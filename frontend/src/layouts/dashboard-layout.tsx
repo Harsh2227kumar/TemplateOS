@@ -1,5 +1,7 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/auth-context";
 import { cn } from "@/lib/utils";
 
 const navItemClassName = ({ isActive }: { isActive: boolean }) =>
@@ -9,6 +11,13 @@ const navItemClassName = ({ isActive }: { isActive: boolean }) =>
   );
 
 export function DashboardLayout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const handleLogout = () => {
+    logout();
+    navigate("/login", { replace: true });
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <div className="mx-auto grid min-h-screen max-w-7xl grid-cols-1 lg:grid-cols-[260px_1fr]">
@@ -35,8 +44,14 @@ export function DashboardLayout() {
                 <p className="text-sm text-slate-500">V1.1 Project Foundation</p>
                 <h2 className="text-xl font-semibold">Dashboard Shell</h2>
               </div>
-              <div className="rounded-full bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
-                Local setup in progress
+              <div className="flex items-center gap-3">
+                <div className="hidden text-right sm:block">
+                  <p className="text-sm font-medium">{user?.full_name}</p>
+                  <p className="text-xs capitalize text-slate-500">{user?.role.split("_").join(" ")}</p>
+                </div>
+                <Button variant="outline" onClick={handleLogout}>
+                  Log out
+                </Button>
               </div>
             </div>
           </header>
