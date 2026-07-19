@@ -1,0 +1,17 @@
+MD/
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+alembic.ini
+backend/storage/
+backend/__pycache__/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
