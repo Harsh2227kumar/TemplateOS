@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
     backend_cors_origins: str = Field(default="http://localhost:5173", alias="BACKEND_CORS_ORIGINS")
     database_url: str = Field(alias="DATABASE_URL")
-    jwt_secret_key: str = Field(default="change-me", alias="JWT_SECRET_KEY")
+    jwt_secret_key: str = Field(alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
     access_token_expire_minutes: int = Field(default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES")
 
