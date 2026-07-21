@@ -277,6 +277,7 @@ Add all future updates below this section.
 
 ---
 
+
 ### Checkpoint 0003
 
 - Date: 2026-07-20
@@ -500,6 +501,7 @@ Add all future updates below this section.
 
 ---
 
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
@@ -508,7 +510,11 @@ Copy this template for each future update and place it below the latest checkpoi
 ### Checkpoint 000X
 
 - Date: YYYY-MM-DD
+
+- Member: Name
+
 - Member: Yash Khadgi
+
 - Branch: branch-name
 - Push status: before push
 - Range covered: after Checkpoint 000(previous) -> current update date
