@@ -97,7 +97,21 @@ def test_signup_login_and_profile_flow() -> None:
     )
     assert expired.status_code == 401
     assert profile.status_code == 200
-    assert profile.json()["full_name"] == "Test User"
+    profile_body = profile.json()
+    assert profile_body == {
+        "id": user.id,
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "role": "normal_user",
+        "department": None,
+        "organization": None,
+        "job_title": None,
+        "phone": None,
+        "avatar_url": None,
+        "signature_path": None,
+        "preferences": None,
+    }
+    assert "hashed_password" not in profile_body
 
 
 def test_profile_rejects_missing_and_invalid_tokens() -> None:
@@ -107,3 +121,21 @@ def test_profile_rejects_missing_and_invalid_tokens() -> None:
         headers={"Authorization": "Bearer not-a-valid-token"},
     )
     assert invalid.status_code == 401
+
+
+def test_profile_rejects_token_for_missing_user() -> None:
+    token = jwt.encode(
+        {
+            "sub": "999",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=30),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 401

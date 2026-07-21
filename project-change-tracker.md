@@ -277,6 +277,231 @@ Add all future updates below this section.
 
 ---
 
+
+### Checkpoint 0003
+
+- Date: 2026-07-20
+- Member: Yash Khadgi
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0002 -> 2026-07-20
+
+#### Summary
+
+- Extended the protected current-user profile API response for V1.1 Phase 3 and added tests for the safe profile contract.
+
+#### Completed Tasks
+
+- Added a dedicated profile response schema with nullable Phase 3 profile fields
+- Updated `GET /api/v1/auth/me` to return the richer profile contract
+- Added backend tests for safe profile fields, missing optional values, invalid tokens, expired tokens, and nonexistent token users
+
+#### Code Changes
+
+- `backend/app/schemas/user.py` for `UserProfileRead` and profile preferences schema
+- `backend/app/api/v1/endpoints/auth.py` for the `/auth/me` response model
+- `backend/tests/test_auth.py` for profile API contract and authorization tests
+
+#### Features Added / Updated / Removed
+
+- Added: explicit authenticated profile API contract for dashboard/profile usage
+- Updated: `/api/v1/auth/me` response shape
+- Removed: None
+
+#### Issues Fixed
+
+- Added coverage to ensure profile responses do not expose `hashed_password`
+- Added coverage for tokens whose user no longer exists
+
+#### Notes For Next Push
+
+- Member 3 still needs to persist Phase 3 profile fields through the user model and migration.
+- Full `pytest` currently collects `backend/scripts/test_db_connection.py` and requires `DATABASE_URL` plus `JWT_SECRET_KEY`; use `pytest tests` for the backend test suite unless that script is excluded or configured.
+
+---
+
+### Checkpoint 0004
+
+- Date: 2026-07-21
+- Member: Yash Khadgi
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0003 -> 2026-07-21
+
+#### Summary
+
+- Implemented the V1.2 Phase 1 local storage service foundation and an authenticated original-template upload API.
+
+#### Completed Tasks
+
+- Added local storage folder mapping for original templates, processed templates, generated DOCX/PDF, signatures, and temp files
+- Added safe save/read/delete/exists helpers with path traversal protection
+- Added unique sanitized filename generation while preserving file extensions
+- Added authenticated DOCX upload endpoint for saving original templates into local storage
+- Added backend tests for storage service behavior and upload API validation
+
+#### Code Changes
+
+- `backend/app/services/storage_service.py` for local storage helpers and path safety
+- `backend/app/api/v1/endpoints/storage.py` for the storage upload API
+- `backend/app/api/v1/api.py` for storage router registration
+- `backend/app/schemas/storage.py` for stored-file response schema
+- `backend/tests/test_storage_service.py` and `backend/tests/test_storage_api.py` for storage coverage
+- `backend/requirements.txt` for `python-multipart` upload support
+- `.gitignore` for local SQLite database files used during manual backend checks
+
+#### Features Added / Updated / Removed
+
+- Added: local storage service abstraction for V1 file storage
+- Added: `POST /api/v1/storage/templates/original` authenticated DOCX upload endpoint
+- Updated: backend requirements for multipart upload handling
+- Removed: None
+
+#### Issues Fixed
+
+- Added protections against absolute paths and `../` traversal in storage helpers
+- Added validation for non-DOCX and empty uploads
+
+#### Notes For Next Push
+
+- Full template metadata persistence still belongs to the upcoming template table/API work.
+- Local `backend/storage/` remains ignored by git, as planned for V1 local file storage.
+
+---
+
+### Checkpoint 0005
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0004 -> 2026-07-20
+
+#### Summary
+
+- Added Phase 3 user profile persistence, a reversible migration, environment-driven demo profiles, and database-focused verification.
+
+#### Completed Tasks
+
+- Extended users with nullable department, organization, job title, phone, avatar path/URL, signature path, and JSON preferences fields
+- Centralized and validated the documented seven-role vocabulary while preserving normal_user as the default
+- Added an explicit idempotent seed command for all seven temporary accounts already declared in .env.example
+- Verified seeded credentials through the existing login flow
+- Added persistence, nullability, uniqueness, role, seed, password-hash, and migration tests
+- Documented the seed command and persistence contract for Members 1 and 2
+
+#### Code Changes
+
+- backend/app/models/user.py for profile columns and shared role vocabulary
+- backend/alembic/versions/20260720_03_add_user_profile_fields.py for the forward migration and downgrade
+- backend/app/db/demo_seed.py and backend/scripts/seed_demo_users.py for demo profile seeding
+- backend/scripts/seed_user.py for reuse of the shared role vocabulary
+- backend/tests/test_user_profile_data.py for database and migration coverage
+- backend/README.md for seed usage and API-contract handoff
+
+#### Features Added / Updated / Removed
+
+- Added: nullable Phase 3 profile persistence and JSON preferences
+- Added: explicit environment-gated demo profile seed flow
+- Updated: role validation and single-user seed role choices
+- Removed: None
+
+#### Issues Fixed
+
+- Prevented duplicate demo users on repeated seed runs
+- Prevented plaintext demo passwords from being stored
+- Kept all new columns nullable so existing users remain migration-safe
+
+#### Notes For Next Push
+
+- Member 2 should extend the existing UserRead schema and GET /api/v1/auth/me response with the documented nullable profile fields.
+- Member 1 can consume that single response contract; no duplicate profile endpoint is required.
+- Backend verification result: 9 tests passed, including Alembic upgrade and downgrade on a temporary database.
+
+---
+
+
+### Checkpoint 0006
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0005 -> 2026-07-20
+
+#### Summary
+
+- Renamed the demo credential namespace to SIT_* and added contract checks to prevent seed/config drift.
+
+#### Completed Tasks
+
+- Renamed all seven demo seed environment prefixes to SIT_*
+- Renamed the matching email and password variables in .env.example
+- Updated backend seed documentation
+- Added tests that require SIT_ prefixes and exact agreement between seed definitions and .env.example
+- Confirmed no legacy demo credential prefixes remain in repository source or configuration
+
+#### Code Changes
+
+- .env.example for SIT credential variable names
+- backend/app/db/demo_seed.py for SIT seed definitions
+- backend/README.md for SIT setup documentation
+- backend/tests/test_user_profile_data.py for namespace and environment-contract regression coverage
+
+#### Features Added / Updated / Removed
+
+- Updated: demo credential environment namespace
+- Added: automated seed/environment name alignment verification
+- Removed: legacy demo credential names
+
+#### Issues Fixed
+
+- Prevented demo seeding failures caused by environment-variable naming mismatches
+
+#### Notes For Next Push
+
+- Local .env contained no legacy demo credential keys and required no migration.
+- Backend verification result: 10 tests passed.
+
+---
+
+
+### Checkpoint 0007
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0006 -> 2026-07-20
+
+#### Summary
+
+- Resolved SQLAlchemy/Alembic index drift and cleaned database test formatting.
+
+#### Completed Tasks
+
+- Removed the redundant index declaration from the users primary key
+- Normalized spacing between profile-data test functions
+- Verified the complete backend suite
+- Verified the live PostgreSQL schema matches SQLAlchemy metadata
+
+#### Code Changes
+
+- backend/app/models/user.py
+- backend/tests/test_user_profile_data.py
+
+#### Issues Fixed
+
+- Alembic check no longer proposes an unnecessary ix_users_id index
+
+#### Notes For Next Push
+
+- Backend verification result: 10 tests passed.
+- Alembic verification result: no new upgrade operations detected.
+
+---
+
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
@@ -285,7 +510,11 @@ Copy this template for each future update and place it below the latest checkpoi
 ### Checkpoint 000X
 
 - Date: YYYY-MM-DD
+
 - Member: Name
+
+- Member: Yash Khadgi
+
 - Branch: branch-name
 - Push status: before push
 - Range covered: after Checkpoint 000(previous) -> current update date

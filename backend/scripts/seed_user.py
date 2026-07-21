@@ -10,17 +10,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 from app.core.security import hash_password
 from app.db.session import SessionLocal
-from app.models.user import User
-
-ROLES = (
-    "super_admin",
-    "org_admin",
-    "department_admin",
-    "faculty",
-    "student",
-    "approver",
-    "normal_user",
-)
+from app.models.user import USER_ROLES, User
 
 
 def main() -> None:
@@ -28,7 +18,7 @@ def main() -> None:
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--full-name", required=True)
-    parser.add_argument("--role", choices=ROLES, default="normal_user")
+    parser.add_argument("--role", choices=USER_ROLES, default="normal_user")
     args = parser.parse_args()
 
     if len(args.password) < 8:
