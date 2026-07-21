@@ -6,7 +6,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import LoginRequest, SignupRequest, Token
-from app.schemas.user import UserRead
+from app.schemas.user import UserProfileRead, UserRead
 
 router = APIRouter()
 
@@ -49,6 +49,6 @@ def login(payload: LoginRequest, db: DbSession) -> Token:
     return Token(access_token=create_access_token(str(user.id)))
 
 
-@router.get("/me", response_model=UserRead)
+@router.get("/me", response_model=UserProfileRead)
 def my_profile(current_user: CurrentUser) -> User:
     return current_user
