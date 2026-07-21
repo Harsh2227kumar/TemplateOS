@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 
 class UserRead(BaseModel):
@@ -22,4 +22,4 @@ class UserProfileRead(UserRead):
     phone: str | None = None
     avatar_url: str | None = None
     signature_path: str | None = None
-    preferences: ProfilePreferences = Field(default_factory=ProfilePreferences)
+    preferences: ProfilePreferences | None = None
