@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class UserRead(BaseModel):
@@ -8,3 +8,18 @@ class UserRead(BaseModel):
     role: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProfilePreferences(BaseModel):
+    default_document_format: str = "docx"
+    email_notifications: bool = False
+
+
+class UserProfileRead(UserRead):
+    department: str | None = None
+    organization: str | None = None
+    job_title: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+    signature_path: str | None = None
+    preferences: ProfilePreferences = Field(default_factory=ProfilePreferences)
