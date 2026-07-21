@@ -1,4 +1,7 @@
 MD/
+Prompts/
+plan_md/
+.DS_Store
 node_modules/
 dist/
 .venv/
@@ -9,6 +12,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+*.db
 alembic.ini
 backend/storage/
 backend/__pycache__/
