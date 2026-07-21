@@ -368,6 +368,138 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0005
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0004 -> 2026-07-20
+
+#### Summary
+
+- Added Phase 3 user profile persistence, a reversible migration, environment-driven demo profiles, and database-focused verification.
+
+#### Completed Tasks
+
+- Extended users with nullable department, organization, job title, phone, avatar path/URL, signature path, and JSON preferences fields
+- Centralized and validated the documented seven-role vocabulary while preserving normal_user as the default
+- Added an explicit idempotent seed command for all seven temporary accounts already declared in .env.example
+- Verified seeded credentials through the existing login flow
+- Added persistence, nullability, uniqueness, role, seed, password-hash, and migration tests
+- Documented the seed command and persistence contract for Members 1 and 2
+
+#### Code Changes
+
+- backend/app/models/user.py for profile columns and shared role vocabulary
+- backend/alembic/versions/20260720_03_add_user_profile_fields.py for the forward migration and downgrade
+- backend/app/db/demo_seed.py and backend/scripts/seed_demo_users.py for demo profile seeding
+- backend/scripts/seed_user.py for reuse of the shared role vocabulary
+- backend/tests/test_user_profile_data.py for database and migration coverage
+- backend/README.md for seed usage and API-contract handoff
+
+#### Features Added / Updated / Removed
+
+- Added: nullable Phase 3 profile persistence and JSON preferences
+- Added: explicit environment-gated demo profile seed flow
+- Updated: role validation and single-user seed role choices
+- Removed: None
+
+#### Issues Fixed
+
+- Prevented duplicate demo users on repeated seed runs
+- Prevented plaintext demo passwords from being stored
+- Kept all new columns nullable so existing users remain migration-safe
+
+#### Notes For Next Push
+
+- Member 2 should extend the existing UserRead schema and GET /api/v1/auth/me response with the documented nullable profile fields.
+- Member 1 can consume that single response contract; no duplicate profile endpoint is required.
+- Backend verification result: 9 tests passed, including Alembic upgrade and downgrade on a temporary database.
+
+---
+
+
+### Checkpoint 0006
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0005 -> 2026-07-20
+
+#### Summary
+
+- Renamed the demo credential namespace to SIT_* and added contract checks to prevent seed/config drift.
+
+#### Completed Tasks
+
+- Renamed all seven demo seed environment prefixes to SIT_*
+- Renamed the matching email and password variables in .env.example
+- Updated backend seed documentation
+- Added tests that require SIT_ prefixes and exact agreement between seed definitions and .env.example
+- Confirmed no legacy demo credential prefixes remain in repository source or configuration
+
+#### Code Changes
+
+- .env.example for SIT credential variable names
+- backend/app/db/demo_seed.py for SIT seed definitions
+- backend/README.md for SIT setup documentation
+- backend/tests/test_user_profile_data.py for namespace and environment-contract regression coverage
+
+#### Features Added / Updated / Removed
+
+- Updated: demo credential environment namespace
+- Added: automated seed/environment name alignment verification
+- Removed: legacy demo credential names
+
+#### Issues Fixed
+
+- Prevented demo seeding failures caused by environment-variable naming mismatches
+
+#### Notes For Next Push
+
+- Local .env contained no legacy demo credential keys and required no migration.
+- Backend verification result: 10 tests passed.
+
+---
+
+
+### Checkpoint 0007
+
+- Date: 2026-07-20
+- Member: Member 3
+- Branch: `feature/backend-user-profile-data`
+- Push status: prepared for push
+- Range covered: after Checkpoint 0006 -> 2026-07-20
+
+#### Summary
+
+- Resolved SQLAlchemy/Alembic index drift and cleaned database test formatting.
+
+#### Completed Tasks
+
+- Removed the redundant index declaration from the users primary key
+- Normalized spacing between profile-data test functions
+- Verified the complete backend suite
+- Verified the live PostgreSQL schema matches SQLAlchemy metadata
+
+#### Code Changes
+
+- backend/app/models/user.py
+- backend/tests/test_user_profile_data.py
+
+#### Issues Fixed
+
+- Alembic check no longer proposes an unnecessary ix_users_id index
+
+#### Notes For Next Push
+
+- Backend verification result: 10 tests passed.
+- Alembic verification result: no new upgrade operations detected.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.

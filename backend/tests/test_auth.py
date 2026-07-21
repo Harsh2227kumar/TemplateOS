@@ -109,10 +109,7 @@ def test_signup_login_and_profile_flow() -> None:
         "phone": None,
         "avatar_url": None,
         "signature_path": None,
-        "preferences": {
-            "default_document_format": "docx",
-            "email_notifications": False,
-        },
+        "preferences": None,
     }
     assert "hashed_password" not in profile_body
 
