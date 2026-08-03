@@ -501,6 +501,90 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0008
+
+- Date: 2026-08-03
+- Member: Member 1 (AI)
+- Branch: `feature/frontend-dashboard`
+- Push status: before push
+- Range covered: after Checkpoint 0007 -> 2026-08-03
+
+#### Summary
+
+- Implemented V1.1 Phase 3 frontend dashboard shell, including responsive layout, sidebar, navbar, empty states, and an enriched read-only profile page consuming the backend profile contract.
+
+#### Completed Tasks
+
+- Extended frontend `User` TypeScript interface with nullable Phase 3 profile fields and `UserPreferences`.
+- Created reusable formatting utilities for roles and avatar initials.
+- Created reusable `AvatarFallback` and `EmptyState` UI components.
+- Extracted and built `SidebarNav` with active states and "Coming soon" placeholders.
+- Reworked `DashboardLayout` for a responsive desktop-sidebar and mobile-drawer layout.
+- Replaced dashboard placeholders with a personalized welcome hero and proper empty states for documents/templates.
+- Rebuilt the profile page to render all authenticated Phase 3 profile fields gracefully with null-fallbacks.
+- Verified zero TypeScript/build errors via `npm run build`.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` for expanded `User` and `UserPreferences` interfaces.
+- `frontend/src/lib/format.ts` for formatting functions.
+- `frontend/src/components/ui/avatar-fallback.tsx` and `frontend/src/components/empty-state.tsx` for new UI primitives.
+- `frontend/src/components/sidebar-nav.tsx` and `frontend/src/layouts/dashboard-layout.tsx` for the app shell and navigation.
+- `frontend/src/pages/dashboard-page.tsx` and `frontend/src/pages/profile-page.tsx` for the main view content.
+
+#### Features Added / Updated / Removed
+
+- Added: Responsive sidebar and mobile drawer navigation.
+- Added: Proper document and template empty states on the dashboard.
+- Added: Full read-only profile rendering.
+- Updated: `User` interface to match Member 2/3 backend contract.
+- Removed: Legacy placeholder cards on the dashboard.
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Member 1 frontend Phase 3 is complete and ready for integration testing.
+
+---
+
+### Checkpoint 0009
+
+- Date: 2026-08-03
+- Member: Member 1 (AI)
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0008 -> 2026-08-03
+
+#### Summary
+
+- Fixed an Alembic configuration bug that crashed migrations when the Neon database connection string contained `%` characters (such as `%3D` in `options=endpoint%3D...`).
+
+#### Completed Tasks
+
+- Updated `alembic/env.py` to correctly escape `%` characters by replacing them with `%%` before passing the `DATABASE_URL` to `configparser`.
+
+#### Code Changes
+
+- `backend/alembic/env.py`
+
+#### Features Added / Updated / Removed
+
+- Added: None
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed `ValueError: invalid interpolation syntax` during `alembic upgrade head`.
+
+#### Notes For Next Push
+
+- Ready for push.
+
+---
 
 ## Entry Template
 

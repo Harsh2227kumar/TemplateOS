@@ -1,10 +1,22 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
+export interface UserPreferences {
+  default_document_format: string | null;
+  email_notifications: boolean | null;
+}
+
 export interface User {
   id: number;
   email: string;
   full_name: string;
   role: string;
+  department: string | null;
+  organization: string | null;
+  job_title: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+  signature_path: string | null;
+  preferences: UserPreferences | null;
 }
 
 interface TokenResponse {
