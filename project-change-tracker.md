@@ -586,6 +586,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0010
+
+- Date: 2026-08-03
+- Member: Member 3 (AI)
+- Branch: `feature/backend-template-model`
+- Push status: before push
+- Range covered: after Checkpoint 0009 -> 2026-08-03
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Database / Integration Developer tasks: Added the `Template` database model, Pydantic schemas, CRUD operations, and generated Alembic migration for template uploads.
+
+#### Completed Tasks
+
+- Created SQLAlchemy `Template` model with appropriate columns and validation for categories, visibility, and status.
+- Added a backref `templates` relationship to the `User` model.
+- Generated and successfully tested Alembic migration `20260803_04_create_templates_table.py` for Neon PostgreSQL.
+- Created Pydantic v2 schemas `TemplateCreate`, `TemplateResponse`, and `TemplateListItem`.
+- Created basic AsyncSession CRUD operations (`create_template`, `get_template_by_id`, `get_templates_by_user`).
+- Added an offline integration smoke test for the Template model defaults.
+
+#### Code Changes
+
+- `backend/app/models/template.py` and `backend/app/models/__init__.py` for the database model definition.
+- `backend/app/models/user.py` for relationship mapping.
+- `backend/alembic/versions/20260803_04_create_templates_table.py` for the database migration.
+- `backend/app/schemas/template.py` for Pydantic definitions.
+- `backend/app/crud/template_crud.py` and `backend/app/crud/__init__.py` for CRUD functions.
+- `backend/tests/test_template_model.py` for the model tests.
+
+#### Features Added / Updated / Removed
+
+- Added: `Template` database model and corresponding table migration.
+- Added: Pydantic schemas and CRUD utilities for Template API operations.
+- Updated: `User` model to link uploaded templates.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Member 2 can now import `TemplateCreate`, `TemplateResponse`, and `create_template` to wire up the document upload route.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
