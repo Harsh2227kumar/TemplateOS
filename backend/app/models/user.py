@@ -1,9 +1,12 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, String
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.template import Template
 
 USER_ROLES = (
     "super_admin",
@@ -38,3 +41,5 @@ class User(Base):
         if role not in USER_ROLES:
             raise ValueError(f"Unsupported user role: {role}")
         return role
+
+    templates: Mapped[list["Template"]] = relationship("Template", back_populates="uploader")
