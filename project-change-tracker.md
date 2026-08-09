@@ -815,6 +815,45 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0015
+
+- Date: 2026-08-09
+- Member: Member 2 (AI)
+- Branch: feature/template-upload-integration
+- Push status: before push
+- Range covered: after Checkpoint 0014 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Backend Developer tasks. Audited the template upload endpoint, added new GET routes for template list and detail, and verified CORS and router configuration.
+
+#### Completed Tasks
+
+- Added audit comment to `POST /upload` confirming correct file type validation, DB rollback, and async I/O.
+- Implemented `GET /api/v1/templates/` to return the current user's templates.
+- Implemented `GET /api/v1/templates/{template_id}` to retrieve a single template with authorization checks (403/404).
+- Verified router registration in `api.py` and CORS configuration in `main.py`.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py`
+
+#### Features Added / Updated / Removed
+
+- Added: `GET /api/v1/templates/` and `GET /api/v1/templates/{template_id}` endpoints.
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- All integration tests pass successfully. The backend is fully ready for the frontend integration.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.

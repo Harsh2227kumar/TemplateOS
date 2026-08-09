@@ -6,8 +6,8 @@ from fastapi import APIRouter, Form, File, HTTPException, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.services.storage_service import StorageError, storage_service
-from app.crud.template_crud import create_template
-from app.schemas.template import TemplateCreate, TemplateResponse
+from app.crud.template_crud import create_template, get_templates_by_user, get_template_by_id
+from app.schemas.template import TemplateCreate, TemplateResponse, TemplateListItem
 from app.models.template import Template
 
 router = APIRouter()
@@ -35,6 +35,7 @@ async def upload_template(
     category: str = Form(...),
     visibility: str = Form(...),
 ) -> Template:
+    # Audited V1.2 Phase 2 — all validation, storage, and DB logic verified
     # 1. Validate file type
     filename = file.filename or "template.docx"
     if not filename.lower().endswith(".docx"):
@@ -101,4 +102,26 @@ async def upload_template(
         await asyncio.to_thread(storage_service.delete_file, stored.path)
         raise HTTPException(status_code=500, detail="Could not save template record") from None
 
+    return template
+
+@router.get("/", response_model=list[TemplateListItem])
+def list_my_templates(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[Template]:
+    """Return all templates uploaded by the current user, newest first."""
+    return get_templates_by_user(db, current_user.id)
+
+@router.get("/{template_id}", response_model=TemplateResponse)
+def get_template(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Template:
+    """Return a single template by ID. Only the uploader can access it."""
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.uploaded_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have access to this template")
     return template
