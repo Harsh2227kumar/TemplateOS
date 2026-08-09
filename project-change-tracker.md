@@ -586,6 +586,142 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0010
+
+- Date: 2026-08-03
+- Member: Member 3 (AI)
+- Branch: `feature/backend-template-model`
+- Push status: before push
+- Range covered: after Checkpoint 0009 -> 2026-08-03
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Database / Integration Developer tasks: Added the `Template` database model, Pydantic schemas, CRUD operations, and generated Alembic migration for template uploads.
+
+#### Completed Tasks
+
+- Created SQLAlchemy `Template` model with appropriate columns and validation for categories, visibility, and status.
+- Added a backref `templates` relationship to the `User` model.
+- Generated and successfully tested Alembic migration `20260803_04_create_templates_table.py` for Neon PostgreSQL.
+- Created Pydantic v2 schemas `TemplateCreate`, `TemplateResponse`, and `TemplateListItem`.
+- Created basic AsyncSession CRUD operations (`create_template`, `get_template_by_id`, `get_templates_by_user`).
+- Added an offline integration smoke test for the Template model defaults.
+
+#### Code Changes
+
+- `backend/app/models/template.py` and `backend/app/models/__init__.py` for the database model definition.
+- `backend/app/models/user.py` for relationship mapping.
+- `backend/alembic/versions/20260803_04_create_templates_table.py` for the database migration.
+- `backend/app/schemas/template.py` for Pydantic definitions.
+- `backend/app/crud/template_crud.py` and `backend/app/crud/__init__.py` for CRUD functions.
+- `backend/tests/test_template_model.py` for the model tests.
+
+#### Features Added / Updated / Removed
+
+- Added: `Template` database model and corresponding table migration.
+- Added: Pydantic schemas and CRUD utilities for Template API operations.
+- Updated: `User` model to link uploaded templates.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Member 2 can now import `TemplateCreate`, `TemplateResponse`, and `create_template` to wire up the document upload route.
+
+### Checkpoint 0011
+
+- Date: 2026-08-09
+- Member: Member 2 (AI)
+- Branch: `feature/backend-template-model`
+- Push status: before push
+- Range covered: after Checkpoint 0010 -> 2026-08-09
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Backend/Service Developer tasks: Created the original template file upload endpoint with validation, storage saving, and database record insertion.
+
+#### Completed Tasks
+
+- Created `POST /upload` endpoint for `.docx` files under the `/templates` router.
+- Implemented file validation (extension, size, empty file) and metadata validation (name length, category, visibility constraints).
+- Integrated with `storage_service` to persist the original `.docx` locally.
+- Handled database insertion with `create_template` and implemented cleanup of the local file if DB insertion fails.
+- Registered `templates.router` in `api.py`.
+- Refactored `template_crud.py` to correctly use the synchronous `Session` as dictated by the project configuration.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py` for upload endpoint.
+- `backend/app/api/v1/api.py` for routing setup.
+- `backend/app/crud/template_crud.py` for synchronous session refactor.
+
+#### Features Added / Updated / Removed
+
+- Added: `POST /api/v1/templates/upload` authenticated endpoint for templates.
+- Updated: DB CRUD `create_template` to execute synchronously.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed an asynchronous `AsyncSession` mismatch bug in `template_crud.py` by converting it to match the rest of the synchronous DB architecture.
+
+#### Notes For Next Push
+
+- Member 1 can now build the frontend upload form and submit requests to this new API endpoint.
+
+### Checkpoint 0012
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: `feature/frontend-template-upload`
+- Push status: before push
+- Range covered: after Checkpoint 0011 -> 2026-08-09
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Frontend Developer tasks: Created the original template file upload UI with drag-and-drop, client-side validation, and mock API integration.
+
+#### Completed Tasks
+
+- Built `UploadZone` drag-and-drop component rejecting non-.docx or >10MB files.
+- Built `UploadTemplateForm` with plain React state and full client-side validation matching the login page pattern.
+- Added `TemplateResponse` schema and `templatesApi.upload` fetch call with FormData.
+- Created `upload-template-page.tsx` and wired it into the dashboard route.
+- Added "Upload Template" link to sidebar.
+- Wired dashboard empty state to navigate to the new page.
+
+#### Code Changes
+
+- `frontend/src/components/upload/UploadZone.tsx` (new)
+- `frontend/src/components/upload/UploadTemplateForm.tsx` (new)
+- `frontend/src/pages/upload-template-page.tsx` (new)
+- `frontend/src/lib/api.ts`
+- `frontend/src/components/sidebar-nav.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/layouts/dashboard-layout.tsx`
+- `frontend/src/pages/dashboard-page.tsx`
+- `frontend/src/components/empty-state.tsx`
+
+#### Features Added / Updated / Removed
+
+- Added: Template upload form with drag-and-drop and validation.
+- Added: Client-side API fetch setup for multipart file upload.
+- Updated: Dashboard navigation to include upload page.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- The API call currently uses a 2-second mock. Once Member 2 completes the backend integration and pushes to `dev`, this mock can be removed and replaced with the actual fetch call logic (already written and commented out).
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
@@ -594,11 +730,7 @@ Copy this template for each future update and place it below the latest checkpoi
 ### Checkpoint 000X
 
 - Date: YYYY-MM-DD
-
 - Member: Name
-
-- Member: Yash Khadgi
-
 - Branch: branch-name
 - Push status: before push
 - Range covered: after Checkpoint 000(previous) -> current update date
@@ -630,3 +762,4 @@ Copy this template for each future update and place it below the latest checkpoi
 
 - Optional handoff notes or `None`
 ```
+
