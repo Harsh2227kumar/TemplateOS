@@ -769,6 +769,52 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0014
+
+- Date: 2026-08-09
+- Member: Member 3 (AI)
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0013 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Database/Integration Developer tasks. Added comprehensive integration tests for template upload, expanded model tests, added Phase 3 CRUD stubs, and patched the Alembic migration for cross-dialect SQLite test compatibility.
+
+#### Completed Tasks
+
+- Verified and patched `create_templates_table` migration to use `CURRENT_TIMESTAMP` instead of `now()` to fix SQLite syntax errors during testing.
+- Created `test_template_upload.py` with 9 integration tests for the template upload endpoint, and scoped dependency overrides to avoid global pollution affecting other test suites.
+- Expanded `test_template_model.py` with 5 new unit tests for `@validates`.
+- Added `__init__` constructor to the `Template` model for immediate default values on instantiation.
+- Appended Phase 3 CRUD stubs (`get_public_templates`, `get_templates_by_category`) to `template_crud.py`.
+
+#### Code Changes
+
+- `backend/alembic/versions/20260803_04_create_templates_table.py`
+- `backend/tests/test_template_upload.py`
+- `backend/tests/test_template_model.py`
+- `backend/app/models/template.py`
+- `backend/app/crud/template_crud.py`
+
+#### Features Added / Updated / Removed
+
+- Added: 9 integration tests for template uploads and 5 model unit tests.
+- Added: Phase 3 CRUD stubs for fetching public templates and templates by category.
+- Updated: `Template` model to set python-side defaults instantly.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed cross-dialect Alembic bug causing SQLite `SyntaxError` on `server_default=sa.text('now()')`.
+- Fixed global test runner pollution by scoping `TestClient` dependency overrides to individual fixtures.
+
+#### Notes For Next Push
+
+- Tests are passing successfully (`pytest tests/ -v`). Ready for push. Manual validation on the Neon database via SQL is recommended post-deployment to definitively check `original_file_path`.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.

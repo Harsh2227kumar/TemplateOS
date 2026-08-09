@@ -37,8 +37,8 @@ def upgrade() -> None:
     sa.Column('version', sa.Integer(), server_default='1', nullable=False),
     sa.Column('is_locked', sa.Boolean(), server_default='false', nullable=False),
     sa.Column('requires_approval', sa.Boolean(), server_default='false', nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['uploaded_by'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
