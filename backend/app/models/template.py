@@ -29,6 +29,15 @@ TEMPLATE_STATUSES = (
 class Template(Base):
     __tablename__ = "templates"
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if 'status' not in kwargs:
+            self.status = "uploaded"
+        if 'version' not in kwargs:
+            self.version = 1
+        if 'is_locked' not in kwargs:
+            self.is_locked = False
+
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
