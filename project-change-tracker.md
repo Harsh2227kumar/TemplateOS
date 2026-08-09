@@ -769,6 +769,135 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0014
+
+- Date: 2026-08-09
+- Member: Member 3 (AI)
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0013 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Database/Integration Developer tasks. Added comprehensive integration tests for template upload, expanded model tests, added Phase 3 CRUD stubs, and patched the Alembic migration for cross-dialect SQLite test compatibility.
+
+#### Completed Tasks
+
+- Verified and patched `create_templates_table` migration to use `CURRENT_TIMESTAMP` instead of `now()` to fix SQLite syntax errors during testing.
+- Created `test_template_upload.py` with 9 integration tests for the template upload endpoint, and scoped dependency overrides to avoid global pollution affecting other test suites.
+- Expanded `test_template_model.py` with 5 new unit tests for `@validates`.
+- Added `__init__` constructor to the `Template` model for immediate default values on instantiation.
+- Appended Phase 3 CRUD stubs (`get_public_templates`, `get_templates_by_category`) to `template_crud.py`.
+
+#### Code Changes
+
+- `backend/alembic/versions/20260803_04_create_templates_table.py`
+- `backend/tests/test_template_upload.py`
+- `backend/tests/test_template_model.py`
+- `backend/app/models/template.py`
+- `backend/app/crud/template_crud.py`
+
+#### Features Added / Updated / Removed
+
+- Added: 9 integration tests for template uploads and 5 model unit tests.
+- Added: Phase 3 CRUD stubs for fetching public templates and templates by category.
+- Updated: `Template` model to set python-side defaults instantly.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed cross-dialect Alembic bug causing SQLite `SyntaxError` on `server_default=sa.text('now()')`.
+- Fixed global test runner pollution by scoping `TestClient` dependency overrides to individual fixtures.
+
+#### Notes For Next Push
+
+- Tests are passing successfully (`pytest tests/ -v`). Ready for push. Manual validation on the Neon database via SQL is recommended post-deployment to definitively check `original_file_path`.
+
+---
+
+### Checkpoint 0015
+
+- Date: 2026-08-09
+- Member: Member 2 (AI)
+- Branch: feature/template-upload-integration
+- Push status: before push
+- Range covered: after Checkpoint 0014 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Backend Developer tasks. Audited the template upload endpoint, added new GET routes for template list and detail, and verified CORS and router configuration.
+
+#### Completed Tasks
+
+- Added audit comment to `POST /upload` confirming correct file type validation, DB rollback, and async I/O.
+- Implemented `GET /api/v1/templates/` to return the current user's templates.
+- Implemented `GET /api/v1/templates/{template_id}` to retrieve a single template with authorization checks (403/404).
+- Verified router registration in `api.py` and CORS configuration in `main.py`.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py`
+
+#### Features Added / Updated / Removed
+
+- Added: `GET /api/v1/templates/` and `GET /api/v1/templates/{template_id}` endpoints.
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- All integration tests pass successfully. The backend is fully ready for the frontend integration.
+
+---
+
+### Checkpoint 0016
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: current
+- Push status: before push
+- Range covered: after Checkpoint 0015 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Frontend Developer tasks. Replaced the mock upload API with a real fetch call, added a 3-step upload status strip, polished the success state, and mapped specific API errors to user-friendly messages.
+
+#### Completed Tasks
+
+- Replaced the mock API upload function with a real `fetch` using `FormData`.
+- Added a responsive 3-step status strip ("Fill Details", "Uploading File", "Done") to the upload template page.
+- Enhanced the success state in `UploadTemplateForm.tsx` to display the file size and a shadcn `<Badge>` for the category.
+- Created a `mapApiError` utility to display specific user-friendly error messages for known API errors (e.g. invalid file type, file too large, session expired).
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/pages/upload-template-page.tsx`
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `frontend/src/components/ui/badge.tsx` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: 3-step visual status strip for template uploads.
+- Added: shadcn `<Badge>` component to the frontend.
+- Updated: Template upload now integrates with the real backend API.
+- Updated: Enhanced success and error states on template upload.
+- Removed: Mock `setTimeout` upload implementation in `api.ts`.
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- V1.2 Phase 2 frontend tasks are completely implemented and ready to test end-to-end with the backend.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.

@@ -1,9 +1,14 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 from uuid import uuid4
 
+from app.core.config import settings
 
-DEFAULT_STORAGE_ROOT = Path(__file__).resolve().parents[2] / "storage"
+logger = logging.getLogger(__name__)
+
+# Use the configured storage base path instead of hardcoding
+DEFAULT_STORAGE_ROOT = Path(settings.storage_base_path).resolve()
 
 STORAGE_FOLDERS = {
     "templates_original": Path("templates/original"),
@@ -37,10 +42,13 @@ class StoredFile:
 class LocalStorageService:
     def __init__(self, root_path: Path | str = DEFAULT_STORAGE_ROOT) -> None:
         self.root_path = Path(root_path).resolve()
+        logger.info(f"Initialized LocalStorageService with root: {self.root_path}")
 
     def ensure_storage_tree(self) -> None:
         for folder in STORAGE_FOLDERS:
-            self.folder_path(folder).mkdir(parents=True, exist_ok=True)
+            folder_path = self.folder_path(folder)
+            folder_path.mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Ensured storage folder exists: {folder_path}")
 
     def folder_path(self, folder: str) -> Path:
         if folder not in STORAGE_FOLDERS:
@@ -65,6 +73,8 @@ class LocalStorageService:
         filename = self.build_filename(original_filename)
         target_path = self._resolve_relative_path(STORAGE_FOLDERS[folder] / filename)
         target_path.write_bytes(content)
+        
+        logger.info(f"Saved file {filename} to {target_folder} ({len(content)} bytes)")
 
         return StoredFile(
             path=self.relative_path(target_path),
@@ -85,6 +95,7 @@ class LocalStorageService:
         if not file_path.is_file():
             raise InvalidStoragePathError(f"Storage path is not a file: {relative_path}")
         file_path.unlink()
+        logger.info(f"Deleted file: {file_path}")
         return True
 
     def exists(self, relative_path: str | Path) -> bool:

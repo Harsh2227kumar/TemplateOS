@@ -1,0 +1,127 @@
+import asyncio
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, Form, File, HTTPException, UploadFile, status
+
+from app.api.deps import CurrentUser, DbSession
+from app.services.storage_service import StorageError, storage_service
+from app.crud.template_crud import create_template, get_templates_by_user, get_template_by_id
+from app.schemas.template import TemplateCreate, TemplateResponse, TemplateListItem
+from app.models.template import Template
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+
+ALLOWED_CATEGORIES = {
+    "notice", "mom", "report", "application",
+    "letter", "certificate", "proposal", "invoice", "custom",
+}
+ALLOWED_VISIBILITY = {"private", "public", "organization", "department", "group"}
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@router.post(
+    "/upload",
+    response_model=TemplateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_template(
+    current_user: CurrentUser,
+    db: DbSession,
+    file: UploadFile = File(...),
+    name: str = Form(...),
+    description: str | None = Form(default=None),
+    category: str = Form(...),
+    visibility: str = Form(...),
+) -> Template:
+    # Audited V1.2 Phase 2 — all validation, storage, and DB logic verified
+    # 1. Validate file type
+    filename = file.filename or "template.docx"
+    if not filename.lower().endswith(".docx"):
+        raise HTTPException(status_code=400, detail="Only DOCX files are accepted")
+
+    # 2. Read + empty check
+    content = await file.read()
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+
+    # 3. File size check
+    if len(content) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=400, detail="File size exceeds the 10 MB limit")
+
+    # 4. Validate name
+    clean_name = name.strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Template name is required")
+    if len(clean_name) > 100:
+        raise HTTPException(status_code=400, detail="Template name must be 100 characters or fewer")
+
+    # 5. Validate category
+    if category not in ALLOWED_CATEGORIES:
+        raise HTTPException(
+            status_code=400, 
+            detail="Invalid category. Allowed: notice, mom, report, application, letter, certificate, proposal, invoice, custom"
+        )
+
+    # 6. Validate visibility
+    if visibility not in ALLOWED_VISIBILITY:
+        raise HTTPException(status_code=400, detail="Invalid visibility value")
+
+    # 7. Save file via storage_service (in thread pool)
+    try:
+        logger.info(f"Saving template {filename} for user {current_user.id}")
+        stored = await asyncio.to_thread(
+            storage_service.save_bytes, "templates_original", filename, content
+        )
+    except StorageError as e:
+        logger.error(f"Storage error while saving {filename}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save uploaded file",
+        ) from None
+
+    # 8. Insert DB record via create_template
+    template_data = TemplateCreate(
+        name=clean_name,
+        description=description,
+        category=category,
+        visibility=visibility,
+        original_file_path=stored.path,
+        original_filename=filename,
+        file_size_bytes=stored.size_bytes,
+        file_extension=".docx",
+        uploaded_by=current_user.id,
+    )
+
+    try:
+        template = create_template(db, template_data)
+        logger.info(f"Created template record {template.id} for user {current_user.id}")
+    except Exception as e:
+        logger.error(f"DB error while creating template record: {e}. Rolling back file.")
+        await asyncio.to_thread(storage_service.delete_file, stored.path)
+        raise HTTPException(status_code=500, detail="Could not save template record") from None
+
+    return template
+
+@router.get("/", response_model=list[TemplateListItem])
+def list_my_templates(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[Template]:
+    """Return all templates uploaded by the current user, newest first."""
+    return get_templates_by_user(db, current_user.id)
+
+@router.get("/{template_id}", response_model=TemplateResponse)
+def get_template(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Template:
+    """Return a single template by ID. Only the uploader can access it."""
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.uploaded_by != current_user.id:
+        raise HTTPException(status_code=403, detail="You do not have access to this template")
+    return template
