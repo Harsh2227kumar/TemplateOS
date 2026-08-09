@@ -1,7 +1,29 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
+import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 import { ApiError, templatesApi, type TemplateResponse } from "@/lib/api";
 import { UploadZone } from "./UploadZone";
 
@@ -17,7 +39,7 @@ const CATEGORY_OPTIONS = [
   { label: "Proposal", value: "proposal" },
   { label: "Invoice", value: "invoice" },
   { label: "Custom", value: "custom" },
-];
+] as const;
 
 const VISIBILITY_OPTIONS = [
   { label: "Private", value: "private" },
@@ -25,77 +47,62 @@ const VISIBILITY_OPTIONS = [
   { label: "Organization", value: "organization" },
   { label: "Department", value: "department" },
   { label: "Group", value: "group" },
-];
+] as const;
 
-const INPUT_CLASS =
-  "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200";
+const uploadTemplateSchema = z.object({
+  name: z.string().min(1, "Template name is required").max(100, "Template name must be 100 characters or fewer"),
+  description: z.string().max(500, "Description must be 500 characters or fewer").optional(),
+  category: z.enum([
+    "notice", "mom", "report", "application", "letter", "certificate", "proposal", "invoice", "custom"
+  ], { required_error: "Please select a category" }),
+  visibility: z.enum([
+    "private", "public", "organization", "department", "group"
+  ], { required_error: "Please select a visibility" }),
+  file: z.instanceof(File, { message: "Please select a .docx file to upload" }),
+});
+
+type UploadTemplateValues = z.infer<typeof uploadTemplateSchema>;
 
 export function UploadTemplateForm() {
   const navigate = useNavigate();
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("");
-  const [visibility, setVisibility] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<TemplateResponse | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const form = useForm<UploadTemplateValues>({
+    resolver: zodResolver(uploadTemplateSchema),
+    mode: "onBlur",
+    defaultValues: {
+      name: "",
+      description: "",
+    },
+  });
+
+  const { isSubmitting } = form.formState;
 
   const resetForm = () => {
-    setName("");
-    setDescription("");
-    setCategory("");
-    setVisibility("");
-    setFile(null);
+    form.reset();
     setError("");
     setSuccess(null);
-    setIsSubmitting(false);
   };
 
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const onSubmit = async (values: UploadTemplateValues) => {
     setError("");
 
-    // Client-side validation
-    if (name.trim().length === 0) {
-      setError("Template name is required");
-      return;
-    }
-    if (name.trim().length > 100) {
-      setError("Template name must be 100 characters or fewer");
-      return;
-    }
-    if (category === "") {
-      setError("Please select a category");
-      return;
-    }
-    if (visibility === "") {
-      setError("Please select a visibility");
-      return;
-    }
-    if (file === null) {
-      setError("Please select a .docx file to upload");
-      return;
-    }
-
     const token = localStorage.getItem(TOKEN_KEY) ?? "";
-    setIsSubmitting(true);
     try {
       const result = await templatesApi.upload(token, {
-        file,
-        name: name.trim(),
-        description: description.trim() || undefined,
-        category,
-        visibility,
+        file: values.file,
+        name: values.name.trim(),
+        description: values.description?.trim() || undefined,
+        category: values.category,
+        visibility: values.visibility,
       });
       setSuccess(result);
     } catch (caught) {
       setError(
         caught instanceof ApiError ? caught.message : "Upload failed. Please try again.",
       );
-    } finally {
-      setIsSubmitting(false);
     }
   };
 
@@ -124,88 +131,141 @@ export function UploadTemplateForm() {
 
   // ── Form view ─────────────────────────────────────────────────────────────
   return (
-    <form className="space-y-5" onSubmit={handleSubmit} noValidate>
-      {/* Template Name */}
-      <label className="block text-sm font-medium text-slate-700">
-        Template Name <span className="text-red-500">*</span>
-        <input
-          className={INPUT_CLASS}
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Q3 Project Proposal"
-          maxLength={100}
+    <Form {...form}>
+      <form className="space-y-5" onSubmit={form.handleSubmit(onSubmit)} noValidate>
+        {/* Template Name */}
+        <FormField
+          control={form.control}
+          name="name"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Template Name <span className="text-red-500">*</span>
+              </FormLabel>
+              <FormControl>
+                <Input placeholder="e.g. Q3 Project Proposal" maxLength={100} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </label>
 
-      {/* Description */}
-      <label className="block text-sm font-medium text-slate-700">
-        Description{" "}
-        <span className="font-normal text-slate-500">(optional)</span>
-        <textarea
-          className={`${INPUT_CLASS} resize-none`}
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Briefly describe this template…"
+        {/* Description */}
+        <FormField
+          control={form.control}
+          name="description"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Description <span className="font-normal text-slate-500">(optional)</span>
+              </FormLabel>
+              <FormControl>
+                <Textarea
+                  placeholder="Briefly describe this template…"
+                  className="resize-none"
+                  rows={3}
+                  maxLength={500}
+                  {...field}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </label>
 
-      {/* Category */}
-      <label className="block text-sm font-medium text-slate-700">
-        Category <span className="text-red-500">*</span>
-        <select
-          className={INPUT_CLASS}
-          value={category}
-          onChange={(e) => setCategory(e.target.value)}
-        >
-          <option value="" disabled>
-            Select a category
-          </option>
-          {CATEGORY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        {/* Category */}
+        <FormField
+          control={form.control}
+          name="category"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Category <span className="text-red-500">*</span>
+              </FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a category" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      {/* Visibility */}
-      <label className="block text-sm font-medium text-slate-700">
-        Visibility <span className="text-red-500">*</span>
-        <select
-          className={INPUT_CLASS}
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value)}
-        >
-          <option value="" disabled>
-            Select visibility
-          </option>
-          {VISIBILITY_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        {/* Visibility */}
+        <FormField
+          control={form.control}
+          name="visibility"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                Visibility <span className="text-red-500">*</span>
+              </FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select visibility" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {VISIBILITY_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      {/* File Upload */}
-      <div>
-        <p className="mb-1 text-sm font-medium text-slate-700">
-          DOCX File <span className="text-red-500">*</span>
-        </p>
-        <UploadZone file={file} onChange={setFile} />
-      </div>
+        {/* File Upload */}
+        <FormField
+          control={form.control}
+          name="file"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>
+                DOCX File <span className="text-red-500">*</span>
+              </FormLabel>
+              <FormControl>
+                <UploadZone
+                  file={field.value}
+                  onChange={field.onChange}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
-      {/* Error banner */}
-      {error && (
-        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
-      )}
+        {/* Error banner */}
+        {error && (
+          <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        )}
 
-      {/* Submit */}
-      <Button className="w-full" type="submit" disabled={isSubmitting}>
-        {isSubmitting ? "Uploading…" : "Upload Template"}
-      </Button>
-    </form>
+        {/* Submit */}
+        <Button className="w-full" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Uploading…
+            </>
+          ) : (
+            "Upload Template"
+          )}
+        </Button>
+      </form>
+    </Form>
   );
 }
