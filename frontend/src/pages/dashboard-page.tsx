@@ -1,11 +1,13 @@
 import { FileText, FolderOpen } from "lucide-react";
 
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const firstName = user?.full_name?.split(" ")[0] || "User";
 
   return (
@@ -55,6 +57,7 @@ export function DashboardPage() {
             title="No templates yet"
             description="Uploaded templates, statuses, and quick actions will live in this panel."
             actionLabel="Upload Template"
+            onAction={() => navigate("/upload-template")}
           />
         </section>
       </div>
