@@ -854,6 +854,50 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0016
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: current
+- Push status: before push
+- Range covered: after Checkpoint 0015 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Frontend Developer tasks. Replaced the mock upload API with a real fetch call, added a 3-step upload status strip, polished the success state, and mapped specific API errors to user-friendly messages.
+
+#### Completed Tasks
+
+- Replaced the mock API upload function with a real `fetch` using `FormData`.
+- Added a responsive 3-step status strip ("Fill Details", "Uploading File", "Done") to the upload template page.
+- Enhanced the success state in `UploadTemplateForm.tsx` to display the file size and a shadcn `<Badge>` for the category.
+- Created a `mapApiError` utility to display specific user-friendly error messages for known API errors (e.g. invalid file type, file too large, session expired).
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/pages/upload-template-page.tsx`
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `frontend/src/components/ui/badge.tsx` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: 3-step visual status strip for template uploads.
+- Added: shadcn `<Badge>` component to the frontend.
+- Updated: Template upload now integrates with the real backend API.
+- Updated: Enhanced success and error states on template upload.
+- Removed: Mock `setTimeout` upload implementation in `api.ts`.
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- V1.2 Phase 2 frontend tasks are completely implemented and ready to test end-to-end with the backend.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
