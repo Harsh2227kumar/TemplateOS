@@ -28,3 +28,35 @@ def get_templates_by_user(db: Session, user_id: int) -> list[Template]:
         .order_by(Template.created_at.desc())
     )
     return list(result.scalars().all())
+
+def get_public_templates(db: Session, limit: int = 50, offset: int = 0) -> list[Template]:
+    """
+    Return publicly visible templates, newest first.
+    Used by the template library listing in Phase 3.
+    """
+    result = db.execute(
+        select(Template)
+        .where(Template.visibility == "public")
+        .where(Template.status.in_(["active", "uploaded", "field_configured"]))
+        .order_by(Template.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    return list(result.scalars().all())
+
+def get_templates_by_category(
+    db: Session,
+    category: str,
+    user_id: int | None = None,
+    limit: int = 50,
+) -> list[Template]:
+    """
+    Return templates filtered by category.
+    If user_id is provided, returns only that user's templates in the category.
+    """
+    query = select(Template).where(Template.category == category)
+    if user_id is not None:
+        query = query.where(Template.uploaded_by == user_id)
+    query = query.order_by(Template.created_at.desc()).limit(limit)
+    result = db.execute(query)
+    return list(result.scalars().all())
