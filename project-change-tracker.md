@@ -631,6 +631,47 @@ Add all future updates below this section.
 
 - Member 2 can now import `TemplateCreate`, `TemplateResponse`, and `create_template` to wire up the document upload route.
 
+### Checkpoint 0011
+
+- Date: 2026-08-09
+- Member: Member 2 (AI)
+- Branch: `feature/backend-template-model`
+- Push status: before push
+- Range covered: after Checkpoint 0010 -> 2026-08-09
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Backend/Service Developer tasks: Created the original template file upload endpoint with validation, storage saving, and database record insertion.
+
+#### Completed Tasks
+
+- Created `POST /upload` endpoint for `.docx` files under the `/templates` router.
+- Implemented file validation (extension, size, empty file) and metadata validation (name length, category, visibility constraints).
+- Integrated with `storage_service` to persist the original `.docx` locally.
+- Handled database insertion with `create_template` and implemented cleanup of the local file if DB insertion fails.
+- Registered `templates.router` in `api.py`.
+- Refactored `template_crud.py` to correctly use the synchronous `Session` as dictated by the project configuration.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py` for upload endpoint.
+- `backend/app/api/v1/api.py` for routing setup.
+- `backend/app/crud/template_crud.py` for synchronous session refactor.
+
+#### Features Added / Updated / Removed
+
+- Added: `POST /api/v1/templates/upload` authenticated endpoint for templates.
+- Updated: DB CRUD `create_template` to execute synchronously.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed an asynchronous `AsyncSession` mismatch bug in `template_crud.py` by converting it to match the rest of the synchronous DB architecture.
+
+#### Notes For Next Push
+
+- Member 1 can now build the frontend upload form and submit requests to this new API endpoint.
+
 ---
 
 ## Entry Template
@@ -641,11 +682,7 @@ Copy this template for each future update and place it below the latest checkpoi
 ### Checkpoint 000X
 
 - Date: YYYY-MM-DD
-
 - Member: Name
-
-- Member: Yash Khadgi
-
 - Branch: branch-name
 - Push status: before push
 - Range covered: after Checkpoint 000(previous) -> current update date
@@ -677,3 +714,4 @@ Copy this template for each future update and place it below the latest checkpoi
 
 - Optional handoff notes or `None`
 ```
+
