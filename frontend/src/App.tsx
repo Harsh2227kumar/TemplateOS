@@ -4,7 +4,6 @@ import { DashboardLayout } from "./layouts/dashboard-layout";
 import { DashboardPage } from "./pages/dashboard-page";
 import { LoginPage } from "./pages/login-page";
 import { ProfilePage } from "./pages/profile-page";
-import { UploadTemplatePage } from "./pages/upload-template-page";
 import { SignupPage } from "./pages/signup-page";
 
 export function App() {
@@ -18,7 +17,6 @@ export function App() {
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/upload-template" element={<UploadTemplatePage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
