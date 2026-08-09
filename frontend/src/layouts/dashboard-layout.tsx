@@ -28,7 +28,8 @@ export function DashboardLayout() {
   const getPageTitle = () => {
     if (location.pathname === "/profile") return "Profile";
     if (location.pathname === "/templates") return "My Templates";
-    return "Dashboard Shell";
+    if (location.pathname === "/upload-template") return "Upload Template";
+    return "Dashboard";
   };
 
   return (
