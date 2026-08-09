@@ -722,6 +722,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0013
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: `fix/v12-phase1-audit-issues`
+- Push status: before push
+- Range covered: after Checkpoint 0012 -> 2026-08-09
+
+#### Summary
+
+- Addressed V1.2 Phase 1 audit findings by completing the frontend form validation migration, fixing backend storage path loading, adding app lifecycle storage initialization, and ensuring asynchronous thread pooling for file I/O operations.
+
+#### Completed Tasks
+
+- Rewrote `UploadTemplateForm` to use `react-hook-form` and `zod` for per-field validation.
+- Installed and integrated `shadcn/ui` form components (`Form`, `Input`, `Textarea`, `Select`, `Label`).
+- Added `storage_base_path` configuration to `config.py` and removed hardcoded path in `storage_service.py`.
+- Added a `lifespan` event hook to `main.py` that calls `ensure_storage_tree()` on startup.
+- Introduced `asyncio.to_thread` for the synchronous `save_bytes` and `delete_file` storage methods inside the async upload endpoint.
+- Added extensive `logging` integration to `storage_service.py` and `templates.py`.
+
+#### Code Changes
+
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `frontend/src/components/ui/` (added form, input, label, select, textarea)
+- `backend/app/core/config.py`
+- `backend/app/services/storage_service.py`
+- `backend/app/main.py`
+- `backend/app/api/v1/endpoints/templates.py`
+
+#### Features Added / Updated / Removed
+
+- Added: Per-field validation feedback UI and upload spinner.
+- Updated: Storage directory is now auto-created at app startup.
+- Updated: Storage saving operations are non-blocking via thread pooling.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed all 8 issues (4 critical, 4 moderate) raised during the V1.2 Phase 1 audit.
+
+#### Notes For Next Push
+
+- Changes cover cross-stack bugfixes for the V1.2 Phase 1 implementation. The branch is ready for review and merge into `dev`.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
