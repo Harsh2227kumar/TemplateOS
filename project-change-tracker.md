@@ -672,6 +672,101 @@ Add all future updates below this section.
 
 - Member 1 can now build the frontend upload form and submit requests to this new API endpoint.
 
+### Checkpoint 0012
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: `feature/frontend-template-upload`
+- Push status: before push
+- Range covered: after Checkpoint 0011 -> 2026-08-09
+
+#### Summary
+
+- Implemented V1.2 Phase 1 Frontend Developer tasks: Created the original template file upload UI with drag-and-drop, client-side validation, and mock API integration.
+
+#### Completed Tasks
+
+- Built `UploadZone` drag-and-drop component rejecting non-.docx or >10MB files.
+- Built `UploadTemplateForm` with plain React state and full client-side validation matching the login page pattern.
+- Added `TemplateResponse` schema and `templatesApi.upload` fetch call with FormData.
+- Created `upload-template-page.tsx` and wired it into the dashboard route.
+- Added "Upload Template" link to sidebar.
+- Wired dashboard empty state to navigate to the new page.
+
+#### Code Changes
+
+- `frontend/src/components/upload/UploadZone.tsx` (new)
+- `frontend/src/components/upload/UploadTemplateForm.tsx` (new)
+- `frontend/src/pages/upload-template-page.tsx` (new)
+- `frontend/src/lib/api.ts`
+- `frontend/src/components/sidebar-nav.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/layouts/dashboard-layout.tsx`
+- `frontend/src/pages/dashboard-page.tsx`
+- `frontend/src/components/empty-state.tsx`
+
+#### Features Added / Updated / Removed
+
+- Added: Template upload form with drag-and-drop and validation.
+- Added: Client-side API fetch setup for multipart file upload.
+- Updated: Dashboard navigation to include upload page.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- The API call currently uses a 2-second mock. Once Member 2 completes the backend integration and pushes to `dev`, this mock can be removed and replaced with the actual fetch call logic (already written and commented out).
+
+---
+
+### Checkpoint 0013
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: `fix/v12-phase1-audit-issues`
+- Push status: before push
+- Range covered: after Checkpoint 0012 -> 2026-08-09
+
+#### Summary
+
+- Addressed V1.2 Phase 1 audit findings by completing the frontend form validation migration, fixing backend storage path loading, adding app lifecycle storage initialization, and ensuring asynchronous thread pooling for file I/O operations.
+
+#### Completed Tasks
+
+- Rewrote `UploadTemplateForm` to use `react-hook-form` and `zod` for per-field validation.
+- Installed and integrated `shadcn/ui` form components (`Form`, `Input`, `Textarea`, `Select`, `Label`).
+- Added `storage_base_path` configuration to `config.py` and removed hardcoded path in `storage_service.py`.
+- Added a `lifespan` event hook to `main.py` that calls `ensure_storage_tree()` on startup.
+- Introduced `asyncio.to_thread` for the synchronous `save_bytes` and `delete_file` storage methods inside the async upload endpoint.
+- Added extensive `logging` integration to `storage_service.py` and `templates.py`.
+
+#### Code Changes
+
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `frontend/src/components/ui/` (added form, input, label, select, textarea)
+- `backend/app/core/config.py`
+- `backend/app/services/storage_service.py`
+- `backend/app/main.py`
+- `backend/app/api/v1/endpoints/templates.py`
+
+#### Features Added / Updated / Removed
+
+- Added: Per-field validation feedback UI and upload spinner.
+- Updated: Storage directory is now auto-created at app startup.
+- Updated: Storage saving operations are non-blocking via thread pooling.
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed all 8 issues (4 critical, 4 moderate) raised during the V1.2 Phase 1 audit.
+
+#### Notes For Next Push
+
+- Changes cover cross-stack bugfixes for the V1.2 Phase 1 implementation. The branch is ready for review and merge into `dev`.
+
 ---
 
 ## Entry Template
