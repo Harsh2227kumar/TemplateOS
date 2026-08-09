@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Form, File, HTTPException, UploadFile, status
@@ -9,6 +11,7 @@ from app.schemas.template import TemplateCreate, TemplateResponse
 from app.models.template import Template
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 ALLOWED_CATEGORIES = {
     "notice", "mom", "report", "application",
@@ -64,10 +67,14 @@ async def upload_template(
     if visibility not in ALLOWED_VISIBILITY:
         raise HTTPException(status_code=400, detail="Invalid visibility value")
 
-    # 7. Save file via storage_service
+    # 7. Save file via storage_service (in thread pool)
     try:
-        stored = storage_service.save_bytes("templates_original", filename, content)
-    except StorageError:
+        logger.info(f"Saving template {filename} for user {current_user.id}")
+        stored = await asyncio.to_thread(
+            storage_service.save_bytes, "templates_original", filename, content
+        )
+    except StorageError as e:
+        logger.error(f"Storage error while saving {filename}: {e}")
         raise HTTPException(
             status_code=500,
             detail="Could not save uploaded file",
@@ -88,8 +95,10 @@ async def upload_template(
 
     try:
         template = create_template(db, template_data)
-    except Exception:
-        storage_service.delete_file(stored.path)
+        logger.info(f"Created template record {template.id} for user {current_user.id}")
+    except Exception as e:
+        logger.error(f"DB error while creating template record: {e}. Rolling back file.")
+        await asyncio.to_thread(storage_service.delete_file, stored.path)
         raise HTTPException(status_code=500, detail="Could not save template record") from None
 
     return template
