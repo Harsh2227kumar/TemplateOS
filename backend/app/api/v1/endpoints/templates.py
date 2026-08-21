@@ -2,12 +2,22 @@ import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Form, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.services.storage_service import StorageError, storage_service
-from app.crud.template_crud import create_template, get_templates_by_user, get_template_by_id
-from app.schemas.template import TemplateCreate, TemplateResponse, TemplateListItem
+from app.crud.template_crud import (
+    create_template,
+    get_templates_by_user,
+    get_template_by_id,
+    get_library_templates,
+)
+from app.schemas.template import (
+    TemplateCreate,
+    TemplateResponse,
+    TemplateListItem,
+    TemplateLibraryResponse,
+)
 from app.models.template import Template
 
 router = APIRouter()
@@ -18,8 +28,90 @@ ALLOWED_CATEGORIES = {
     "letter", "certificate", "proposal", "invoice", "custom",
 }
 ALLOWED_VISIBILITY = {"private", "public", "organization", "department", "group"}
+ALLOWED_STATUSES = {
+    "uploaded", "placeholder_detected", "field_configured",
+    "active", "archived", "locked",
+}
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+
+def validate_filter_param(value: str | None, allowed: set[str], param_name: str) -> None:
+    """Validate a filter parameter against a set of allowed values."""
+    if value is not None and value not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {param_name}. Allowed: {', '.join(sorted(allowed))}",
+        )
+
+
+# --- GET endpoints ---
+# IMPORTANT: /library must be declared BEFORE /{template_id}
+# so FastAPI does not try to parse "library" as an integer.
+
+@router.get("/library", response_model=TemplateLibraryResponse)
+def list_library_templates(
+    current_user: CurrentUser,
+    db: DbSession,
+    search: str | None = Query(None, max_length=100, description="Search by template name"),
+    category: str | None = Query(None, description="Filter by category"),
+    visibility: str | None = Query(None, description="Filter by visibility"),
+    status: str | None = Query(None, description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
+) -> dict:
+    """
+    Return templates visible to the current user.
+    Includes: user's own templates + public templates.
+    Supports search, category filter, visibility filter, and pagination.
+    """
+    validate_filter_param(category, ALLOWED_CATEGORIES, "category")
+    validate_filter_param(visibility, ALLOWED_VISIBILITY, "visibility")
+    validate_filter_param(status, ALLOWED_STATUSES, "status")
+
+    templates, total = get_library_templates(
+        db=db,
+        user_id=current_user.id,
+        search=search,
+        category=category,
+        visibility=visibility,
+        status=status,
+        page=page,
+        limit=limit,
+    )
+
+    return {
+        "templates": templates,
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
+
+
+@router.get("/", response_model=list[TemplateListItem])
+def list_my_templates(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[Template]:
+    """Return all templates uploaded by the current user, newest first."""
+    return get_templates_by_user(db, current_user.id)
+
+
+@router.get("/{template_id}", response_model=TemplateResponse)
+def get_template(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> Template:
+    """Return a single template by ID. Accessible if user owns it OR it is public."""
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.uploaded_by != current_user.id and template.visibility != "public":
+        raise HTTPException(status_code=403, detail="You do not have access to this template")
+    return template
+
+
+# --- POST endpoints ---
 
 @router.post(
     "/upload",
@@ -102,26 +194,4 @@ async def upload_template(
         await asyncio.to_thread(storage_service.delete_file, stored.path)
         raise HTTPException(status_code=500, detail="Could not save template record") from None
 
-    return template
-
-@router.get("/", response_model=list[TemplateListItem])
-def list_my_templates(
-    current_user: CurrentUser,
-    db: DbSession,
-) -> list[Template]:
-    """Return all templates uploaded by the current user, newest first."""
-    return get_templates_by_user(db, current_user.id)
-
-@router.get("/{template_id}", response_model=TemplateResponse)
-def get_template(
-    template_id: int,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> Template:
-    """Return a single template by ID. Only the uploader can access it."""
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(status_code=403, detail="You do not have access to this template")
     return template
