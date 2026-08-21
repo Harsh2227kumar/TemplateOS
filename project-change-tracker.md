@@ -854,6 +854,97 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0016
+
+- Date: 2026-08-09
+- Member: Member 1 (AI)
+- Branch: current
+- Push status: before push
+- Range covered: after Checkpoint 0015 -> 2026-08-09
+
+#### Summary
+
+- Completed V1.2 Phase 2 Frontend Developer tasks. Replaced the mock upload API with a real fetch call, added a 3-step upload status strip, polished the success state, and mapped specific API errors to user-friendly messages.
+
+#### Completed Tasks
+
+- Replaced the mock API upload function with a real `fetch` using `FormData`.
+- Added a responsive 3-step status strip ("Fill Details", "Uploading File", "Done") to the upload template page.
+- Enhanced the success state in `UploadTemplateForm.tsx` to display the file size and a shadcn `<Badge>` for the category.
+- Created a `mapApiError` utility to display specific user-friendly error messages for known API errors (e.g. invalid file type, file too large, session expired).
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/pages/upload-template-page.tsx`
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `frontend/src/components/ui/badge.tsx` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: 3-step visual status strip for template uploads.
+- Added: shadcn `<Badge>` component to the frontend.
+- Updated: Template upload now integrates with the real backend API.
+- Updated: Enhanced success and error states on template upload.
+- Removed: Mock `setTimeout` upload implementation in `api.ts`.
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- V1.2 Phase 2 frontend tasks are completely implemented and ready to test end-to-end with the backend.
+
+---
+
+### Checkpoint 0017
+
+- Date: 2026-08-21
+- Member: Member 3 (AI)
+- Branch: feature/frontend-template-upload-integration
+- Push status: before push
+- Range covered: after Checkpoint 0016 -> 2026-08-21
+
+#### Summary
+
+- Completed V1.2 Phase 3 Database / Integration tasks. Added backend CRUD operations, models, endpoints, tests, and a seed script to support the new Template Library feature.
+
+#### Completed Tasks
+
+- Implemented `get_library_templates` CRUD function with search, category, visibility filtering, and pagination support.
+- Added `get_template_count_by_user` and `search_templates` CRUD utility functions.
+- Added `TemplateLibraryResponse` Pydantic schema for paginated responses.
+- Added `GET /api/v1/templates/library` endpoint for browsing templates.
+- Updated `GET /api/v1/templates/{id}` endpoint to securely allow public template access by non-owners.
+- Created `test_template_library.py` with 12 rigorous integration tests covering filters, search, visibility constraints, and pagination.
+- Created `seed_templates.py` script to insert 12 sample templates into the database for demo/testing purposes.
+
+#### Code Changes
+
+- `backend/app/crud/template_crud.py`
+- `backend/app/schemas/template.py`
+- `backend/app/api/v1/endpoints/templates.py`
+- `backend/tests/test_template_library.py` (new)
+- `backend/scripts/seed_templates.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Backend data layer, API endpoint, schemas, and tests for the Template Library.
+- Added: Demo seed script for templates.
+- Updated: Template detail endpoint to respect public visibility.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- All 52 backend integration tests pass. The API is fully prepared for Member 1 to consume and build the frontend Template Library UI.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
