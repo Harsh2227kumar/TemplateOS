@@ -60,6 +60,23 @@ export const authApi = {
   me: (token: string) => request<User>("/auth/me", {}, token),
 };
 
+export interface TemplateListItem {
+  id: number;
+  name: string;
+  category: string;
+  visibility: string;
+  status: string;
+  uploaded_by: number;
+  created_at: string;
+}
+
+export interface TemplateLibraryResponse {
+  templates: TemplateListItem[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface TemplateResponse {
   id: number;
   name: string;
@@ -77,6 +94,35 @@ export interface TemplateResponse {
 }
 
 export const templatesApi = {
+  getLibrary: async (token: string, params?: {
+    search?: string;
+    category?: string;
+    visibility?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<TemplateLibraryResponse> => {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== "") {
+          searchParams.append(key, String(value));
+        }
+      });
+    }
+    const queryString = searchParams.toString();
+    const url = `/templates/library${queryString ? `?${queryString}` : ""}`;
+    return request<TemplateLibraryResponse>(url, {}, token);
+  },
+
+  getTemplateDetail: async (token: string, id: number): Promise<TemplateResponse> => {
+    return request<TemplateResponse>(`/templates/${id}`, {}, token);
+  },
+
+  getMyTemplates: async (token: string): Promise<TemplateListItem[]> => {
+    return request<TemplateListItem[]>("/templates/", {}, token);
+  },
+
   upload: async (
     token: string,
     payload: {
