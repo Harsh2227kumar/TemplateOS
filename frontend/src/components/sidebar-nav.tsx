@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { CloudUpload, FileText, LayoutDashboard, User } from "lucide-react";
+import { CloudUpload, LayoutGrid, LayoutDashboard, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -16,15 +16,14 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
+    label: "Template Library",
+    to: "/templates",
+    icon: LayoutGrid,
+  },
+  {
     label: "Upload Template",
     to: "/upload-template",
     icon: CloudUpload,
-  },
-  {
-    label: "My Templates",
-    to: "/templates",
-    icon: FileText,
-    comingSoon: true,
   },
   {
     label: "Profile",

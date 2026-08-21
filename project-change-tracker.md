@@ -945,6 +945,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0018
+
+- Date: 2026-08-21
+- Member: Member 1 (AI)
+- Branch: feature/frontend-template-library-phase3
+- Push status: before push
+- Range covered: after Checkpoint 0017 -> 2026-08-21
+
+#### Summary
+
+- Completed V1.2 Phase 3 Frontend Developer tasks. Built the Template Library and Template Detail pages, including UI components for cards, search, filters, and a responsive grid layout.
+
+#### Completed Tasks
+
+- Added `TemplateListItem` and `TemplateLibraryResponse` interfaces to `api.ts`.
+- Implemented `getLibrary`, `getTemplateDetail`, and `getMyTemplates` API methods.
+- Built `TemplateCard`, `TemplateSearchBar`, `TemplateFilters`, and `TemplateGrid` components.
+- Built `TemplateLibraryPage` with search/filter/pagination logic and integrated the components.
+- Built `TemplateDetailPage` to display comprehensive template metadata, and handle 404/403 errors correctly.
+- Added routes for `/templates` and `/templates/:id` to `App.tsx`.
+- Updated `sidebar-nav.tsx` to include "Template Library" link and icon.
+- Added `skeleton` UI component from shadcn/ui.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`
+- `frontend/src/components/templates/TemplateCard.tsx` (new)
+- `frontend/src/components/templates/TemplateSearchBar.tsx` (new)
+- `frontend/src/components/templates/TemplateFilters.tsx` (new)
+- `frontend/src/components/templates/TemplateGrid.tsx` (new)
+- `frontend/src/pages/template-library-page.tsx` (new)
+- `frontend/src/pages/template-detail-page.tsx` (new)
+- `frontend/src/components/ui/skeleton.tsx` (new)
+- `frontend/src/App.tsx`
+- `frontend/src/components/sidebar-nav.tsx`
+
+#### Features Added / Updated / Removed
+
+- Added: Template Library page to browse all accessible templates.
+- Added: Template Detail page for inspecting a template's metadata.
+- Added: Search, filter, and pagination capabilities on the frontend.
+- Updated: Sidebar navigation to point directly to the new Template Library.
+- Removed: "coming soon" badge from the templates navigation link.
+
+#### Issues Fixed
+
+- Fixed shadcn/ui adding `skeleton.tsx` to the wrong directory (moved from `@/components/ui/` to `src/components/ui/`).
+
+#### Notes For Next Push
+
+- V1.2 Phase 3 Frontend tasks are complete and pass `npm run build` with no typescript errors. Ready for push and integration review.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.
