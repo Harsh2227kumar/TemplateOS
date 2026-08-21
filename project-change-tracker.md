@@ -898,6 +898,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0017
+
+- Date: 2026-08-21
+- Member: Member 3 (AI)
+- Branch: feature/frontend-template-upload-integration
+- Push status: before push
+- Range covered: after Checkpoint 0016 -> 2026-08-21
+
+#### Summary
+
+- Completed V1.2 Phase 3 Database / Integration tasks. Added backend CRUD operations, models, endpoints, tests, and a seed script to support the new Template Library feature.
+
+#### Completed Tasks
+
+- Implemented `get_library_templates` CRUD function with search, category, visibility filtering, and pagination support.
+- Added `get_template_count_by_user` and `search_templates` CRUD utility functions.
+- Added `TemplateLibraryResponse` Pydantic schema for paginated responses.
+- Added `GET /api/v1/templates/library` endpoint for browsing templates.
+- Updated `GET /api/v1/templates/{id}` endpoint to securely allow public template access by non-owners.
+- Created `test_template_library.py` with 12 rigorous integration tests covering filters, search, visibility constraints, and pagination.
+- Created `seed_templates.py` script to insert 12 sample templates into the database for demo/testing purposes.
+
+#### Code Changes
+
+- `backend/app/crud/template_crud.py`
+- `backend/app/schemas/template.py`
+- `backend/app/api/v1/endpoints/templates.py`
+- `backend/tests/test_template_library.py` (new)
+- `backend/scripts/seed_templates.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Backend data layer, API endpoint, schemas, and tests for the Template Library.
+- Added: Demo seed script for templates.
+- Updated: Template detail endpoint to respect public visibility.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- All 52 backend integration tests pass. The API is fully prepared for Member 1 to consume and build the frontend Template Library UI.
+
+---
+
 ## Entry Template
 
 Copy this template for each future update and place it below the latest checkpoint.

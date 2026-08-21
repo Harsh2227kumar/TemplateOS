@@ -37,3 +37,12 @@ class TemplateListItem(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TemplateLibraryResponse(BaseModel):
+    templates: list[TemplateListItem]
+    total: int
+    page: int
+    limit: int
+
+    model_config = ConfigDict(from_attributes=True)
