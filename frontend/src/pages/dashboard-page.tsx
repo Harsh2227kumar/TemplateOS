@@ -21,8 +21,10 @@ export function DashboardPage() {
             This starter dashboard provides a clean UI shell. Template workflows, document generation, and AI features will be connected in upcoming phases.
           </p>
           <div className="mt-8 flex flex-wrap gap-4">
-            <Button className="bg-white text-slate-900 hover:bg-slate-100">
-              View Documentation
+            <Button asChild className="bg-white text-slate-900 hover:bg-slate-100">
+              <a href={(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1").replace("/api/v1", "/docs")} target="_blank" rel="noopener noreferrer">
+                View Documentation
+              </a>
             </Button>
             <Button variant="outline" className="border-slate-600 bg-slate-800/50 text-white hover:bg-slate-700">
               shadcn/ui ready
