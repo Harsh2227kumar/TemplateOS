@@ -145,15 +145,15 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
           <span className="text-sm text-slate-500">{formatBytes(success.file_size_bytes ?? 0)}</span>
         </div>
         <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={resetForm}>
-            Upload Another
-          </Button>
           <Button
             type="button"
-            variant="outline"
-            onClick={() => navigate("/templates")}
+            variant="default"
+            onClick={() => navigate(`/templates/${success.id}`)}
           >
-            View Templates
+            View Template
+          </Button>
+          <Button type="button" variant="outline" onClick={resetForm}>
+            Upload Another
           </Button>
         </div>
       </div>
