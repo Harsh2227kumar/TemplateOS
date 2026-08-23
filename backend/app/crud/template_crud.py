@@ -62,6 +62,10 @@ def get_templates_by_category(
     return list(result.scalars().all())
 
 
+def _escape_like(value: str) -> str:
+    """Escape special LIKE characters so they match literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 def get_library_templates(
     db: Session,
     user_id: int,
@@ -98,7 +102,8 @@ def get_library_templates(
     query = select(Template).where(visibility_filter)
 
     if search:
-        query = query.where(Template.name.ilike(f"%{search}%"))
+        safe_search = _escape_like(search)
+        query = query.where(Template.name.ilike(f"%{safe_search}%"))
     if category:
         query = query.where(Template.category == category)
     if visibility:
@@ -141,7 +146,10 @@ def search_templates(
         base = base.where(Template.uploaded_by == user_id)
     else:
         base = base.where(Template.visibility == "public")
-    base = base.where(Template.name.ilike(f"%{query_text}%"))
+    
+    safe_search = _escape_like(query_text)
+    base = base.where(Template.name.ilike(f"%{safe_search}%"))
+    
     base = base.order_by(Template.created_at.desc()).limit(limit)
     result = db.execute(base)
     return list(result.scalars().all())
