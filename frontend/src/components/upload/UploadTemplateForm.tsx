@@ -24,6 +24,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { Badge } from "@/components/ui/badge";
+
 import { ApiError, templatesApi, type TemplateResponse } from "@/lib/api";
 import { UploadZone } from "./UploadZone";
 
@@ -63,7 +65,30 @@ const uploadTemplateSchema = z.object({
 
 type UploadTemplateValues = z.infer<typeof uploadTemplateSchema>;
 
-export function UploadTemplateForm() {
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function mapApiError(err: ApiError): string {
+  const msg = err.message;
+  if (err.status === 400 && msg.includes("DOCX"))
+    return "Only .docx files are accepted. Please check your file.";
+  if (err.status === 400 && (msg.includes("10 MB") || msg.toLowerCase().includes("size")))
+    return "Your file is too large. Maximum size is 10 MB.";
+  if (err.status === 401)
+    return "Your session has expired. Please log in again.";
+  if (err.status === 500)
+    return "The server could not save your file. Please try again.";
+  return msg;
+}
+
+interface UploadTemplateFormProps {
+  onUploadStart?: () => void;
+  onUploadSuccess?: () => void;
+}
+
+export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTemplateFormProps) {
   const navigate = useNavigate();
 
   const [error, setError] = useState("");
@@ -91,6 +116,7 @@ export function UploadTemplateForm() {
 
     const token = localStorage.getItem(TOKEN_KEY) ?? "";
     try {
+      onUploadStart?.();
       const result = await templatesApi.upload(token, {
         file: values.file,
         name: values.name.trim(),
@@ -99,9 +125,10 @@ export function UploadTemplateForm() {
         visibility: values.visibility,
       });
       setSuccess(result);
+      onUploadSuccess?.();
     } catch (caught) {
       setError(
-        caught instanceof ApiError ? caught.message : "Upload failed. Please try again.",
+        caught instanceof ApiError ? mapApiError(caught) : "Upload failed. Please try again.",
       );
     }
   };
@@ -113,16 +140,20 @@ export function UploadTemplateForm() {
         <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
           ✓ &ldquo;{success.name}&rdquo; uploaded successfully.
         </p>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="capitalize">{success.category}</Badge>
+          <span className="text-sm text-slate-500">{formatBytes(success.file_size_bytes ?? 0)}</span>
+        </div>
         <div className="flex flex-wrap gap-3">
-          <Button type="button" onClick={resetForm}>
-            Upload Another
-          </Button>
           <Button
             type="button"
-            variant="outline"
-            onClick={() => navigate("/templates")}
+            variant="default"
+            onClick={() => navigate(`/templates/${success.id}`)}
           >
-            View Templates
+            View Template
+          </Button>
+          <Button type="button" variant="outline" onClick={resetForm}>
+            Upload Another
           </Button>
         </div>
       </div>
