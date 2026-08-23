@@ -999,9 +999,56 @@ Add all future updates below this section.
 
 ---
 
-## Entry Template
+### Checkpoint 0019
 
-Copy this template for each future update and place it below the latest checkpoint.
+- Date: 2026-08-23
+- Member: Member 1, 2, 3 (AI)
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0018 -> 2026-08-23
+
+#### Summary
+
+- Resolved all outstanding bugs from V1.1 and V1.2 audits (Dashboard integration, backend wildcard search, storage cleanup) and initialized the V1.3 database schema for placeholder detection.
+
+#### Completed Tasks
+
+- Dashboard "My Templates" wired to fetch real templates (`api.ts` -> `dashboard-page.tsx`).
+- Replaced dashboard developer copy and dummy buttons with actual user-friendly text and internal links.
+- Updated template upload success state to link directly to `/templates/:id`.
+- Removed redundant `storage.py` endpoint from the backend.
+- Added `_escape_like` to `template_crud.py` to prevent SQL wildcard `%` and `_` matching issues.
+- Ignored/deleted local `test.db`.
+- Built `TemplateField` database model, Pydantic schemas, and Alembic migration for V1.3 Phase 1.
+
+#### Code Changes
+
+- `frontend/src/pages/dashboard-page.tsx`
+- `frontend/src/components/upload/UploadTemplateForm.tsx`
+- `backend/app/crud/template_crud.py`
+- `backend/app/api/v1/api.py` and `backend/app/api/v1/endpoints/storage.py` (deleted)
+- `backend/app/models/template_field.py` (new) and `backend/app/models/template.py` (updated)
+- `backend/app/schemas/template_field.py` (new)
+- `backend/alembic/versions/fb6604df0637_add_template_fields_table.py` (new)
+- `.gitignore` (updated)
+
+#### Features Added / Updated / Removed
+
+- Added: `template_fields` PostgreSQL table for V1.3 placeholder detection.
+- Updated: Dashboard UI properly integrated with backend template data.
+- Removed: Unused `storage.py` API endpoint and `test.db`.
+
+#### Issues Fixed
+
+- Fixed BUG-003, BUG-007, BUG-008, BUG-009, BUG-010, BUG-013, BUG-014, BUG-015 from the `bugs.md` audit.
+
+#### Notes For Next Push
+
+- V1.1 and V1.2 are officially complete and bug-free. Ready to commence building V1.3 backend logic.
+
+---
+
+## Entry Template
 
 ```md
 ### Checkpoint 000X
