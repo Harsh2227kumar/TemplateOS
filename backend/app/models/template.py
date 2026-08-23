@@ -15,6 +15,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.user import User
+    from app.models.template_field import TemplateField
 
 TEMPLATE_CATEGORIES = (
     "notice", "mom", "report", "application",
@@ -67,6 +68,7 @@ class Template(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     uploader: Mapped["User"] = relationship("User", back_populates="templates")
+    fields: Mapped[list["TemplateField"]] = relationship("TemplateField", back_populates="template", cascade="all, delete-orphan")
 
     @validates("category")
     def validate_category(self, _key: str, category: str) -> str:
