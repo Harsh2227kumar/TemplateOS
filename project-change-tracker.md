@@ -1087,6 +1087,55 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0022
+
+- Date: 2026-08-28
+- Member: Member 3 (AI)
+- Branch: feature/template-fields-metadata
+- Push status: before push
+- Range covered: after Checkpoint 0020 -> 2026-08-28
+- Note: Checkpoint 0021 (V1.3 Phase 1 Member 1 frontend) lives on `feature/placeholder-detection` and is not merged yet; numbering skips it on this branch.
+
+#### Summary
+
+- Expanded `template_fields` to the full V1.3 field-metadata contract (model + additive migration + schemas) and added the `template_field_crud` persistence layer Member 2's detection endpoint will call.
+
+#### Completed Tasks
+
+- Expanded `app/models/template_field.py`: `FIELD_TYPES` corrected to the MVP set (`text, textarea, date, number, list, signature` — removed `dropdown`), added `field_label`, `section`, `example_value`, `validation_rule`, `ai_enabled` columns, custom `__init__` defaults, `UniqueConstraint("template_id", "field_name")` and composite `Index(template_id, display_order)`.
+- Patched migration `fb6604df0637`: `sa.text('now()')` -> `sa.text('CURRENT_TIMESTAMP')` for `created_at`/`updated_at` (cross-dialect rule; SQLite tests were failing on `DEFAULT now()`).
+- New additive migration `7c4e9a1b2d58_expand_template_fields_metadata`: adds the 5 columns (`ai_enabled` NOT NULL with server_default `false`), the unique constraint (via `batch_alter_table` for SQLite compatibility), and the composite index; verified `upgrade head`, `downgrade -1`, and re-upgrade clean on a scratch SQLite DB.
+- Expanded `app/schemas/template_field.py`: full `TemplateFieldBase/Create/Update/Read` (label, section, example, validation, ai_enabled) + Phase 1 detection-response schemas (`DuplicateFieldWarning`, `InvalidFieldNameWarning`, `DetectionWarnings`, `DetectionSummary`, `PlaceholderDetectionResponse`).
+- Created `app/crud/template_field_crud.py`: `bulk_create_fields`, `get_fields_by_template` (ordered by display_order, id), `delete_fields_by_template`, `field_exists`; registered in `app/crud/__init__.py`.
+- New tests: `tests/test_template_field_model.py` (model defaults/validation/unique constraint + full CRUD coverage) and `tests/test_placeholder_detection.py` (persistence-flow tests now; endpoint contract tests auto-skip until Member 2's detect-placeholders / fields routes exist, then activate).
+- Full suite: 67 passed, 8 skipped (endpoint tests awaiting Member 2); previously failing `test_profile_migration_upgrade_and_downgrade` now passes.
+
+#### Code Changes
+
+- `backend/app/models/template_field.py` (expanded)
+- `backend/alembic/versions/7c4e9a1b2d58_expand_template_fields_metadata.py` (new)
+- `backend/alembic/versions/fb6604df0637_add_template_fields_table.py` (timestamp patch)
+- `backend/app/schemas/template_field.py` (expanded)
+- `backend/app/crud/template_field_crud.py` (new) and `backend/app/crud/__init__.py` (register)
+- `backend/tests/test_template_field_model.py`, `backend/tests/test_placeholder_detection.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: full field-metadata columns on `template_fields`; `(template_id, field_name)` uniqueness; ordered field reads; detection-response Pydantic schemas; `template_field_crud` helpers.
+- Updated: `FIELD_TYPES` vocabulary to the MVP set; migration timestamps to `CURRENT_TIMESTAMP`.
+- Removed: `dropdown` from the allowed field types.
+
+#### Issues Fixed
+
+- Fixed pre-existing failure `tests/test_user_profile_data.py::test_profile_migration_upgrade_and_downgrade` — SQLite rejected `DEFAULT now()` emitted by `fb6604df0637`.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 1) can now build `docx_parser.py` + the detect-placeholders/fields endpoints on top of this CRUD and the `PlaceholderDetectionResponse` schema; the 8 skipped endpoint tests in `test_placeholder_detection.py` will activate automatically and encode the agreed contract (ordered persistence, duplicate collapse, invalid-name exclusion with suggested keys, idempotency, force re-detect, owner-only 403, split-across-runs parity, no-500 on malformed tokens).
+- Run `alembic upgrade head` against Neon when deploying (migration `7c4e9a1b2d58` is additive and safe for existing rows).
+
+---
+
 ## Entry Template
 
 ```md
