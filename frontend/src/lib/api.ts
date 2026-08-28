@@ -91,6 +91,7 @@ export interface TemplateResponse {
   version: number;
   created_at: string;
   updated_at: string;
+  processed_file_path?: string | null;
 }
 
 export interface TemplateField {
@@ -129,6 +130,55 @@ export interface PlaceholderDetectionResponse {
     invalid_count: number;
     duplicate_count: number;
   };
+}
+
+// --- V1.3 Phase 2: manual template cleaning ---
+
+export interface DocSegment {
+  index: number;
+  location: "body" | "table" | "header" | "footer";
+  text: string;
+}
+
+export interface TemplateContent {
+  template_id: number;
+  segments: DocSegment[];
+  has_processed: boolean;
+}
+
+export interface PlaceholderReplacement {
+  sample_text: string;
+  placeholder_key: string;
+  field_label?: string;
+  field_type?: string;
+  section?: string;
+  segment_index?: number;
+}
+
+export interface ReplacementResult {
+  placeholder_key: string;
+  sample_text: string;
+  occurrences: number;
+  matched: boolean;
+  reason?: string | null;
+}
+
+export interface CleanResponse {
+  template_id: number;
+  status: string;
+  processed_file_path: string;
+  created_fields: TemplateField[];
+  results: ReplacementResult[];
+  warnings: {
+    unmatched: string[];
+    invalid_keys: string[];
+  };
+}
+
+export interface CleanTemplatePayload {
+  replacements: PlaceholderReplacement[];
+  confirm: boolean;
+  mark_configured?: boolean;
 }
 
 export const templatesApi = {
@@ -171,6 +221,22 @@ export const templatesApi = {
 
   getFields: async (token: string, id: number): Promise<TemplateField[]> => {
     return request<TemplateField[]>(`/templates/${id}/fields`, {}, token);
+  },
+
+  getContent: async (token: string, id: number): Promise<TemplateContent> => {
+    return request<TemplateContent>(`/templates/${id}/content`, {}, token);
+  },
+
+  cleanTemplate: async (
+    token: string,
+    id: number,
+    payload: CleanTemplatePayload,
+  ): Promise<CleanResponse> => {
+    return request<CleanResponse>(
+      `/templates/${id}/clean`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    );
   },
 
   upload: async (
