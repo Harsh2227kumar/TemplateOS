@@ -5,8 +5,17 @@ import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Download, Eraser, ListChecks, ScanSearch, Settings2 } from "lucide-react";
+import { ArrowLeft, Download, Eraser, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
@@ -55,6 +64,10 @@ export function TemplateDetailPage() {
   const [template, setTemplate] = useState<TemplateResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ message: string; status?: number } | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTemplate();
@@ -140,7 +153,30 @@ export function TemplateDetailPage() {
   if (!template) return null;
 
   const isOwner = template.uploaded_by === user?.id;
+  const isSuperAdmin = user?.role === "super_admin";
   const configAction = isOwner ? getConfigAction(template.id, template.status) : null;
+  const canSubmitDelete = confirmText.trim().toLowerCase() === "confirm" && !isDeleting;
+
+  const openDeleteDialog = () => {
+    setConfirmText("");
+    setDeleteError(null);
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      const token = localStorage.getItem("templateos_access_token") || "";
+      await templatesApi.deleteTemplate(token, template.id);
+      setDeleteOpen(false);
+      navigate("/templates");
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete the template. Please try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   return (
     <div className="max-w-4xl space-y-8 pb-10">
@@ -220,7 +256,62 @@ export function TemplateDetailPage() {
           <Download className="h-4 w-4" />
           Download Original
         </Button>
+        {isSuperAdmin && (
+          <Button
+            variant="destructive"
+            className="gap-2 sm:ml-auto"
+            onClick={openDeleteDialog}
+            disabled={isDeleting}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete Template
+          </Button>
+        )}
       </div>
+
+      <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this template permanently?</DialogTitle>
+            <DialogDescription>
+              This removes <span className="font-medium text-slate-900">{template.name}</span>,
+              its detected fields, and the original and processed DOCX files from storage. This
+              action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-sm text-slate-600">
+              Type <span className="font-mono font-semibold text-red-600">confirm</span> to
+              continue.
+            </p>
+            <Input
+              value={confirmText}
+              onChange={(event) => setConfirmText(event.target.value)}
+              placeholder="confirm"
+              autoComplete="off"
+              disabled={isDeleting}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && canSubmitDelete) handleDelete();
+              }}
+            />
+          </div>
+          {deleteError && (
+            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{deleteError}</div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={!canSubmitDelete}
+            >
+              {isDeleting ? "Deleting…" : "Delete permanently"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

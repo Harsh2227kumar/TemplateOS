@@ -1415,6 +1415,45 @@ Add all future updates below this section.
 - Frontend follow-up (separate PR into `frontend`): super-admin-only Delete button on the template detail page behind a type-"confirm" dialog; `templatesApi.deleteTemplate` must handle the 204 empty body.
 - Deletion order is deliberate: DB first, files second — orphan files are harmless, a row pointing at deleted files is not.
 
+---
+
+### Checkpoint 0028
+
+- Date: 2026-08-28
+- Member: Member 1 (AI)
+- Branch: feature/super-admin-template-delete-ui
+- Push status: before push
+- Range covered: after Checkpoint 0026 (frontend branch) -> 2026-08-28
+- Note: Checkpoint 0027 (the backend deletion endpoint) lives on the `backend` branch (`feature/super-admin-template-delete`, PR #69) and is not merged here yet.
+
+#### Summary
+
+- Added the frontend half of super-admin template deletion: a super-admin-only destructive Delete action on the template detail page behind a type-"confirm" dialog, plus the `deleteTemplate` API client method with 204 empty-body handling.
+
+#### Completed Tasks
+
+- Extended `frontend/src/lib/api.ts`: `request<T>` now returns `undefined` for 204 No Content responses (DELETE endpoints send no body); added `templatesApi.deleteTemplate(token, id)`.
+- Updated `frontend/src/pages/template-detail-page.tsx`: a destructive "Delete Template" button rendered only when `user?.role === "super_admin"` (owners and regular users never see it); clicking opens a Dialog explaining the irreversible consequences (template, its fields, and the original + processed DOCX files are removed) and requiring the user to type `confirm` exactly (trimmed, case-insensitive) before the destructive button enables; Enter submits when valid; ApiError surfaces inside the dialog with the state preserved; on success the dialog closes and the user is navigated to `/templates`.
+- Verified `npm run build` (strict TS) on the feature branch and on a combined backend+frontend integration tree, plus a live e2e against the real backend.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (204 handling + deleteTemplate)
+- `frontend/src/pages/template-detail-page.tsx` (delete button + confirm dialog)
+
+#### Features Added / Updated / Removed
+
+- Added: super-admin-only template deletion UI with typed confirmation; `deleteTemplate` API method; 204 no-content support in the shared request helper.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Live e2e verified against the merged backend (temp integration branch, deleted after): owner DELETE → 403 "Only a super admin can delete templates"; `/auth/me` returns `role` for the UI gate; super-admin DELETE → 204 with 0-byte body; DB record + fields gone, stored DOCX removed from disk; subsequent GET → 404. Backend suite 106/106 and strict TS build pass on the combined tree.
+- Backend half is PR #69 into `backend`; this PR + #69 integrate into `dev` via the usual frontend/backend sync flow.
+- When integrating, the tracker union order is 0026 → 0027 → 0028.
 
 ---
 
