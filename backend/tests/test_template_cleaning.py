@@ -17,6 +17,7 @@ Layers:
 
 import io
 import os
+import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
@@ -271,6 +272,11 @@ def _build_sample_docx() -> bytes:
 def test_apply_replacements_produces_placeholder_and_preserves_original():
     from app.services.docx_cleaner import apply_replacements
 
+    def _document_xml(docx: bytes) -> bytes:
+        """A DOCX is a zip; check word/document.xml (uncompressed via zipfile)."""
+        with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+            return archive.read("word/document.xml")
+
     original_bytes = _build_sample_docx()
     processed = apply_replacements(
         original_bytes,
@@ -282,10 +288,12 @@ def test_apply_replacements_produces_placeholder_and_preserves_original():
         ],
     )
     assert processed != original_bytes
-    assert b"{{ meeting_title }}" in processed or b"{{meeting_title}}" in processed
+    assert b"{{ meeting_title }}" in _document_xml(
+        processed
+    ) or b"{{meeting_title}}" in _document_xml(processed)
     # Original is untouched: bytes identical, no placeholder introduced.
     assert original_bytes == _build_sample_docx()
-    assert b"{{ meeting_title }}" not in original_bytes
+    assert b"{{ meeting_title }}" not in _document_xml(original_bytes)
 
 
 @requires_docx_cleaner
@@ -427,13 +435,15 @@ def test_clean_persists_processed_path_and_field(clean_owner_token):
     assert detail["original_file_path"] == template["original_file_path"]
     assert detail["processed_file_path"] == body["processed_file_path"]
 
-    # The processed DOCX on disk really contains the placeholder.
+    # The processed DOCX on disk really contains the placeholder
+    # (read word/document.xml from the zip — entries are DEFLATE-compressed).
     from app.services.storage_service import storage_service
 
     processed_bytes = storage_service.read_bytes(body["processed_file_path"])
+    with zipfile.ZipFile(io.BytesIO(processed_bytes)) as archive:
+        document_xml = archive.read("word/document.xml")
     assert (
-        b"{{ meeting_title }}" in processed_bytes
-        or b"{{meeting_title}}" in processed_bytes
+        b"{{ meeting_title }}" in document_xml or b"{{meeting_title}}" in document_xml
     )
 
 
