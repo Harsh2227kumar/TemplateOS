@@ -106,7 +106,20 @@ def get_template(
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id and template.visibility != "public":
+    has_access = False
+    
+    if current_user.role == "super_admin":
+        has_access = True
+    elif template.uploaded_by == current_user.id or template.visibility == "public":
+        has_access = True
+    elif template.visibility == "department" and current_user.department and template.uploader.department == current_user.department:
+        has_access = True
+    elif template.visibility == "organization" and current_user.organization and template.uploader.organization == current_user.organization:
+        has_access = True
+    elif template.visibility == "group" and current_user.role and template.uploader.role == current_user.role:
+        has_access = True
+
+    if not has_access:
         raise HTTPException(status_code=403, detail="You do not have access to this template")
     return template
 
