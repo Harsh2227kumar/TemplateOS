@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { AlertTriangle, ArrowLeft, ArrowRight, Braces, RefreshCw, ScanSearch } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Braces, Eraser, RefreshCw, ScanSearch } from "lucide-react";
 
 function MonoKey({ name }: { name: string }) {
   return (
@@ -98,7 +98,7 @@ function WarningsPanel({ warnings }: { warnings: DetectionWarnings }) {
               Some placeholders couldn't be parsed for document generation.
             </p>
             <p className="mt-1">
-              Fix the invalid names above (Template Cleaning, Phase 2) so the template will fill
+              Fix the invalid names above via Template Cleaning so the template will fill
               correctly. Detection still succeeded via a text-scan fallback.
             </p>
           </div>
@@ -127,7 +127,7 @@ function WarningsPanel({ warnings }: { warnings: DetectionWarnings }) {
             </ul>
             <p className="mt-2">
               These placeholders were skipped and not added as fields. Fix them in the DOCX or
-              convert them via Template Cleaning (Phase 2).
+              convert them via Template Cleaning.
             </p>
           </div>
         )}
@@ -303,8 +303,13 @@ export function PlaceholderReviewPage() {
         <EmptyState
           icon={Braces}
           title="No placeholders found"
-          description="This DOCX doesn't contain any {{placeholders}} yet. Use Template Cleaning to convert sample text into reusable placeholders — coming in Phase 2."
-          actionLabel="Template Cleaning"
+          description="This DOCX doesn't contain any {{placeholders}} yet. Use Template Cleaning to convert its sample text into reusable placeholders."
+          actionLabel="Clean This Template"
+          onAction={
+            isOwner
+              ? () => navigate(`/templates/${template.id}/clean`)
+              : undefined
+          }
         />
       ) : (
         <Card>
@@ -338,6 +343,16 @@ export function PlaceholderReviewPage() {
           <Button className="gap-2" onClick={() => navigate(`/templates/${template.id}/fields`)}>
             Continue to Field Setup
             <ArrowRight className="h-4 w-4" />
+          </Button>
+        )}
+        {isOwner && (
+          <Button
+            variant={fieldCount > 0 ? "outline" : "default"}
+            className="gap-2"
+            onClick={() => navigate(`/templates/${template.id}/clean`)}
+          >
+            <Eraser className="h-4 w-4" />
+            Clean Template
           </Button>
         )}
         <Button variant="outline" onClick={() => navigate(`/templates/${template.id}`)}>
