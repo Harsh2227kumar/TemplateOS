@@ -93,6 +93,44 @@ export interface TemplateResponse {
   updated_at: string;
 }
 
+export interface TemplateField {
+  id: number;
+  template_id: number;
+  field_name: string;
+  field_label: string | null;
+  field_type: string;
+  default_value: string | null;
+  is_required: boolean;
+  description: string | null;
+  example_value: string | null;
+  validation_rule: string | null;
+  section: string | null;
+  ai_enabled: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DetectionWarnings {
+  duplicates: { key: string; count: number }[];
+  invalid_names: { raw: string; suggested_key: string; count: number; reason: string }[];
+  parse_error: string | null;
+}
+
+export interface PlaceholderDetectionResponse {
+  template_id: number;
+  status: string;
+  already_detected: boolean;
+  detected_fields: TemplateField[];
+  warnings: DetectionWarnings;
+  summary: {
+    total_matches: number;
+    unique_valid: number;
+    invalid_count: number;
+    duplicate_count: number;
+  };
+}
+
 export const templatesApi = {
   getLibrary: async (token: string, params?: {
     search?: string;
@@ -121,6 +159,18 @@ export const templatesApi = {
 
   getMyTemplates: async (token: string): Promise<TemplateListItem[]> => {
     return request<TemplateListItem[]>("/templates/", {}, token);
+  },
+
+  detectPlaceholders: async (token: string, id: number, force = false): Promise<PlaceholderDetectionResponse> => {
+    return request<PlaceholderDetectionResponse>(
+      `/templates/${id}/detect-placeholders${force ? "?force=true" : ""}`,
+      { method: "POST" },
+      token,
+    );
+  },
+
+  getFields: async (token: string, id: number): Promise<TemplateField[]> => {
+    return request<TemplateField[]>(`/templates/${id}/fields`, {}, token);
   },
 
   upload: async (
