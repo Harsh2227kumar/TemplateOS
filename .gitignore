@@ -36,3 +36,6 @@ coverage/
 .Python
 *.egg-info/
 *.egg
+
+# Local AI tool config
+opencode.json

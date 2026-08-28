@@ -1087,6 +1087,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0021
+
+- Date: 2026-08-28
+- Member: Member 1 (AI)
+- Branch: feature/placeholder-detection
+- Push status: before push
+- Range covered: after Checkpoint 0020 -> 2026-08-28
+
+#### Summary
+
+- Implemented the V1.3 Phase 1 Member 1 frontend slice: the owner-facing Placeholder Detection UI (API client methods, owner-aware detail page actions, Placeholder Review page with warnings, and routing).
+
+#### Completed Tasks
+
+- Added `TemplateField`, `DetectionWarnings`, and `PlaceholderDetectionResponse` types to the frontend API client.
+- Added `templatesApi.detectPlaceholders(token, id, force)` (`POST /templates/{id}/detect-placeholders`) and `templatesApi.getFields(token, id)` (`GET /templates/{id}/fields`) to the frontend API client.
+- Replaced the disabled "Use This Template" stub on the template detail page with an owner-only, status-aware config action: `uploaded` -> "Detect Placeholders", `placeholder_detected` -> "Review Fields", `field_configured`/`active` -> "Edit Fields".
+- Rendered the template status as a colored Badge on the detail page; non-owners keep the read-only view.
+- Built the Placeholder Review page (`/templates/:id/placeholders`): detect trigger when no fields exist, ordered detected-fields list (display_order, label with field_name fallback, type Badge, mono `{{key}}`, Required badge), warnings panel (duplicate, invalid-name, parse_error), confirm-guarded Re-detect, Phase 2 empty state, and loading/403/404 error states.
+- Added the shadcn `Dialog` component (Radix) and used it to confirm re-detection (replaces fields).
+- Created the Field Setup page stub for the Phase 3 route (`/templates/:id/fields`).
+- Registered `/templates/:id/placeholders` and `/templates/:id/fields` routes in `App.tsx` inside `ProtectedRoute` + `DashboardLayout`.
+- Verified `npm run build` passes with strict TypeScript.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (modified — types + 2 API methods)
+- `frontend/src/pages/template-detail-page.tsx` (modified — owner-aware actions + status badge)
+- `frontend/src/pages/placeholder-review-page.tsx` (new)
+- `frontend/src/pages/field-setup-page.tsx` (new — Phase 3 stub)
+- `frontend/src/pages/dashboard-page.tsx` (modified — token bug fix)
+- `frontend/src/components/ui/dialog.tsx` (new)
+- `frontend/src/App.tsx` (modified — 2 new routes)
+- `frontend/package.json`, `package-lock.json` (added `@radix-ui/react-dialog`)
+
+#### Features Added / Updated / Removed
+
+- Added: Placeholder Review page with detection trigger, detected-fields list, and warnings panel; owner-only config actions on the template detail page; `Dialog` UI primitive; detection API client methods and types; Field Setup stub route.
+- Updated: Template detail page status Badge and primary action; frontend API client.
+- Removed: Disabled "Use This Template" stub button (filling a form from a template is V1.4; replaced with owner config action).
+
+#### Issues Fixed
+
+- Fixed pre-existing build-breaking bug in `dashboard-page.tsx`: destructured `token` from `useAuth()` (not exposed by the auth context); now reads `localStorage.getItem("templateos_access_token")` per project convention.
+- Restored `project-change-tracker.md` after the working copy was accidentally wiped to a single line.
+
+#### Notes For Next Push
+
+- Backend endpoints `POST /templates/{id}/detect-placeholders` and `GET /templates/{id}/fields` (Member 2, V1.3 Phase 1) are not yet implemented; the review page is built against the agreed typed shapes and needs end-to-end wiring once available.
+- Detection warnings render only for the current detection session (the backend does not persist warnings with the fields).
+- The Field Setup page is a stub pending V1.3 Phase 3.
+
+---
+
 ### Checkpoint 0022
 
 - Date: 2026-08-28
