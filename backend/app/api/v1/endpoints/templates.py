@@ -6,6 +6,10 @@ from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, sta
 
 from app.api.deps import CurrentUser, DbSession
 from app.services import docx_parser
+from app.services.docx_cleaner import (
+    apply_replacements_with_results,
+    get_renderable_path,
+)
 from app.services.storage_service import (
     StorageError,
     StoredFileNotFoundError,
@@ -13,12 +17,15 @@ from app.services.storage_service import (
 )
 from app.services.template_access import user_can_view_template
 from app.crud.template_crud import (
+    advance_status,
     create_template,
     get_templates_by_user,
     get_template_by_id,
     get_library_templates,
+    set_processed_path,
 )
 from app.crud.template_field_crud import (
+    append_field,
     bulk_create_fields,
     delete_fields_by_template,
     get_fields_by_template,
@@ -37,6 +44,12 @@ from app.schemas.template_field import (
     PlaceholderDetectionResponse,
     TemplateFieldCreate,
     TemplateFieldRead,
+)
+from app.schemas.cleaning import (
+    CleanTemplateRequest,
+    CleanTemplateResponse,
+    CleanWarnings,
+    ReplacementResult,
 )
 from app.models.template import Template
 from app.models.template_field import TemplateField
@@ -372,4 +385,175 @@ async def detect_placeholders(
             invalid_count=len(result.invalid_names),
             duplicate_count=len(result.duplicates),
         ),
+    )
+
+
+@router.get("/{template_id}/content")
+async def get_template_content(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """
+    Return the ORIGINAL DOCX's text segments (body, tables, headers, footers)
+    so the owner can select sample text for cleaning. View-access protected.
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if not user_can_view_template(current_user, template):
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this template"
+        )
+    if not template.original_file_path:
+        raise HTTPException(status_code=409, detail="Template has no source file")
+
+    try:
+        docx_bytes = await asyncio.to_thread(
+            storage_service.read_bytes, template.original_file_path
+        )
+    except StoredFileNotFoundError:
+        raise HTTPException(
+            status_code=409, detail="Source file missing on disk"
+        ) from None
+
+    try:
+        segments = await asyncio.to_thread(
+            docx_parser.extract_text_segments, docx_bytes
+        )
+    except Exception as e:
+        logger.error(f"Content extraction failed for template {template_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not read the template document"
+        ) from None
+
+    return {
+        "template_id": template_id,
+        "segments": segments,
+        "has_processed": template.processed_file_path is not None,
+    }
+
+
+@router.post("/{template_id}/clean", response_model=CleanTemplateResponse)
+async def clean_template(
+    template_id: int,
+    request: CleanTemplateRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> CleanTemplateResponse:
+    """
+    Convert owner-confirmed sample text into {{placeholders}} in a NEW
+    processed DOCX (templates/processed/). The original file is never
+    modified. Owner-only, manual-confirmation required. Re-cleaning always
+    regenerates from the ORIGINAL, so replacements never stack.
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if template.uploaded_by != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only the template owner can clean this template"
+        )
+
+    if not request.confirm:
+        raise HTTPException(status_code=400, detail="Cleaning must be confirmed")
+
+    if not request.replacements:
+        raise HTTPException(
+            status_code=400, detail="At least one replacement is required"
+        )
+
+    if not template.original_file_path:
+        raise HTTPException(status_code=409, detail="Template has no source file")
+
+    logger.info(
+        f"Cleaning started for template {template_id}: "
+        f"{len(request.replacements)} replacement(s) from user {current_user.id}"
+    )
+
+    # ALWAYS start from the original bytes (re-clean regenerates, never stacks).
+    try:
+        original_bytes = await asyncio.to_thread(
+            storage_service.read_bytes, template.original_file_path
+        )
+    except StoredFileNotFoundError:
+        raise HTTPException(
+            status_code=409, detail="Source file missing on disk"
+        ) from None
+
+    try:
+        processed_bytes, results = await asyncio.to_thread(
+            apply_replacements_with_results,
+            original_bytes,
+            request.replacements,
+        )
+    except Exception as e:
+        logger.error(f"Cleaning failed for template {template_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not apply the requested replacements"
+        ) from None
+
+    # Save the processed copy (separate file; original untouched).
+    stored = await asyncio.to_thread(
+        storage_service.save_bytes,
+        "templates_processed",
+        template.original_filename or "template.docx",
+        processed_bytes,
+    )
+    template = set_processed_path(db, template, stored.path)
+
+    # Upsert a field per MATCHED replacement (append_field skips duplicates).
+    created_fields = []
+    for replacement, result in zip(request.replacements, results):
+        if not result.matched:
+            continue
+        field = append_field(
+            db,
+            template_id,
+            TemplateFieldCreate(
+                field_name=replacement.placeholder_key,
+                field_label=replacement.field_label
+                or docx_parser.humanize_key(replacement.placeholder_key),
+                field_type=replacement.field_type or "text",
+                example_value=replacement.sample_text,
+                is_required=True,
+                section=replacement.section,
+                source="cleaned",
+            ),
+        )
+        if field is not None:
+            created_fields.append(field)
+
+    # Status: field_configured when marked, else placeholder_detected —
+    # advance_status is forward-only and never downgrades.
+    target = "field_configured" if request.mark_configured else "placeholder_detected"
+    template = advance_status(db, template, target)
+
+    unmatched = [
+        r.sample_text for r in results if not r.matched and r.reason != "invalid_key"
+    ]
+    invalid_keys = [r.placeholder_key for r in results if r.reason == "invalid_key"]
+    logger.info(
+        f"Cleaning finished for template {template_id}: "
+        f"{len(created_fields)} field(s) created, "
+        f"{len(unmatched)} unmatched, {len(invalid_keys)} invalid key(s)"
+    )
+
+    return CleanTemplateResponse(
+        template_id=template_id,
+        status=template.status,
+        processed_file_path=stored.path,
+        created_fields=created_fields,
+        results=[
+            ReplacementResult(
+                placeholder_key=result.placeholder_key,
+                sample_text=result.sample_text,
+                occurrences=result.occurrences,
+                matched=result.matched,
+                reason=result.reason,
+            )
+            for result in results
+        ],
+        warnings=CleanWarnings(unmatched=unmatched, invalid_keys=invalid_keys),
     )
