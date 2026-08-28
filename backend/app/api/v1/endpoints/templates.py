@@ -163,6 +163,51 @@ def get_template(
     return template
 
 
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_template(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> None:
+    """
+    Permanently delete a template: the DB record (fields cascade) and every
+    stored file (original + processed). Super-admin only — a destructive,
+    irreversible action, so even the template owner cannot perform it.
+    """
+    if current_user.role != "super_admin":
+        raise HTTPException(
+            status_code=403, detail="Only a super admin can delete templates"
+        )
+
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    original_path = template.original_file_path
+    processed_path = template.processed_file_path
+
+    # DB first (fields cascade via ORM); file deletion is best-effort afterwards
+    # so a storage hiccup can never leave a template row pointing at deleted files.
+    db.delete(template)
+    db.commit()
+
+    for relative_path in (original_path, processed_path):
+        if not relative_path:
+            continue
+        try:
+            await asyncio.to_thread(storage_service.delete_file, relative_path)
+        except StorageError:
+            logger.warning(
+                f"Template {template_id} deleted from DB but file could not be "
+                f"removed from storage: {relative_path}"
+            )
+
+    logger.info(
+        f"Super admin {current_user.id} deleted template {template_id} "
+        f"(original={bool(original_path)}, processed={bool(processed_path)})"
+    )
+
+
 @router.get("/{template_id}/fields", response_model=list[TemplateFieldRead])
 def get_template_fields(
     template_id: int,
