@@ -1,7 +1,8 @@
-from sqlalchemy import select, or_, func
+from sqlalchemy import select, or_, and_, func
 from sqlalchemy.orm import Session
 
 from app.models.template import Template
+from app.models.user import User
 from app.schemas.template import TemplateCreate
 
 def create_template(db: Session, data: TemplateCreate) -> Template:
@@ -94,12 +95,47 @@ def get_library_templates(
 
     Returns: (list_of_templates, total_count)
     """
-    visibility_filter = or_(
-        Template.uploaded_by == user_id,
-        Template.visibility == "public",
-    )
+    user = db.get(User, user_id)
+    if not user:
+        return [], 0
 
-    query = select(Template).where(visibility_filter)
+    if user.role != "super_admin":
+        conditions = [
+            Template.uploaded_by == user_id,
+            Template.visibility == "public",
+        ]
+        
+        if user.department:
+            conditions.append(
+                and_(
+                    Template.visibility == "department",
+                    Template.uploader.has(User.department == user.department)
+                )
+            )
+            
+        if user.organization:
+            conditions.append(
+                and_(
+                    Template.visibility == "organization",
+                    Template.uploader.has(User.organization == user.organization)
+                )
+            )
+            
+        # Optional: handling "group" visibility if user has a role/group
+        if user.role:
+            conditions.append(
+                and_(
+                    Template.visibility == "group",
+                    Template.uploader.has(User.role == user.role)
+                )
+            )
+
+        visibility_filter = or_(*conditions)
+
+    if user.role == "super_admin":
+        query = select(Template)
+    else:
+        query = select(Template).where(visibility_filter)
 
     if search:
         safe_search = _escape_like(search)
