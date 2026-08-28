@@ -1278,6 +1278,44 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0027
+
+- Date: 2026-08-28
+- Member: Member 2 (AI)
+- Branch: feature/super-admin-template-delete
+- Push status: before push
+- Range covered: after Checkpoint 0025 -> 2026-08-28
+
+#### Summary
+
+- Added super-admin template deletion: `DELETE /api/v1/templates/{id}` permanently removes the template record (fields cascade) and every stored file (original + processed). Everyone else — including the template owner — gets 403.
+
+#### Completed Tasks
+
+- Added `DELETE /api/v1/templates/{template_id}` (204 No Content) in `templates.py`: super-admin-only guard (403 otherwise), 404 for missing templates; deletes the DB row first (ORM cascades `template_fields` via the relationship's `delete-orphan`), then removes `original_file_path` + `processed_file_path` from storage best-effort (`asyncio.to_thread`, `StorageError` logged as a warning so a storage hiccup never leaves a template row pointing at deleted files); structured logging of the deletion.
+- New `tests/test_template_delete.py`: super-admin happy path (204, empty body, record gone, fields cascaded, original file gone from disk, subsequent GET 404), processed copy also removed (created via the clean endpoint), owner 403, other-user 403, missing 404, unauthenticated 401, double-delete second call 404.
+- Full suite: 106 passed (99 prior + 7 new).
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py` (DELETE route)
+- `backend/tests/test_template_delete.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: irreversible super-admin template deletion covering both the database record (with cascading fields) and stored DOCX files.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Frontend follow-up (separate PR into `frontend`): super-admin-only Delete button on the template detail page behind a type-"confirm" dialog; `templatesApi.deleteTemplate` must handle the 204 empty body.
+- Deletion order is deliberate: DB first, files second — orphan files are harmless, a row pointing at deleted files is not.
+
+---
+
 ## Entry Template
 
 ```md
