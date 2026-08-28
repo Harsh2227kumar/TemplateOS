@@ -1136,6 +1136,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0023
+
+- Date: 2026-08-28
+- Member: Member 2 (AI)
+- Branch: feature/backend-docx-placeholder-detection
+- Push status: before push
+- Range covered: after Checkpoint 0022 -> 2026-08-28
+
+#### Summary
+
+- Implemented V1.3 Phase 1 placeholder detection backend: the pure DOCX parsing service (python-docx text extraction + docxtpl authoritative variable detection), the reusable view-access helper, and the owner-only detect-placeholders + view-access fields-read endpoints persisting through Member 3's CRUD.
+
+#### Completed Tasks
+
+- Added `docxtpl==0.20.2` and `python-docx==1.1.2` to `backend/requirements.txt` (docxtpl adopted in V1.3 for detect/generate parity — the same Jinja2 engine that renders in V1.6).
+- Created `app/services/docx_parser.py` (pure, no DB): `extract_text_segments` (body in true document order, table cells with nested recursion, section headers/footers — one shared DocxTemplate parse), `get_template_variables` (docxtpl `get_undeclared_template_variables`, catches Jinja `TemplateSyntaxError` and degrades to `(None, message)` — never 500s), `PLACEHOLDER_PATTERN` / `VALID_KEY_PATTERN`, `detect_placeholders` (regex scan for ordering/duplicates/malformed tokens + docxtpl parity intersection with regex-key-valid fallback and `parse_warning`), plus `suggest_key` / `humanize_key` helpers.
+- Created `app/services/template_access.py`: extracted the inline `has_access` ladder from `get_template` into `user_can_view_template(user, template)` (identical behavior); reused by `get_template` and the new fields endpoint.
+- Added `POST /api/v1/templates/{template_id}/detect-placeholders?force=` — owner-only (403), 404 missing template, 409 no source file / file missing on disk, storage read + CPU-bound parsing via `asyncio.to_thread`, idempotent without force (returns existing fields + fresh warnings, `already_detected=true`), force replaces fields via `delete_fields_by_template` + `bulk_create_fields`, persists `field_name`/humanized `field_label`/`text`/required/first-seen `display_order`, advances status to `placeholder_detected` only from `uploaded`/`placeholder_detected`, returns `PlaceholderDetectionResponse` (fields + warnings + summary), logs start/finish with counts.
+- Added `GET /api/v1/templates/{template_id}/fields` — view access via `user_can_view_template`, returns `list[TemplateFieldRead]` ordered by `display_order`.
+- Fixed docxtpl lazy initialization: `DocxTemplate.init_docx()` must be called before accessing `.docx`.
+- All 8 previously-skipped endpoint contract tests in `tests/test_placeholder_detection.py` activated and pass; full suite 75 passed, 0 skipped.
+
+#### Code Changes
+
+- `backend/requirements.txt` (docxtpl + python-docx)
+- `backend/app/services/docx_parser.py` (new)
+- `backend/app/services/template_access.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (refactored `get_template` to use the helper; added 2 routes)
+
+#### Features Added / Updated / Removed
+
+- Added: placeholder detection service with detect/generate parity; owner-only detection endpoint with idempotency and force re-detect; ordered fields-read endpoint with RBAC view access; reusable `user_can_view_template` helper.
+- Updated: `get_template` now delegates to the shared access helper (behavior unchanged).
+- Removed: inline `has_access` ladder duplication in `templates.py`.
+
+#### Issues Fixed
+
+- None (the docxtpl `init_docx()` lazy-init issue was found and fixed within this same change).
+
+#### Notes For Next Push
+
+- The V1.3 Phase 1 backend is feature-complete end to end (parser -> endpoint -> persistence); Member 1's frontend PR #57 (`feature/placeholder-detection`) can now be verified against these real endpoints and amended if any response-shape fixes are needed before merging into `frontend`.
+- Deploy note: `pip install -r requirements.txt` (new deps) — no new migration in this slice.
+- `extract_text_segments` / `get_template_variables` / `PLACEHOLDER_PATTERN` / `VALID_KEY_PATTERN` are reused by Phase 2 (cleaning) and Phase 4 (AI context excerpt).
+
+---
+
 ## Entry Template
 
 ```md
