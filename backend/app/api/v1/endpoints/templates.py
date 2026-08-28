@@ -5,12 +5,23 @@ from typing import Annotated
 from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
 
 from app.api.deps import CurrentUser, DbSession
-from app.services.storage_service import StorageError, storage_service
+from app.services import docx_parser
+from app.services.storage_service import (
+    StorageError,
+    StoredFileNotFoundError,
+    storage_service,
+)
+from app.services.template_access import user_can_view_template
 from app.crud.template_crud import (
     create_template,
     get_templates_by_user,
     get_template_by_id,
     get_library_templates,
+)
+from app.crud.template_field_crud import (
+    bulk_create_fields,
+    delete_fields_by_template,
+    get_fields_by_template,
 )
 from app.schemas.template import (
     TemplateCreate,
@@ -18,24 +29,47 @@ from app.schemas.template import (
     TemplateListItem,
     TemplateLibraryResponse,
 )
+from app.schemas.template_field import (
+    DetectionSummary,
+    DetectionWarnings,
+    DuplicateFieldWarning,
+    InvalidFieldNameWarning,
+    PlaceholderDetectionResponse,
+    TemplateFieldCreate,
+    TemplateFieldRead,
+)
 from app.models.template import Template
+from app.models.template_field import TemplateField
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 ALLOWED_CATEGORIES = {
-    "notice", "mom", "report", "application",
-    "letter", "certificate", "proposal", "invoice", "custom",
+    "notice",
+    "mom",
+    "report",
+    "application",
+    "letter",
+    "certificate",
+    "proposal",
+    "invoice",
+    "custom",
 }
 ALLOWED_VISIBILITY = {"private", "public", "organization", "department", "group"}
 ALLOWED_STATUSES = {
-    "uploaded", "placeholder_detected", "field_configured",
-    "active", "archived", "locked",
+    "uploaded",
+    "placeholder_detected",
+    "field_configured",
+    "active",
+    "archived",
+    "locked",
 }
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
-def validate_filter_param(value: str | None, allowed: set[str], param_name: str) -> None:
+def validate_filter_param(
+    value: str | None, allowed: set[str], param_name: str
+) -> None:
     """Validate a filter parameter against a set of allowed values."""
     if value is not None and value not in allowed:
         raise HTTPException(
@@ -48,11 +82,14 @@ def validate_filter_param(value: str | None, allowed: set[str], param_name: str)
 # IMPORTANT: /library must be declared BEFORE /{template_id}
 # so FastAPI does not try to parse "library" as an integer.
 
+
 @router.get("/library", response_model=TemplateLibraryResponse)
 def list_library_templates(
     current_user: CurrentUser,
     db: DbSession,
-    search: str | None = Query(None, max_length=100, description="Search by template name"),
+    search: str | None = Query(
+        None, max_length=100, description="Search by template name"
+    ),
     category: str | None = Query(None, description="Filter by category"),
     visibility: str | None = Query(None, description="Filter by visibility"),
     status: str | None = Query(None, description="Filter by status"),
@@ -106,25 +143,35 @@ def get_template(
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    has_access = False
-    
-    if current_user.role == "super_admin":
-        has_access = True
-    elif template.uploaded_by == current_user.id or template.visibility == "public":
-        has_access = True
-    elif template.visibility == "department" and current_user.department and template.uploader.department == current_user.department:
-        has_access = True
-    elif template.visibility == "organization" and current_user.organization and template.uploader.organization == current_user.organization:
-        has_access = True
-    elif template.visibility == "group" and current_user.role and template.uploader.role == current_user.role:
-        has_access = True
-
-    if not has_access:
-        raise HTTPException(status_code=403, detail="You do not have access to this template")
+    if not user_can_view_template(current_user, template):
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this template"
+        )
     return template
 
 
+@router.get("/{template_id}/fields", response_model=list[TemplateFieldRead])
+def get_template_fields(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> list[TemplateField]:
+    """
+    Return a template's detected fields, ordered by display_order.
+    Reader access: anyone who can already view the template.
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if not user_can_view_template(current_user, template):
+        raise HTTPException(
+            status_code=403, detail="You do not have access to this template"
+        )
+    return get_fields_by_template(db, template_id)
+
+
 # --- POST endpoints ---
+
 
 @router.post(
     "/upload",
@@ -160,13 +207,15 @@ async def upload_template(
     if not clean_name:
         raise HTTPException(status_code=400, detail="Template name is required")
     if len(clean_name) > 100:
-        raise HTTPException(status_code=400, detail="Template name must be 100 characters or fewer")
+        raise HTTPException(
+            status_code=400, detail="Template name must be 100 characters or fewer"
+        )
 
     # 5. Validate category
     if category not in ALLOWED_CATEGORIES:
         raise HTTPException(
-            status_code=400, 
-            detail="Invalid category. Allowed: notice, mom, report, application, letter, certificate, proposal, invoice, custom"
+            status_code=400,
+            detail="Invalid category. Allowed: notice, mom, report, application, letter, certificate, proposal, invoice, custom",
         )
 
     # 6. Validate visibility
@@ -203,8 +252,124 @@ async def upload_template(
         template = create_template(db, template_data)
         logger.info(f"Created template record {template.id} for user {current_user.id}")
     except Exception as e:
-        logger.error(f"DB error while creating template record: {e}. Rolling back file.")
+        logger.error(
+            f"DB error while creating template record: {e}. Rolling back file."
+        )
         await asyncio.to_thread(storage_service.delete_file, stored.path)
-        raise HTTPException(status_code=500, detail="Could not save template record") from None
+        raise HTTPException(
+            status_code=500, detail="Could not save template record"
+        ) from None
 
     return template
+
+
+@router.post(
+    "/{template_id}/detect-placeholders",
+    response_model=PlaceholderDetectionResponse,
+)
+async def detect_placeholders(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    force: bool = Query(False, description="Replace existing fields with a fresh scan"),
+) -> PlaceholderDetectionResponse:
+    """
+    Detect every {{placeholder}} in the template's original DOCX and persist
+    the valid ones as ordered template_fields. Read-only on the DOCX.
+
+    Owner-only. Idempotent: re-running without force returns the existing
+    fields plus fresh warnings; force=true replaces the stored fields.
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    if template.uploaded_by != current_user.id:
+        raise HTTPException(
+            status_code=403, detail="Only the template owner can detect placeholders"
+        )
+
+    if not template.original_file_path:
+        raise HTTPException(status_code=409, detail="Template has no source file")
+
+    logger.info(
+        f"Placeholder detection started for template {template_id} (force={force})"
+    )
+    try:
+        docx_bytes = await asyncio.to_thread(
+            storage_service.read_bytes, template.original_file_path
+        )
+    except StoredFileNotFoundError:
+        raise HTTPException(
+            status_code=409, detail="Source file missing on disk"
+        ) from None
+
+    try:
+        result = await asyncio.to_thread(docx_parser.detect_placeholders, docx_bytes)
+    except Exception as e:
+        logger.error(f"Placeholder detection failed for template {template_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not parse the template document"
+        ) from None
+
+    existing_fields = get_fields_by_template(db, template_id)
+    already_detected = bool(existing_fields) and not force
+
+    if already_detected:
+        # Do not duplicate: return the existing fields with fresh warnings.
+        detected_fields = existing_fields
+    else:
+        if force:
+            delete_fields_by_template(db, template_id)
+        field_payloads = [
+            TemplateFieldCreate(
+                field_name=field.key,
+                field_label=docx_parser.humanize_key(field.key),
+                field_type="text",
+                is_required=True,
+                display_order=field.display_order,
+            )
+            for field in result.valid_fields
+        ]
+        detected_fields = bulk_create_fields(db, template_id, field_payloads)
+
+        # Advance the status without ever downgrading field_configured/active.
+        if template.status in ("uploaded", "placeholder_detected"):
+            template.status = "placeholder_detected"
+            db.commit()
+            db.refresh(template)
+
+    logger.info(
+        f"Placeholder detection finished for template {template_id}: "
+        f"{result.unique_valid} valid, {len(result.invalid_names)} invalid, "
+        f"{len(result.duplicates)} duplicates (already_detected={already_detected})"
+    )
+
+    return PlaceholderDetectionResponse(
+        template_id=template_id,
+        status=template.status,
+        already_detected=already_detected,
+        detected_fields=detected_fields,
+        warnings=DetectionWarnings(
+            duplicates=[
+                DuplicateFieldWarning(key=duplicate.key, count=duplicate.count)
+                for duplicate in result.duplicates
+            ],
+            invalid_names=[
+                InvalidFieldNameWarning(
+                    raw=invalid.raw,
+                    suggested_key=invalid.suggested_key,
+                    count=invalid.count,
+                    reason=invalid.reason,
+                )
+                for invalid in result.invalid_names
+            ],
+            parse_error=result.parse_warning,
+        ),
+        summary=DetectionSummary(
+            total_matches=result.total_matches,
+            unique_valid=result.unique_valid,
+            invalid_count=len(result.invalid_names),
+            duplicate_count=len(result.duplicates),
+        ),
+    )
