@@ -49,6 +49,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     }
     throw new ApiError(message, response.status);
   }
+  // 204 No Content (e.g. DELETE endpoints) has no body to parse.
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -237,6 +239,10 @@ export const templatesApi = {
       { method: "POST", body: JSON.stringify(payload) },
       token,
     );
+  },
+
+  deleteTemplate: async (token: string, id: number): Promise<void> => {
+    return request<void>(`/templates/${id}`, { method: "DELETE" }, token);
   },
 
   upload: async (
