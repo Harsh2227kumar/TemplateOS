@@ -1048,6 +1048,45 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0020
+
+- Date: 2026-08-28
+- Member: AI Assistant
+- Branch: feature/backend-template-rbac
+- Push status: before push
+- Range covered: after Checkpoint 0019 -> 2026-08-28
+
+#### Summary
+
+- Implemented Role-Based Access Control (RBAC) visibility filtering for templates in the backend.
+
+#### Completed Tasks
+
+- Updated `get_template` endpoint to check user's role, department, organization, and group against template visibility settings.
+- Updated `get_library_templates` CRUD operation to dynamically filter templates based on the user's role, department, organization, and group.
+- Granted `super_admin` role access to all templates regardless of visibility settings.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py`
+- `backend/app/crud/template_crud.py`
+
+#### Features Added / Updated / Removed
+
+- Added: Dynamic RBAC visibility filtering for templates based on user attributes (department, organization, group, role).
+- Updated: `get_template` and `get_library_templates` to enforce visibility rules.
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Needs corresponding frontend tests or updates if UI behavior depends on these new visibility rules.
+
+---
+
 ## Entry Template
 
 ```md
