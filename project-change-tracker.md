@@ -1087,6 +1087,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0021
+
+- Date: 2026-08-28
+- Member: Member 1 (AI)
+- Branch: feature/placeholder-detection
+- Push status: before push
+- Range covered: after Checkpoint 0020 -> 2026-08-28
+
+#### Summary
+
+- Implemented the V1.3 Phase 1 Member 1 frontend slice: the owner-facing Placeholder Detection UI (API client methods, owner-aware detail page actions, Placeholder Review page with warnings, and routing).
+
+#### Completed Tasks
+
+- Added `TemplateField`, `DetectionWarnings`, and `PlaceholderDetectionResponse` types to the frontend API client.
+- Added `templatesApi.detectPlaceholders(token, id, force)` (`POST /templates/{id}/detect-placeholders`) and `templatesApi.getFields(token, id)` (`GET /templates/{id}/fields`) to the frontend API client.
+- Replaced the disabled "Use This Template" stub on the template detail page with an owner-only, status-aware config action: `uploaded` -> "Detect Placeholders", `placeholder_detected` -> "Review Fields", `field_configured`/`active` -> "Edit Fields".
+- Rendered the template status as a colored Badge on the detail page; non-owners keep the read-only view.
+- Built the Placeholder Review page (`/templates/:id/placeholders`): detect trigger when no fields exist, ordered detected-fields list (display_order, label with field_name fallback, type Badge, mono `{{key}}`, Required badge), warnings panel (duplicate, invalid-name, parse_error), confirm-guarded Re-detect, Phase 2 empty state, and loading/403/404 error states.
+- Added the shadcn `Dialog` component (Radix) and used it to confirm re-detection (replaces fields).
+- Created the Field Setup page stub for the Phase 3 route (`/templates/:id/fields`).
+- Registered `/templates/:id/placeholders` and `/templates/:id/fields` routes in `App.tsx` inside `ProtectedRoute` + `DashboardLayout`.
+- Verified `npm run build` passes with strict TypeScript.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (modified — types + 2 API methods)
+- `frontend/src/pages/template-detail-page.tsx` (modified — owner-aware actions + status badge)
+- `frontend/src/pages/placeholder-review-page.tsx` (new)
+- `frontend/src/pages/field-setup-page.tsx` (new — Phase 3 stub)
+- `frontend/src/pages/dashboard-page.tsx` (modified — token bug fix)
+- `frontend/src/components/ui/dialog.tsx` (new)
+- `frontend/src/App.tsx` (modified — 2 new routes)
+- `frontend/package.json`, `package-lock.json` (added `@radix-ui/react-dialog`)
+
+#### Features Added / Updated / Removed
+
+- Added: Placeholder Review page with detection trigger, detected-fields list, and warnings panel; owner-only config actions on the template detail page; `Dialog` UI primitive; detection API client methods and types; Field Setup stub route.
+- Updated: Template detail page status Badge and primary action; frontend API client.
+- Removed: Disabled "Use This Template" stub button (filling a form from a template is V1.4; replaced with owner config action).
+
+#### Issues Fixed
+
+- Fixed pre-existing build-breaking bug in `dashboard-page.tsx`: destructured `token` from `useAuth()` (not exposed by the auth context); now reads `localStorage.getItem("templateos_access_token")` per project convention.
+- Restored `project-change-tracker.md` after the working copy was accidentally wiped to a single line.
+
+#### Notes For Next Push
+
+- Backend endpoints `POST /templates/{id}/detect-placeholders` and `GET /templates/{id}/fields` (Member 2, V1.3 Phase 1) are not yet implemented; the review page is built against the agreed typed shapes and needs end-to-end wiring once available.
+- Detection warnings render only for the current detection session (the backend does not persist warnings with the fields).
+- The Field Setup page is a stub pending V1.3 Phase 3.
+
+---
+
 ### Checkpoint 0022
 
 - Date: 2026-08-28
@@ -1278,6 +1332,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0026
+
+- Date: 2026-08-28
+- Member: Member 1 (AI)
+- Branch: feature/frontend-template-cleaning
+- Push status: before push
+- Range covered: after Checkpoint 0023 (frontend branch) -> 2026-08-28
+- Note: Checkpoints 0024 (P2 M3) and 0025 (P2 M2) live on the `backend` branch and are not merged here yet; numbering continues from the global sequence.
+
+#### Summary
+
+- Implemented the V1.3 Phase 2 Member 1 frontend slice: the owner-facing Template Cleaning UI — render document text segments, select sample values, stage replacements with before→after preview, and apply the cleaning behind a confirmation.
+
+#### Completed Tasks
+
+- Extended `frontend/src/lib/api.ts`: `DocSegment`, `TemplateContent`, `PlaceholderReplacement`, `ReplacementResult`, `CleanResponse`, `CleanTemplatePayload` types + `templatesApi.getContent(token, id)` and `templatesApi.cleanTemplate(token, id, payload)` methods; added optional `processed_file_path` to `TemplateResponse` (backend contract addition from checkpoint 0025).
+- Created `frontend/src/pages/template-cleaning-page.tsx` (route `/templates/:id/clean`): owner-only (access notice + back link for non-owners); loads template + content in parallel (Skeleton, 403/404 error pattern); two-column responsive layout — LEFT renders text segments grouped by location (Body/Table/Header/Footer badges, mono text, whitespace-pre-wrap) with mouse/touch selection capture; RIGHT lists staged replacements (sample → `{{key}}` mono preview, type badge, label, remove) with an empty-state prompt; Convert dialog (RHF + Zod) with `placeholder_key` validated to the backend snake_case rule (mirrored error text), optional label/section, field-type Select over the MVP set, and a normalized key suggestion pre-filled from the selected text (mirrors backend `suggest_key`); duplicate staged keys rejected in-form; Apply bar with confirm dialog summarizing N conversions + original-preserved messaging (plus processed-copy-replacement note when one exists); result view with success banner (created-field count), created-fields list (label, `{{key}}`, type, "was: example_value"), unmatched/invalid-key warnings, and Continue to Field Setup / Back to Template actions; ApiError surfaces via red banner with the staged list kept for retry.
+- Added the `/templates/:id/clean` route in `App.tsx` inside ProtectedRoute + DashboardLayout.
+- Entry points: owner-only "Clean Template" action on the template detail page (secondary outline button next to the config action) and on the Placeholder Review page footer; the review page's no-placeholder empty state now navigates owners to cleaning (was a disabled "coming in Phase 2" stub) and the invalid-name/parse-error copy no longer references Phase 2 as future.
+- Verified `npm run build` (strict TS + Vite) passes on the feature branch and on a combined backend+frontend integration tree.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (types + 2 methods + TemplateResponse field)
+- `frontend/src/pages/template-cleaning-page.tsx` (new)
+- `frontend/src/App.tsx` (route)
+- `frontend/src/pages/template-detail-page.tsx` (owner entry)
+- `frontend/src/pages/placeholder-review-page.tsx` (owner entry + live cleaning empty state + copy updates)
+
+#### Features Added / Updated / Removed
+
+- Added: Template Cleaning page (selection → staged replacements → confirmed apply → result), `getContent`/`cleanTemplate` API client methods and Phase 2 types, cleaning route.
+- Updated: detail + review pages expose the owner-only Clean Template entry; review empty state and warning copy now reference the shipped cleaning feature; `TemplateResponse` carries `processed_file_path`.
+- Removed: disabled "Template Cleaning (Coming soon)" stub on the review empty state.
+
+#### Issues Fixed
+
+- None (e2e setup initially used a stale local `backend` missing PR #64; refreshed before verification — no product code affected).
+
+#### Notes For Next Push
+
+- Verified live against the merged P2 backend (temp integration branch, deleted after): `GET /{id}/content` and `POST /{id}/clean` response keys match the TS types field-for-field (including `reason: null` on matched results), `TemplateResponse.processed_file_path` exposed, non-owner 403 on both endpoints, unconfirmed clean returns 400 "Cleaning must be confirmed", 99 backend tests pass on the combined tree.
+- Integration reminder: merging `backend` (with 0024/0025) into `dev` and then syncing `frontend` will union the tracker checkpoints 0024–0026 in order.
+- Phase 3 (Field Setup) will replace the `/templates/:id/fields` stub and can reuse the staged-replacement list patterns from this page.
+
+---
+
 ### Checkpoint 0027
 
 - Date: 2026-08-28
@@ -1313,6 +1414,7 @@ Add all future updates below this section.
 
 - Frontend follow-up (separate PR into `frontend`): super-admin-only Delete button on the template detail page behind a type-"confirm" dialog; `templatesApi.deleteTemplate` must handle the 204 empty body.
 - Deletion order is deliberate: DB first, files second — orphan files are harmless, a row pointing at deleted files is not.
+
 
 ---
 

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { templatesApi, TemplateListItem } from "@/lib/api";
 
 export function DashboardPage() {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const firstName = user?.full_name?.split(" ")[0] || "User";
 
@@ -17,7 +17,11 @@ export function DashboardPage() {
 
   useEffect(() => {
     async function fetchTemplates() {
-      if (!token) return;
+      const token = localStorage.getItem("templateos_access_token") || "";
+      if (!token) {
+        setTemplatesLoading(false);
+        return;
+      }
       try {
         const data = await templatesApi.getMyTemplates(token);
         setMyTemplates(data);
@@ -28,7 +32,7 @@ export function DashboardPage() {
       }
     }
     fetchTemplates();
-  }, [token]);
+  }, []);
 
   const getCategoryColor = (category: string) => {
     switch (category.toLowerCase()) {

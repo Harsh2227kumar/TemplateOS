@@ -8,6 +8,9 @@ import { UploadTemplatePage } from "./pages/upload-template-page";
 import { SignupPage } from "./pages/signup-page";
 import { TemplateLibraryPage } from "./pages/template-library-page";
 import { TemplateDetailPage } from "./pages/template-detail-page";
+import { PlaceholderReviewPage } from "./pages/placeholder-review-page";
+import { TemplateCleaningPage } from "./pages/template-cleaning-page";
+import { FieldSetupPage } from "./pages/field-setup-page";
 
 export function App() {
   return (
@@ -23,6 +26,9 @@ export function App() {
           <Route path="/upload-template" element={<UploadTemplatePage />} />
           <Route path="/templates" element={<TemplateLibraryPage />} />
           <Route path="/templates/:id" element={<TemplateDetailPage />} />
+          <Route path="/templates/:id/placeholders" element={<PlaceholderReviewPage />} />
+          <Route path="/templates/:id/clean" element={<TemplateCleaningPage />} />
+          <Route path="/templates/:id/fields" element={<FieldSetupPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
