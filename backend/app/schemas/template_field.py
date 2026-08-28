@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.models.template_field import FIELD_SOURCES, FIELD_TYPES
 
 
 class TemplateFieldBase(BaseModel):
@@ -15,10 +17,29 @@ class TemplateFieldBase(BaseModel):
     validation_rule: str | None = Field(default=None, max_length=255)
     ai_enabled: bool = Field(default=False)
     display_order: int = Field(default=0)
+    source: str = Field(default="detected", max_length=20)
+
+    @field_validator("field_type")
+    @classmethod
+    def validate_field_type(cls, value: str) -> str:
+        if value not in FIELD_TYPES:
+            raise ValueError(
+                f"Unsupported field type: {value}. Allowed: {', '.join(FIELD_TYPES)}"
+            )
+        return value
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        if value not in FIELD_SOURCES:
+            raise ValueError(
+                f"Unsupported field source: {value}. Allowed: {', '.join(FIELD_SOURCES)}"
+            )
+        return value
 
 
 class TemplateFieldCreate(TemplateFieldBase):
-    """Payload used by detection to bulk-create fields (template_id comes from the CRUD layer)."""
+    """Payload used by detection/cleaning to create fields (template_id comes from the CRUD layer)."""
 
     pass
 
@@ -37,6 +58,7 @@ class TemplateFieldUpdate(BaseModel):
     validation_rule: str | None = Field(None, max_length=255)
     ai_enabled: bool | None = None
     display_order: int | None = None
+    source: str | None = Field(None, max_length=20)
 
 
 class TemplateFieldRead(TemplateFieldBase):

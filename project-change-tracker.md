@@ -1237,6 +1237,101 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0024
+
+- Date: 2026-08-28
+- Member: Member 3 (AI)
+- Branch: feature/template-cleaning-data-layer
+- Push status: before push
+- Range covered: after Checkpoint 0023 -> 2026-08-28
+
+#### Summary
+
+- Implemented the V1.3 Phase 2 Member 3 data layer for manual template cleaning: clean request/response schemas, processed-path/status/append-field CRUD helpers, the additive `template_fields.source` provenance column, and the test suite (cleaner + endpoint tests skip-guarded until Member 2 ships).
+
+#### Completed Tasks
+
+- Created `app/schemas/cleaning.py`: `PlaceholderReplacement` (validated `placeholder_key` via `^[a-z][a-z0-9_]*$`, `field_type` membership in MVP `FIELD_TYPES`, non-empty `sample_text`), `CleanTemplateRequest` (`replacements` min_length 1, `confirm` gate defaulting false, `mark_configured`), `ReplacementResult`, `CleanWarnings`, `CleanTemplateResponse`.
+- Added `app/crud/template_crud.py` helpers: `set_processed_path` (records processed path, never touches original), `advance_status` (explicit rank map, forward-only, raises on unknown statuses, never downgrades field_configured/active/archived/locked).
+- Added `app/crud/template_field_crud.py` helpers: `next_display_order` (max+1, 0 if none) and `append_field` (idempotent — skips via `field_exists` guard, auto-assigns next display_order); registered all four in `app/crud/__init__.py`.
+- Added the recommended additive migration `3f8d2c6a9e41_add_template_fields_source`: `template_fields.source` (`detected`/`cleaned`/`manual`/`ai`), NOT NULL with `server_default 'detected'`, chained off `7c4e9a1b2d58`; verified upgrade/downgrade/re-upgrade clean on scratch SQLite; single head.
+- Expanded `TemplateField` model (FIELD_SOURCES + `@validates("source")` + `source` column with defaults) and `TemplateFieldCreate/Update/Read` schemas (`source` field with membership validation, default `detected`) — Phase 2 cleaning sets `source="cleaned"`, Phase 4 sets `source="ai"`.
+- New `tests/test_template_cleaning.py`: schema validation (invalid keys/types/replacements/confirm default), CRUD units (path preservation, forward-only status incl. no-downgrade, order sequencing, duplicate skip), and skip-guarded cleaner units (`apply_replacements` — placeholder produced, original unchanged, split-run rewrite, unmatched reporting) + endpoint tests (happy path with `example_value` = sample text + `source="cleaned"`, confirm 400, non-owner 403, empty 400/422, invalid key 422, idempotent re-clean, `mark_configured`, no status downgrade).
+- Full suite: 88 passed, 11 skipped (3 cleaner + 8 endpoint tests awaiting Member 2, skip reasons explicit).
+
+#### Code Changes
+
+- `backend/app/schemas/cleaning.py` (new)
+- `backend/app/crud/template_crud.py`, `backend/app/crud/template_field_crud.py`, `backend/app/crud/__init__.py` (new helpers + registration)
+- `backend/app/models/template_field.py`, `backend/app/schemas/template_field.py` (`source` column/field)
+- `backend/alembic/versions/3f8d2c6a9e41_add_template_fields_source.py` (new)
+- `backend/tests/test_template_cleaning.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: cleaning data contracts (`CleanTemplateRequest/Response` etc.), processed-path/status/append-field CRUD, `template_fields.source` provenance column, forward-only status guard.
+- Updated: `TemplateField` model + schemas now carry `source`.
+- Removed: none.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 2) builds `app/services/docx_cleaner.py` (`apply_replacements` returning processed bytes; `ReplacementSpec(sample_text, placeholder_key)`; optional `return_unmatched=True` mode) and the `GET /{id}/content` + `POST /{id}/clean` endpoints using these schemas/CRUD; the 3+8 skipped tests in `test_template_cleaning.py` then activate and encode the agreed contract (split-run rewrite, `{{ key }}` spacing, occurrences count, idempotency, confirm/owner guards, `mark_configured`).
+- Deploy note: `alembic upgrade head` on Neon applies `3f8d2c6a9e41` (additive, safe — existing rows backfill to `detected`).
+- The `source` values feed the Phase 4 AI-generation audit and the UI badge.
+
+---
+
+### Checkpoint 0025
+
+- Date: 2026-08-28
+- Member: Member 2 (AI)
+- Branch: feature/backend-template-cleaning
+- Push status: before push
+- Range covered: after Checkpoint 0024 -> 2026-08-28
+
+#### Summary
+
+- Implemented V1.3 Phase 2 manual template cleaning: the pure DOCX replacement engine (`docx_cleaner.py`, run-split aware), the `GET /{id}/content` selection endpoint and the owner-only confirmed `POST /{id}/clean` endpoint persisting through Member 3's schemas/CRUD, plus the `get_renderable_path` generation-source contract.
+
+#### Completed Tasks
+
+- Created `app/services/docx_cleaner.py` (pure, no DB): `ReplacementSpec`/`ReplacementResult` dataclasses, `apply_replacements(bytes, replacements, return_unmatched=False)` (typed overloads; bytes or `(bytes, unmatched)`), `apply_replacements_with_results` for the endpoint's per-replacement outcomes, and `get_renderable_path(template)` (processed-else-original contract for V1.6). Paragraph-level rewrite handles Word's run-splitting (first run keeps formatting, rest blanked — accepted MVP tradeoff); walks body paragraphs, table cells (recursive), section headers/footers; works on a copy (caller's bytes never mutated); invalid keys (failing Phase 1's `VALID_KEY_PATTERN`) are skipped with `reason="invalid_key"` and never injected; accepts ReplacementSpec, Pydantic models, or raw dicts.
+- Added `GET /api/v1/templates/{template_id}/content`: view-access via `user_can_view_template`, returns `{template_id, segments, has_processed}` using Phase 1's `extract_text_segments` (run in `asyncio.to_thread`), 404/403/409 guards.
+- Added `POST /api/v1/templates/{template_id}/clean` (body = Member 3's `CleanTemplateRequest`): owner-only 403, `confirm=true` required (400) + at-least-one-replacement (400), ALWAYS regenerates from the ORIGINAL bytes (re-clean never stacks), saves via `save_bytes("templates_processed", ...)`, `set_processed_path`, appends one field per MATCHED replacement via `append_field` (no dupes; `example_value` = sample text, `source="cleaned"`, humanized label fallback), `advance_status` to `field_configured` when `mark_configured` else `placeholder_detected` (never downgrades), returns `CleanTemplateResponse` with per-replacement results + `warnings{unmatched, invalid_keys}`; start/finish logging with counts.
+- Added `processed_file_path` to `TemplateResponse` (schema contract addition — detail responses now expose the processed path; the Phase 2 UI needs it).
+- Fixed the merged M3 test assertions that searched raw zip bytes for placeholders (DOCX entries are DEFLATE-compressed): now reads `word/document.xml` via `zipfile` — contract intent unchanged.
+- All 11 previously-skipped tests activated and pass; full suite 99 passed, 0 skipped. Manual smoke test on an isolated server: content segments, confirm-gate 400, clean with occurrences/unmatched warnings, idempotent re-clean, original XML verified unchanged with sample text intact, processed XML verified to contain `{{ meeting_title }}`/`{{ meeting_date }}` and no leftover sample text.
+
+#### Code Changes
+
+- `backend/app/services/docx_cleaner.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (2 new routes)
+- `backend/app/schemas/template.py` (`processed_file_path` in TemplateResponse)
+- `backend/tests/test_template_cleaning.py` (zip-aware placeholder assertions)
+
+#### Features Added / Updated / Removed
+
+- Added: DOCX cleaning engine with run-split handling; content (selection UI) endpoint; confirmed owner-only clean endpoint producing a processed DOCX; `get_renderable_path` renderable-source contract.
+- Updated: `TemplateResponse` exposes `processed_file_path`.
+- Removed: none.
+
+#### Issues Fixed
+
+- `apply_replacements` initially crashed on Pydantic replacement models (`PlaceholderReplacement` is not subscriptable) — `_normalize_specs` now accepts models, dicts, and ReplacementSpec.
+- M3's raw-bytes placeholder assertions always failed on compressed zips — replaced with `word/document.xml` extraction.
+
+#### Notes For Next Push
+
+- Member 1 (V1.3 Phase 2) can now build the cleaning UI against `GET /{id}/content` (segments) + `POST /{id}/clean` (results + warnings); `TemplateResponse.processed_file_path` should be added to the frontend `TemplateResponse` type.
+- No new migration in this slice; deploy note from 0024 still applies (`alembic upgrade head` for `3f8d2c6a9e41` on Neon).
+- V1.6 generation must source files via `get_renderable_path(template)` (processed-else-original).
+
+---
+
 ### Checkpoint 0026
 
 - Date: 2026-08-28
@@ -1281,6 +1376,7 @@ Add all future updates below this section.
 - Verified live against the merged P2 backend (temp integration branch, deleted after): `GET /{id}/content` and `POST /{id}/clean` response keys match the TS types field-for-field (including `reason: null` on matched results), `TemplateResponse.processed_file_path` exposed, non-owner 403 on both endpoints, unconfirmed clean returns 400 "Cleaning must be confirmed", 99 backend tests pass on the combined tree.
 - Integration reminder: merging `backend` (with 0024/0025) into `dev` and then syncing `frontend` will union the tracker checkpoints 0024–0026 in order.
 - Phase 3 (Field Setup) will replace the `/templates/:id/fields` stub and can reuse the staged-replacement list patterns from this page.
+
 
 ---
 
