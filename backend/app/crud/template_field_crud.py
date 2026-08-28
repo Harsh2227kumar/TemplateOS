@@ -61,3 +61,38 @@ def field_exists(db: Session, template_id: int, field_name: str) -> bool:
         )
     )
     return (result.scalar() or 0) > 0
+
+
+def next_display_order(db: Session, template_id: int) -> int:
+    """Return the next display_order for a template (current max + 1, or 0 if none)."""
+    result = db.execute(
+        select(func.max(TemplateField.display_order)).where(
+            TemplateField.template_id == template_id
+        )
+    )
+    current_max = result.scalar()
+    return 0 if current_max is None else current_max + 1
+
+
+def append_field(
+    db: Session,
+    template_id: int,
+    field: TemplateFieldCreate,
+) -> TemplateField | None:
+    """
+    Append one field to a template, idempotently.
+
+    Returns None (skips, no duplicate) if the template already has a field
+    with the same key (uq_template_field_key / field_exists guard).
+    display_order defaults to next_display_order when not provided.
+    """
+    if field_exists(db, template_id, field.field_name):
+        return None
+    payload = field.model_dump()
+    if payload.get("display_order") in (None, 0):
+        payload["display_order"] = next_display_order(db, template_id)
+    db_obj = TemplateField(template_id=template_id, **payload)
+    db.add(db_obj)
+    db.commit()
+    db.refresh(db_obj)
+    return db_obj
