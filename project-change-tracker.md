@@ -1183,6 +1183,54 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0024
+
+- Date: 2026-08-28
+- Member: Member 3 (AI)
+- Branch: feature/template-cleaning-data-layer
+- Push status: before push
+- Range covered: after Checkpoint 0023 -> 2026-08-28
+
+#### Summary
+
+- Implemented the V1.3 Phase 2 Member 3 data layer for manual template cleaning: clean request/response schemas, processed-path/status/append-field CRUD helpers, the additive `template_fields.source` provenance column, and the test suite (cleaner + endpoint tests skip-guarded until Member 2 ships).
+
+#### Completed Tasks
+
+- Created `app/schemas/cleaning.py`: `PlaceholderReplacement` (validated `placeholder_key` via `^[a-z][a-z0-9_]*$`, `field_type` membership in MVP `FIELD_TYPES`, non-empty `sample_text`), `CleanTemplateRequest` (`replacements` min_length 1, `confirm` gate defaulting false, `mark_configured`), `ReplacementResult`, `CleanWarnings`, `CleanTemplateResponse`.
+- Added `app/crud/template_crud.py` helpers: `set_processed_path` (records processed path, never touches original), `advance_status` (explicit rank map, forward-only, raises on unknown statuses, never downgrades field_configured/active/archived/locked).
+- Added `app/crud/template_field_crud.py` helpers: `next_display_order` (max+1, 0 if none) and `append_field` (idempotent — skips via `field_exists` guard, auto-assigns next display_order); registered all four in `app/crud/__init__.py`.
+- Added the recommended additive migration `3f8d2c6a9e41_add_template_fields_source`: `template_fields.source` (`detected`/`cleaned`/`manual`/`ai`), NOT NULL with `server_default 'detected'`, chained off `7c4e9a1b2d58`; verified upgrade/downgrade/re-upgrade clean on scratch SQLite; single head.
+- Expanded `TemplateField` model (FIELD_SOURCES + `@validates("source")` + `source` column with defaults) and `TemplateFieldCreate/Update/Read` schemas (`source` field with membership validation, default `detected`) — Phase 2 cleaning sets `source="cleaned"`, Phase 4 sets `source="ai"`.
+- New `tests/test_template_cleaning.py`: schema validation (invalid keys/types/replacements/confirm default), CRUD units (path preservation, forward-only status incl. no-downgrade, order sequencing, duplicate skip), and skip-guarded cleaner units (`apply_replacements` — placeholder produced, original unchanged, split-run rewrite, unmatched reporting) + endpoint tests (happy path with `example_value` = sample text + `source="cleaned"`, confirm 400, non-owner 403, empty 400/422, invalid key 422, idempotent re-clean, `mark_configured`, no status downgrade).
+- Full suite: 88 passed, 11 skipped (3 cleaner + 8 endpoint tests awaiting Member 2, skip reasons explicit).
+
+#### Code Changes
+
+- `backend/app/schemas/cleaning.py` (new)
+- `backend/app/crud/template_crud.py`, `backend/app/crud/template_field_crud.py`, `backend/app/crud/__init__.py` (new helpers + registration)
+- `backend/app/models/template_field.py`, `backend/app/schemas/template_field.py` (`source` column/field)
+- `backend/alembic/versions/3f8d2c6a9e41_add_template_fields_source.py` (new)
+- `backend/tests/test_template_cleaning.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: cleaning data contracts (`CleanTemplateRequest/Response` etc.), processed-path/status/append-field CRUD, `template_fields.source` provenance column, forward-only status guard.
+- Updated: `TemplateField` model + schemas now carry `source`.
+- Removed: none.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 2) builds `app/services/docx_cleaner.py` (`apply_replacements` returning processed bytes; `ReplacementSpec(sample_text, placeholder_key)`; optional `return_unmatched=True` mode) and the `GET /{id}/content` + `POST /{id}/clean` endpoints using these schemas/CRUD; the 3+8 skipped tests in `test_template_cleaning.py` then activate and encode the agreed contract (split-run rewrite, `{{ key }}` spacing, occurrences count, idempotency, confirm/owner guards, `mark_configured`).
+- Deploy note: `alembic upgrade head` on Neon applies `3f8d2c6a9e41` (additive, safe — existing rows backfill to `detected`).
+- The `source` values feed the Phase 4 AI-generation audit and the UI badge.
+
+---
+
 ## Entry Template
 
 ```md
