@@ -1231,6 +1231,53 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0025
+
+- Date: 2026-08-28
+- Member: Member 2 (AI)
+- Branch: feature/backend-template-cleaning
+- Push status: before push
+- Range covered: after Checkpoint 0024 -> 2026-08-28
+
+#### Summary
+
+- Implemented V1.3 Phase 2 manual template cleaning: the pure DOCX replacement engine (`docx_cleaner.py`, run-split aware), the `GET /{id}/content` selection endpoint and the owner-only confirmed `POST /{id}/clean` endpoint persisting through Member 3's schemas/CRUD, plus the `get_renderable_path` generation-source contract.
+
+#### Completed Tasks
+
+- Created `app/services/docx_cleaner.py` (pure, no DB): `ReplacementSpec`/`ReplacementResult` dataclasses, `apply_replacements(bytes, replacements, return_unmatched=False)` (typed overloads; bytes or `(bytes, unmatched)`), `apply_replacements_with_results` for the endpoint's per-replacement outcomes, and `get_renderable_path(template)` (processed-else-original contract for V1.6). Paragraph-level rewrite handles Word's run-splitting (first run keeps formatting, rest blanked — accepted MVP tradeoff); walks body paragraphs, table cells (recursive), section headers/footers; works on a copy (caller's bytes never mutated); invalid keys (failing Phase 1's `VALID_KEY_PATTERN`) are skipped with `reason="invalid_key"` and never injected; accepts ReplacementSpec, Pydantic models, or raw dicts.
+- Added `GET /api/v1/templates/{template_id}/content`: view-access via `user_can_view_template`, returns `{template_id, segments, has_processed}` using Phase 1's `extract_text_segments` (run in `asyncio.to_thread`), 404/403/409 guards.
+- Added `POST /api/v1/templates/{template_id}/clean` (body = Member 3's `CleanTemplateRequest`): owner-only 403, `confirm=true` required (400) + at-least-one-replacement (400), ALWAYS regenerates from the ORIGINAL bytes (re-clean never stacks), saves via `save_bytes("templates_processed", ...)`, `set_processed_path`, appends one field per MATCHED replacement via `append_field` (no dupes; `example_value` = sample text, `source="cleaned"`, humanized label fallback), `advance_status` to `field_configured` when `mark_configured` else `placeholder_detected` (never downgrades), returns `CleanTemplateResponse` with per-replacement results + `warnings{unmatched, invalid_keys}`; start/finish logging with counts.
+- Added `processed_file_path` to `TemplateResponse` (schema contract addition — detail responses now expose the processed path; the Phase 2 UI needs it).
+- Fixed the merged M3 test assertions that searched raw zip bytes for placeholders (DOCX entries are DEFLATE-compressed): now reads `word/document.xml` via `zipfile` — contract intent unchanged.
+- All 11 previously-skipped tests activated and pass; full suite 99 passed, 0 skipped. Manual smoke test on an isolated server: content segments, confirm-gate 400, clean with occurrences/unmatched warnings, idempotent re-clean, original XML verified unchanged with sample text intact, processed XML verified to contain `{{ meeting_title }}`/`{{ meeting_date }}` and no leftover sample text.
+
+#### Code Changes
+
+- `backend/app/services/docx_cleaner.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (2 new routes)
+- `backend/app/schemas/template.py` (`processed_file_path` in TemplateResponse)
+- `backend/tests/test_template_cleaning.py` (zip-aware placeholder assertions)
+
+#### Features Added / Updated / Removed
+
+- Added: DOCX cleaning engine with run-split handling; content (selection UI) endpoint; confirmed owner-only clean endpoint producing a processed DOCX; `get_renderable_path` renderable-source contract.
+- Updated: `TemplateResponse` exposes `processed_file_path`.
+- Removed: none.
+
+#### Issues Fixed
+
+- `apply_replacements` initially crashed on Pydantic replacement models (`PlaceholderReplacement` is not subscriptable) — `_normalize_specs` now accepts models, dicts, and ReplacementSpec.
+- M3's raw-bytes placeholder assertions always failed on compressed zips — replaced with `word/document.xml` extraction.
+
+#### Notes For Next Push
+
+- Member 1 (V1.3 Phase 2) can now build the cleaning UI against `GET /{id}/content` (segments) + `POST /{id}/clean` (results + warnings); `TemplateResponse.processed_file_path` should be added to the frontend `TemplateResponse` type.
+- No new migration in this slice; deploy note from 0024 still applies (`alembic upgrade head` for `3f8d2c6a9e41` on Neon).
+- V1.6 generation must source files via `get_renderable_path(template)` (processed-else-original).
+
+---
+
 ## Entry Template
 
 ```md
