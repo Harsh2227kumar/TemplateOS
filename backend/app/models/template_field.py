@@ -31,6 +31,11 @@ if TYPE_CHECKING:
 # MVP field-type vocabulary (V1.3 spec): no "dropdown"; includes "textarea" and "list".
 FIELD_TYPES = ("text", "textarea", "date", "number", "list", "signature")
 
+# How a field came to exist (V1.3 Phase 2+): detected by Phase 1 scanning,
+# created by Phase 2 cleaning, added manually in Phase 3, or suggested by AI
+# in Phase 4 (audit trail for the UI and the AI-generation log).
+FIELD_SOURCES = ("detected", "cleaned", "manual", "ai")
+
 
 class TemplateField(Base):
     __tablename__ = "template_fields"
@@ -45,6 +50,8 @@ class TemplateField(Base):
             self.display_order = 0
         if "ai_enabled" not in kwargs:
             self.ai_enabled = False
+        if "source" not in kwargs:
+            self.source = "detected"
 
     __table_args__ = (
         UniqueConstraint("template_id", "field_name", name="uq_template_field_key"),
@@ -80,6 +87,11 @@ class TemplateField(Base):
 
     display_order: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
+    # V1.3 Phase 2 addition: provenance of the field (detected/cleaned/manual/ai).
+    source: Mapped[str] = mapped_column(
+        String(20), default="detected", server_default="detected"
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -93,3 +105,9 @@ class TemplateField(Base):
         if field_type not in FIELD_TYPES:
             raise ValueError(f"Unsupported field type: {field_type}")
         return field_type
+
+    @validates("source")
+    def validate_source(self, _key: str, source: str) -> str:
+        if source not in FIELD_SOURCES:
+            raise ValueError(f"Unsupported field source: {source}")
+        return source
