@@ -1141,6 +1141,102 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0022
+
+- Date: 2026-08-28
+- Member: Member 3 (AI)
+- Branch: feature/template-fields-metadata
+- Push status: before push
+- Range covered: after Checkpoint 0020 -> 2026-08-28
+- Note: Checkpoint 0021 (V1.3 Phase 1 Member 1 frontend) lives on `feature/placeholder-detection` and is not merged yet; numbering skips it on this branch.
+
+#### Summary
+
+- Expanded `template_fields` to the full V1.3 field-metadata contract (model + additive migration + schemas) and added the `template_field_crud` persistence layer Member 2's detection endpoint will call.
+
+#### Completed Tasks
+
+- Expanded `app/models/template_field.py`: `FIELD_TYPES` corrected to the MVP set (`text, textarea, date, number, list, signature` — removed `dropdown`), added `field_label`, `section`, `example_value`, `validation_rule`, `ai_enabled` columns, custom `__init__` defaults, `UniqueConstraint("template_id", "field_name")` and composite `Index(template_id, display_order)`.
+- Patched migration `fb6604df0637`: `sa.text('now()')` -> `sa.text('CURRENT_TIMESTAMP')` for `created_at`/`updated_at` (cross-dialect rule; SQLite tests were failing on `DEFAULT now()`).
+- New additive migration `7c4e9a1b2d58_expand_template_fields_metadata`: adds the 5 columns (`ai_enabled` NOT NULL with server_default `false`), the unique constraint (via `batch_alter_table` for SQLite compatibility), and the composite index; verified `upgrade head`, `downgrade -1`, and re-upgrade clean on a scratch SQLite DB.
+- Expanded `app/schemas/template_field.py`: full `TemplateFieldBase/Create/Update/Read` (label, section, example, validation, ai_enabled) + Phase 1 detection-response schemas (`DuplicateFieldWarning`, `InvalidFieldNameWarning`, `DetectionWarnings`, `DetectionSummary`, `PlaceholderDetectionResponse`).
+- Created `app/crud/template_field_crud.py`: `bulk_create_fields`, `get_fields_by_template` (ordered by display_order, id), `delete_fields_by_template`, `field_exists`; registered in `app/crud/__init__.py`.
+- New tests: `tests/test_template_field_model.py` (model defaults/validation/unique constraint + full CRUD coverage) and `tests/test_placeholder_detection.py` (persistence-flow tests now; endpoint contract tests auto-skip until Member 2's detect-placeholders / fields routes exist, then activate).
+- Full suite: 67 passed, 8 skipped (endpoint tests awaiting Member 2); previously failing `test_profile_migration_upgrade_and_downgrade` now passes.
+
+#### Code Changes
+
+- `backend/app/models/template_field.py` (expanded)
+- `backend/alembic/versions/7c4e9a1b2d58_expand_template_fields_metadata.py` (new)
+- `backend/alembic/versions/fb6604df0637_add_template_fields_table.py` (timestamp patch)
+- `backend/app/schemas/template_field.py` (expanded)
+- `backend/app/crud/template_field_crud.py` (new) and `backend/app/crud/__init__.py` (register)
+- `backend/tests/test_template_field_model.py`, `backend/tests/test_placeholder_detection.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: full field-metadata columns on `template_fields`; `(template_id, field_name)` uniqueness; ordered field reads; detection-response Pydantic schemas; `template_field_crud` helpers.
+- Updated: `FIELD_TYPES` vocabulary to the MVP set; migration timestamps to `CURRENT_TIMESTAMP`.
+- Removed: `dropdown` from the allowed field types.
+
+#### Issues Fixed
+
+- Fixed pre-existing failure `tests/test_user_profile_data.py::test_profile_migration_upgrade_and_downgrade` — SQLite rejected `DEFAULT now()` emitted by `fb6604df0637`.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 1) can now build `docx_parser.py` + the detect-placeholders/fields endpoints on top of this CRUD and the `PlaceholderDetectionResponse` schema; the 8 skipped endpoint tests in `test_placeholder_detection.py` will activate automatically and encode the agreed contract (ordered persistence, duplicate collapse, invalid-name exclusion with suggested keys, idempotency, force re-detect, owner-only 403, split-across-runs parity, no-500 on malformed tokens).
+- Run `alembic upgrade head` against Neon when deploying (migration `7c4e9a1b2d58` is additive and safe for existing rows).
+
+---
+
+### Checkpoint 0023
+
+- Date: 2026-08-28
+- Member: Member 2 (AI)
+- Branch: feature/backend-docx-placeholder-detection
+- Push status: before push
+- Range covered: after Checkpoint 0022 -> 2026-08-28
+
+#### Summary
+
+- Implemented V1.3 Phase 1 placeholder detection backend: the pure DOCX parsing service (python-docx text extraction + docxtpl authoritative variable detection), the reusable view-access helper, and the owner-only detect-placeholders + view-access fields-read endpoints persisting through Member 3's CRUD.
+
+#### Completed Tasks
+
+- Added `docxtpl==0.20.2` and `python-docx==1.1.2` to `backend/requirements.txt` (docxtpl adopted in V1.3 for detect/generate parity — the same Jinja2 engine that renders in V1.6).
+- Created `app/services/docx_parser.py` (pure, no DB): `extract_text_segments` (body in true document order, table cells with nested recursion, section headers/footers — one shared DocxTemplate parse), `get_template_variables` (docxtpl `get_undeclared_template_variables`, catches Jinja `TemplateSyntaxError` and degrades to `(None, message)` — never 500s), `PLACEHOLDER_PATTERN` / `VALID_KEY_PATTERN`, `detect_placeholders` (regex scan for ordering/duplicates/malformed tokens + docxtpl parity intersection with regex-key-valid fallback and `parse_warning`), plus `suggest_key` / `humanize_key` helpers.
+- Created `app/services/template_access.py`: extracted the inline `has_access` ladder from `get_template` into `user_can_view_template(user, template)` (identical behavior); reused by `get_template` and the new fields endpoint.
+- Added `POST /api/v1/templates/{template_id}/detect-placeholders?force=` — owner-only (403), 404 missing template, 409 no source file / file missing on disk, storage read + CPU-bound parsing via `asyncio.to_thread`, idempotent without force (returns existing fields + fresh warnings, `already_detected=true`), force replaces fields via `delete_fields_by_template` + `bulk_create_fields`, persists `field_name`/humanized `field_label`/`text`/required/first-seen `display_order`, advances status to `placeholder_detected` only from `uploaded`/`placeholder_detected`, returns `PlaceholderDetectionResponse` (fields + warnings + summary), logs start/finish with counts.
+- Added `GET /api/v1/templates/{template_id}/fields` — view access via `user_can_view_template`, returns `list[TemplateFieldRead]` ordered by `display_order`.
+- Fixed docxtpl lazy initialization: `DocxTemplate.init_docx()` must be called before accessing `.docx`.
+- All 8 previously-skipped endpoint contract tests in `tests/test_placeholder_detection.py` activated and pass; full suite 75 passed, 0 skipped.
+
+#### Code Changes
+
+- `backend/requirements.txt` (docxtpl + python-docx)
+- `backend/app/services/docx_parser.py` (new)
+- `backend/app/services/template_access.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (refactored `get_template` to use the helper; added 2 routes)
+
+#### Features Added / Updated / Removed
+
+- Added: placeholder detection service with detect/generate parity; owner-only detection endpoint with idempotency and force re-detect; ordered fields-read endpoint with RBAC view access; reusable `user_can_view_template` helper.
+- Updated: `get_template` now delegates to the shared access helper (behavior unchanged).
+- Removed: inline `has_access` ladder duplication in `templates.py`.
+
+#### Issues Fixed
+
+- None (the docxtpl `init_docx()` lazy-init issue was found and fixed within this same change).
+
+#### Notes For Next Push
+
+- The V1.3 Phase 1 backend is feature-complete end to end (parser -> endpoint -> persistence); Member 1's frontend PR #57 (`feature/placeholder-detection`) can now be verified against these real endpoints and amended if any response-shape fixes are needed before merging into `frontend`.
+- Deploy note: `pip install -r requirements.txt` (new deps) — no new migration in this slice.
+- `extract_text_segments` / `get_template_variables` / `PLACEHOLDER_PATTERN` / `VALID_KEY_PATTERN` are reused by Phase 2 (cleaning) and Phase 4 (AI context excerpt).
+
+---
+
 ## Entry Template
 
 ```md

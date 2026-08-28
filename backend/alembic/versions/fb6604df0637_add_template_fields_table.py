@@ -28,8 +28,8 @@ def upgrade() -> None:
     sa.Column('is_required', sa.Boolean(), server_default='true', nullable=False),
     sa.Column('description', sa.Text(), nullable=True),
     sa.Column('display_order', sa.Integer(), server_default='0', nullable=False),
-    sa.Column('created_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('now()'), nullable=False),
+    sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
+    sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=False),
     sa.ForeignKeyConstraint(['template_id'], ['templates.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
