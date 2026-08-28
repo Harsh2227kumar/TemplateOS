@@ -1,9 +1,21 @@
 from sqlalchemy import select, or_, and_, func
 from sqlalchemy.orm import Session
 
-from app.models.template import Template
+from app.models.template import Template, TEMPLATE_STATUSES
 from app.models.user import User
 from app.schemas.template import TemplateCreate
+
+# Forward-only status ladder (V1.3 Phase 2). "archived"/"locked" are terminal
+# admin states — never moved by automated transitions.
+_STATUS_RANK: dict[str, int] = {
+    "uploaded": 0,
+    "placeholder_detected": 1,
+    "field_configured": 2,
+    "active": 3,
+    "archived": 4,
+    "locked": 5,
+}
+
 
 def create_template(db: Session, data: TemplateCreate) -> Template:
     """
@@ -16,10 +28,12 @@ def create_template(db: Session, data: TemplateCreate) -> Template:
     db.refresh(db_obj)
     return db_obj
 
+
 def get_template_by_id(db: Session, template_id: int) -> Template | None:
     """Return Template or None."""
     result = db.execute(select(Template).where(Template.id == template_id))
     return result.scalar_one_or_none()
+
 
 def get_templates_by_user(db: Session, user_id: int) -> list[Template]:
     """Return all templates uploaded by the given user, newest first."""
@@ -30,7 +44,10 @@ def get_templates_by_user(db: Session, user_id: int) -> list[Template]:
     )
     return list(result.scalars().all())
 
-def get_public_templates(db: Session, limit: int = 50, offset: int = 0) -> list[Template]:
+
+def get_public_templates(
+    db: Session, limit: int = 50, offset: int = 0
+) -> list[Template]:
     """
     Return publicly visible templates, newest first.
     Used by the template library listing in Phase 3.
@@ -44,6 +61,7 @@ def get_public_templates(db: Session, limit: int = 50, offset: int = 0) -> list[
         .offset(offset)
     )
     return list(result.scalars().all())
+
 
 def get_templates_by_category(
     db: Session,
@@ -66,6 +84,7 @@ def get_templates_by_category(
 def _escape_like(value: str) -> str:
     """Escape special LIKE characters so they match literally."""
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
 
 def get_library_templates(
     db: Session,
@@ -104,29 +123,29 @@ def get_library_templates(
             Template.uploaded_by == user_id,
             Template.visibility == "public",
         ]
-        
+
         if user.department:
             conditions.append(
                 and_(
                     Template.visibility == "department",
-                    Template.uploader.has(User.department == user.department)
+                    Template.uploader.has(User.department == user.department),
                 )
             )
-            
+
         if user.organization:
             conditions.append(
                 and_(
                     Template.visibility == "organization",
-                    Template.uploader.has(User.organization == user.organization)
+                    Template.uploader.has(User.organization == user.organization),
                 )
             )
-            
+
         # Optional: handling "group" visibility if user has a role/group
         if user.role:
             conditions.append(
                 and_(
                     Template.visibility == "group",
-                    Template.uploader.has(User.role == user.role)
+                    Template.uploader.has(User.role == user.role),
                 )
             )
 
@@ -182,10 +201,38 @@ def search_templates(
         base = base.where(Template.uploaded_by == user_id)
     else:
         base = base.where(Template.visibility == "public")
-    
+
     safe_search = _escape_like(query_text)
     base = base.where(Template.name.ilike(f"%{safe_search}%"))
-    
+
     base = base.order_by(Template.created_at.desc()).limit(limit)
     result = db.execute(base)
     return list(result.scalars().all())
+
+
+def set_processed_path(db: Session, template: Template, path: str) -> Template:
+    """
+    Record the processed (cleaned) DOCX path on the template.
+    The original_file_path is never touched — cleaning always preserves it.
+    """
+    template.processed_file_path = path
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+def advance_status(db: Session, template: Template, target: str) -> Template:
+    """
+    Move template.status FORWARD along the ladder only:
+    uploaded < placeholder_detected < field_configured < active ( < archived/locked ).
+
+    Never downgrades: if template.status already ranks >= target, the current
+    status is kept (returned unchanged). Raises ValueError for unknown statuses.
+    """
+    if target not in TEMPLATE_STATUSES:
+        raise ValueError(f"Unknown template status: {target}")
+    if _STATUS_RANK[target] > _STATUS_RANK[template.status]:
+        template.status = target
+        db.commit()
+        db.refresh(template)
+    return template
