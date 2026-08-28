@@ -1,14 +1,57 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { templatesApi, TemplateResponse } from "@/lib/api";
+import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Download, FilePlus2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { ArrowLeft, Download, Eraser, ListChecks, ScanSearch, Settings2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  uploaded: "bg-slate-100 text-slate-700",
+  placeholder_detected: "bg-blue-50 text-blue-700",
+  field_configured: "bg-violet-50 text-violet-700",
+  active: "bg-emerald-50 text-emerald-700",
+  archived: "bg-slate-100 text-slate-500",
+  locked: "bg-amber-50 text-amber-700",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn("border-transparent", STATUS_BADGE_CLASSES[status] ?? "bg-slate-100 text-slate-700")}
+    >
+      <span className="capitalize">{status.replace(/_/g, " ")}</span>
+    </Badge>
+  );
+}
+
+interface ConfigAction {
+  label: string;
+  icon: LucideIcon;
+  target: string;
+}
+
+function getConfigAction(templateId: number, status: string): ConfigAction {
+  switch (status) {
+    case "uploaded":
+      return { label: "Detect Placeholders", icon: ScanSearch, target: `/templates/${templateId}/placeholders` };
+    case "field_configured":
+    case "active":
+      return { label: "Edit Fields", icon: Settings2, target: `/templates/${templateId}/fields` };
+    case "placeholder_detected":
+    default:
+      return { label: "Review Fields", icon: ListChecks, target: `/templates/${templateId}/placeholders` };
+  }
+}
 
 export function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [template, setTemplate] = useState<TemplateResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<{ message: string; status?: number } | null>(null);
@@ -96,6 +139,9 @@ export function TemplateDetailPage() {
 
   if (!template) return null;
 
+  const isOwner = template.uploaded_by === user?.id;
+  const configAction = isOwner ? getConfigAction(template.id, template.status) : null;
+
   return (
     <div className="max-w-4xl space-y-8 pb-10">
       <Button variant="ghost" onClick={() => navigate("/templates")} className="-ml-4 text-slate-600">
@@ -106,9 +152,7 @@ export function TemplateDetailPage() {
       <div>
         <h1 className="text-3xl font-semibold mb-4">{template.name}</h1>
         <div className="flex flex-wrap items-center gap-3">
-          <Badge variant="outline" className="bg-slate-50">
-            Status: <span className="ml-1 capitalize">{template.status.replace("_", " ")}</span>
-          </Badge>
+          <StatusBadge status={template.status} />
           <Badge variant="outline" className="bg-slate-50">
             Category: <span className="ml-1 capitalize">{template.category}</span>
           </Badge>
@@ -156,10 +200,22 @@ export function TemplateDetailPage() {
       </div>
 
       <div className="flex flex-wrap gap-4 pt-4 border-t">
-        <Button disabled title="Coming in V1.3" className="gap-2">
-          <FilePlus2 className="h-4 w-4" />
-          Use This Template
-        </Button>
+        {isOwner && configAction && (
+          <Button className="gap-2" onClick={() => navigate(configAction.target)}>
+            <configAction.icon className="h-4 w-4" />
+            {configAction.label}
+          </Button>
+        )}
+        {isOwner && (
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => navigate(`/templates/${template.id}/clean`)}
+          >
+            <Eraser className="h-4 w-4" />
+            Clean Template
+          </Button>
+        )}
         <Button variant="outline" disabled title="Coming soon" className="gap-2">
           <Download className="h-4 w-4" />
           Download Original
