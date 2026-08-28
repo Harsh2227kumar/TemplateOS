@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Download, ListChecks, ScanSearch, Settings2 } from "lucide-react";
+import { ArrowLeft, Download, Eraser, ListChecks, ScanSearch, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
@@ -204,6 +204,16 @@ export function TemplateDetailPage() {
           <Button className="gap-2" onClick={() => navigate(configAction.target)}>
             <configAction.icon className="h-4 w-4" />
             {configAction.label}
+          </Button>
+        )}
+        {isOwner && (
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => navigate(`/templates/${template.id}/clean`)}
+          >
+            <Eraser className="h-4 w-4" />
+            Clean Template
           </Button>
         )}
         <Button variant="outline" disabled title="Coming soon" className="gap-2">
