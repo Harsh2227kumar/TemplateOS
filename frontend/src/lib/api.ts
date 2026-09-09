@@ -134,6 +134,27 @@ export interface PlaceholderDetectionResponse {
   };
 }
 
+// --- V1.3 Phase 3: field metadata editor ---
+
+export interface TemplateFieldUpsert {
+  id?: number;
+  field_name: string;
+  field_label?: string;
+  field_type: string;
+  default_value?: string;
+  is_required: boolean;
+  description?: string;
+  example_value?: string;
+  validation_rule?: string;
+  section?: string;
+  ai_enabled: boolean;
+}
+
+export interface FieldSyncPayload {
+  fields: TemplateFieldUpsert[];
+  mark_configured?: boolean;
+}
+
 // --- V1.3 Phase 2: manual template cleaning ---
 
 export interface DocSegment {
@@ -223,6 +244,63 @@ export const templatesApi = {
 
   getFields: async (token: string, id: number): Promise<TemplateField[]> => {
     return request<TemplateField[]>(`/templates/${id}/fields`, {}, token);
+  },
+
+  createField: async (
+    token: string,
+    id: number,
+    body: TemplateFieldUpsert,
+  ): Promise<TemplateField> => {
+    return request<TemplateField>(
+      `/templates/${id}/fields`,
+      { method: "POST", body: JSON.stringify(body) },
+      token,
+    );
+  },
+
+  updateField: async (
+    token: string,
+    id: number,
+    fieldId: number,
+    body: Partial<TemplateFieldUpsert>,
+  ): Promise<TemplateField> => {
+    return request<TemplateField>(
+      `/templates/${id}/fields/${fieldId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token,
+    );
+  },
+
+  deleteField: async (token: string, id: number, fieldId: number): Promise<void> => {
+    return request<void>(
+      `/templates/${id}/fields/${fieldId}`,
+      { method: "DELETE" },
+      token,
+    );
+  },
+
+  reorderFields: async (
+    token: string,
+    id: number,
+    orderedIds: number[],
+  ): Promise<TemplateField[]> => {
+    return request<TemplateField[]>(
+      `/templates/${id}/fields/reorder`,
+      { method: "PUT", body: JSON.stringify({ ordered_ids: orderedIds }) },
+      token,
+    );
+  },
+
+  saveFields: async (
+    token: string,
+    id: number,
+    payload: FieldSyncPayload,
+  ): Promise<TemplateField[]> => {
+    return request<TemplateField[]>(
+      `/templates/${id}/fields`,
+      { method: "PUT", body: JSON.stringify(payload) },
+      token,
+    );
   },
 
   getContent: async (token: string, id: number): Promise<TemplateContent> => {

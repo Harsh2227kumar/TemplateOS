@@ -53,7 +53,7 @@ function getConfigAction(templateId: number, status: string): ConfigAction {
       return { label: "Edit Fields", icon: Settings2, target: `/templates/${templateId}/fields` };
     case "placeholder_detected":
     default:
-      return { label: "Review Fields", icon: ListChecks, target: `/templates/${templateId}/placeholders` };
+      return { label: "Review Fields", icon: ListChecks, target: `/templates/${templateId}/fields` };
   }
 }
 
