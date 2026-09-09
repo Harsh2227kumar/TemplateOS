@@ -1564,6 +1564,66 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0031
+
+- Date: 2026-09-10
+- Member: Member 1 (AI)
+- Branch: `feature/field-editor-ui` (created from `frontend`, which carries the Phase 3 backend via PR #79)
+- Push status: before push
+- Range covered: after Checkpoint 0030 -> 2026-09-10
+
+#### Summary
+
+- Implemented the V1.3 Phase 3 Member 1 slice: the Field Metadata Editor UI. Replaced the `/templates/:id/fields` placeholder stub with a full owner-only editor — RHF `useFieldArray` + Zod validation mirroring the backend rules, add/delete/reorder per field card, and "Save all" through the bulk sync endpoint (`PUT /{id}/fields`) which reseeds the form and reflects the `field_configured` status.
+
+#### Completed Tasks
+
+- Extended `src/lib/api.ts`: `TemplateFieldUpsert` and `FieldSyncPayload` types plus five methods on `templatesApi` — `createField`, `updateField`, `deleteField`, `reorderFields` (`ordered_ids`), `saveFields` (bulk sync). All follow the existing `request<T>` + explicit-token conventions; the editor page uses `getFields` + `saveFields`.
+- Added `src/components/ui/switch.tsx` (shadcn Switch over `@radix-ui/react-switch@^1.3.7`, installed through the npm workspace so the root `package-lock.json` is the one updated — matching repo convention).
+- Rebuilt `src/pages/field-setup-page.tsx` from the Phase 3 stub into the full editor:
+  - Zod per-field schema: `field_name` regex `^[a-z][a-z0-9_]*$` with the spec's message, type enum over the MVP set, label/section/example/validation max lengths (150/100/255/255), and an array-level `superRefine` that rejects duplicate keys with per-row inline errors.
+  - Field cards (slate, responsive, stack on mobile): mono key Input with live `{{key}}` preview, label, type Select, section, example, validation Input with helper examples (`email`, `min:1`), help-text Textarea, Required and AI-enabled Switches (AI hint: "Enable AI for descriptive fields (agenda, summary); disable for facts (date, amount)."), up/down move buttons, and delete behind a confirm Dialog.
+  - Toolbar: "Add field" appends a blank row (`is_required=true`, `ai_enabled=false`, type `text`); "Save all" submits `saveFields(id, { fields, mark_configured: true })`, reseeds the form from the response, and shows "Fields saved. Template configured." with the status badge advancing to `field_configured` locally (never downgrading `active`/`field_configured`).
+  - Full-sync semantics surfaced: "Saving replaces the field set — removed rows are deleted."
+  - Array position IS the submitted order (server `display_order` never rendered as an input); the DB id rides as `rowId` because `useFieldArray` injects its own `id`.
+  - States: Skeleton loading, 404/403-aware error view with Retry, non-owner notice + back link, locked-template read-only field list with amber notice, red error banner mapping `ApiError` 403/409/422/401.
+  - Reserved the Phase 4 mount point: `<section id="ai-suggestions">` placeholder card.
+- Updated `template-detail-page.tsx`: for status `placeholder_detected`, the owner action "Review Fields" now targets `/templates/:id/fields` (was `/placeholders`); `field_configured`/`active` already targeted the editor, and the Phase 1/2 "Continue to Field Setup" buttons already pointed here.
+- Verified `npm run build` (`tsc -b && vite build`, strict TS) passes.
+- Verified `.gitignore` needs no changes: `frontend/*.tsbuildinfo`, `frontend/dist/`, `frontend/node_modules/` all covered; `vite.config.js`/`.d.ts` are already tracked by team convention.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (+78: 2 types + 5 methods)
+- `frontend/src/pages/field-setup-page.tsx` (stub replaced, ~860 lines)
+- `frontend/src/components/ui/switch.tsx` (new)
+- `frontend/src/pages/template-detail-page.tsx` (1-line route target change)
+- `frontend/package.json` + root `package-lock.json` (`@radix-ui/react-switch`)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Added: Field Setup editor page — owner-only field metadata editing with add/delete(confirm)/reorder(up-down) and bulk "Save all" that advances status to `field_configured`.
+- Added: `Switch` UI primitive (reusable for Phase 4).
+- Added: `TemplateFieldUpsert`/`FieldSyncPayload` client types + the five field-write API methods.
+- Added: Phase 4 AI-suggestions mount point (`<section id="ai-suggestions">`).
+- Updated: template detail "Review Fields" action now routes to the field editor.
+- Removed: the "Field Setup is coming in Phase 3" placeholder stub.
+
+#### Issues Fixed
+
+- Status badge did not refresh after "Save all" — now advances locally to `field_configured` after a successful sync (forward-only; `active` never downgraded).
+- Strict-TS mismatch between zod's inferred literal union for `field_type` and the seeded server strings — fixed with a `FieldTypeValue` type derived from the options const plus an `isFieldType` guard when seeding.
+
+#### Notes For Next Push
+
+- PR target: `feature/field-editor-ui` -> `frontend` (frontend-only change + directly related dependency/lockfile). After review/merge, integrate `frontend` -> `dev` via a merge-commit PR so Phase 3 is complete on the integrated branch.
+- Phase 4 can slot the AI suggestions panel into `<section id="ai-suggestions">` without touching the editor; the `Switch` primitive and the `TemplateFieldUpsert` type are the reuse points for accept-suggestion.
+- Client validation intentionally mirrors the backend contract (key regex, MVP type set, unique keys, max lengths); server 409/422 remain the backstop and surface through `ApiError.message`.
+- The editor intentionally uses only the bulk sync for persistence (spec: "Save all" is the primary write path); `createField`/`updateField`/`deleteField`/`reorderFields` are shipped in the API client for Phase 4+ consumers.
+
+---
+
 ## Entry Template
 
 ```md
