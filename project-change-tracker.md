@@ -1457,6 +1457,113 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0029
+
+- Date: 2026-09-06
+- Member: Member 3 (AI)
+- Branch: `feature/field-editor-data-layer`
+- Push status: before push
+- Range covered: after Checkpoint 0027 -> 2026-09-06
+- Note: Checkpoint 0028 (frontend deletion UI) lives on the `frontend` branch and is not merged into `backend` yet; numbering follows the global sequence.
+
+#### Summary
+
+- Implemented the V1.3 Phase 3 field-editor data layer: upsert/reorder/sync schemas, single-field CRUD with reindexing, a transactional bulk full-sync, and the optional `field_type` DB CHECK constraint, plus comprehensive tests proving the integrity invariants.
+
+#### Completed Tasks
+
+- Added `TemplateFieldUpsert` (id present -> update, absent -> create), `FieldReorderRequest` (min 1 id), and `FieldSyncRequest` (full-sync list + `mark_configured` default true) schemas, with `field_name` regex (`^[a-z][a-z0-9_]*$`), `field_type`/`source` membership validators importing from the model for one source of truth.
+- Hardened `TemplateFieldUpdate` with the same `field_name`/`field_type`/`source` validators so PATCH payloads are rejected at the schema layer before reaching the ORM.
+- Added CRUD: `get_field_by_id`, `create_field` (auto `next_display_order`, duplicate pre-check), `update_field` (partial via `exclude_unset`, rename-collision pre-check, reindex when `display_order` is touched), `delete_field` (delete + flush + `_reindex` to contiguous 0..n-1), `reorder_fields` (permutation guard raising `ValueError`), and `sync_fields` (single-commit/rollback: deletes absent fields first + flush so a create can reuse a freed key, updates kept fields in payload order, creates new fields, `display_order` = array index with client values ignored, created fields default `source="manual"`).
+- Added `_reindex` helper (renumber by current `(display_order, id)`; callers own the commit) and registered all new functions in `app/crud/__init__.py`.
+- Added additive migration `b9e5d2c8a740_add_field_type_check`: `ck_template_field_type` CHECK via `op.batch_alter_table` (cross-dialect; same pattern as `7c4e9a1b2d58`), chained off `3f8d2c6a9e41`; verified single head and clean upgrade/downgrade/re-upgrade cycles on a scratch SQLite DB.
+- Created `tests/test_field_editor.py` (25 tests): schema validation, CRUD units (create/duplicate/partial-update/rename/delete-reindex/reorder-permutation), sync (mixed payload with index-based ordering and ignored client `display_order`, empty-clears, duplicate-in-payload `ValueError`, foreign-template-id `ValueError`, cross-item rename collision `IntegrityError` with full rollback and no partial writes), ORM type rejection, CHECK enforcement + reversibility via the alembic subprocess pattern, and an API round-trip asserting `GET /templates/{id}/fields` reflects CRUD edits in order.
+- Full suite: 131 passed (106 prior + 25 new).
+
+#### Code Changes
+
+- `backend/app/schemas/template_field.py` (Phase 3 upsert/reorder/sync schemas + `TemplateFieldUpdate` validators)
+- `backend/app/crud/template_field_crud.py` (create/update/delete/reorder/sync/get_by_id + `_reindex`)
+- `backend/app/crud/__init__.py` (registration)
+- `backend/alembic/versions/b9e5d2c8a740_add_field_type_check.py` (new)
+- `backend/tests/test_field_editor.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: field-editor CRUD with strict unique-key / valid-type / contiguous-display_order invariants after every operation.
+- Added: transactional full-sync (`sync_fields`) with all-or-nothing semantics and array-index ordering.
+- Added: `ck_template_field_type` DB CHECK constraint (defense in depth below the ORM `@validates`).
+- Updated: `TemplateFieldUpdate` now validates key/type/source at the schema layer.
+- Removed: none.
+
+#### Issues Fixed
+
+- Found during testing: SQLite reuses a freed rowid for newly created rows, so "deleted field id no longer resolves" is not a valid assertion; tests assert deletion by field_name instead (no product-code change needed).
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 3) can now wire the endpoints: `create_field` (POST), `update_field` (PATCH), `delete_field` (DELETE), `reorder_fields` (PUT/PATCH with `FieldReorderRequest`), `sync_fields` (PUT with `FieldSyncRequest`); map `ValueError` -> 422 and rename-collision `IntegrityError` -> 409/422.
+- Confirmed full-sync delete semantics: fields absent from the sync payload ARE deleted; `sync_fields` itself reindexes (array index), and `delete_field` reindexes internally after a single delete — the endpoint layer never reindexes.
+- `FieldSyncRequest.mark_configured` is the endpoint's concern: call `advance_status(db, template, "field_configured")` after a successful sync (never downgrades).
+- Fields created through the editor default to `source="manual"` for the Phase 4 audit trail; updates only change `source` when explicitly sent.
+- Deploy note: `alembic upgrade head` on Neon applies `b9e5d2c8a740` (additive CHECK; safe — all existing rows pass the ORM validator).
+
+---
+
+### Checkpoint 0030
+
+- Date: 2026-09-09
+- Member: Member 2 (AI)
+- Branch: `feature/field-editor-endpoints` (created from `backend`; Member 3's data layer landed there via PR #75)
+- Push status: before push
+- Range covered: after Checkpoint 0029 -> 2026-09-09
+
+#### Summary
+
+- Implemented the V1.3 Phase 3 Member 2 slice: the field-editor endpoints. Five owner-only write routes over Member 3's CRUD with lock enforcement, integrity error mapping (409/422), contiguous `display_order` after every operation, and the transactional bulk full-sync that advances the template to `field_configured` — plus 27 API tests proving the contract.
+
+#### Completed Tasks
+
+- Added `_require_owner_editable(db, template_id, current_user)` guard shared by every field-write route: 404 missing template, 403 non-owner, 403 locked (`Template is locked and cannot be edited`).
+- `POST /{template_id}/fields` — create one field (201). 409 duplicate `field_name` (pre-check + `IntegrityError` backstop); 422 invalid `field_type` (CRUD/`@validates` `ValueError` mapped cleanly); `display_order` defaults to append position, explicit values honored then the set renumbered contiguous 0..n-1.
+- `PUT /{template_id}/fields/reorder` — validates `ordered_ids` is a permutation of the template's current field ids (else 422); returns the fresh ordered set. Route declared BEFORE the parameterized `/{template_id}/fields/{field_id}` so "reorder" is never captured as a field id; `/library` stays first.
+- `PATCH /{template_id}/fields/{field_id}` — partial update (`exclude_unset` semantics via `TemplateFieldUpdate`); 404 missing field or field belonging to another template; 409 rename collision; 422 invalid type.
+- `DELETE /{template_id}/fields/{field_id}` — 204; reindex-after-delete lives inside Member 3's `delete_field` (as agreed in Checkpoint 0029).
+- `PUT /{template_id}/fields` — BULK SYNC (full-save): duplicate `field_name` in payload -> 422; id from another template -> 422; existing fields ABSENT from the payload are DELETED (full-sync semantics, documented in the route docstring/OpenAPI); `display_order` = array position; all-or-nothing via `sync_fields` rollback; cross-item rename collision `IntegrityError` -> 409 with nothing written; `mark_configured` (default true) with >=1 field -> `advance_status(db, template, "field_configured")` (forward-only — `active` is never downgraded); returns the fresh ordered `list[TemplateFieldRead]`.
+- Logging with counts on create/update/delete/reorder/sync.
+- Created `tests/test_field_editor_api.py` (27 tests): ordering + contiguity after every op, 404/403/409/422 mapping per route, locked-template rejection on all five writes, mixed full-sync payload (create/update/delete-by-omission), empty-payload clears without status advance, `mark_configured=false` keeps status, `active` never downgraded, stranger reads public template fields but cannot write them.
+- Full suite: 158 passed (131 prior + 27 new).
+- Repo hygiene: removed stray Windows `nul` artifact at repo root and added it to `.gitignore`.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py` (+282 lines: 5 field-write routes + `_require_owner_editable`, `_field_value_error`, `_ensure_contiguous_order` helpers; imports for Member 3 CRUD/schemas)
+- `backend/tests/test_field_editor_api.py` (new, 27 tests)
+- `.gitignore` (+ Windows `nul` artifact guard; verified all other backend/frontend artifacts — storage, `*.db`, `.venv`, caches, node_modules, dist, tsbuildinfo — already covered)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Added: owner-only field CRUD endpoints — `POST /{id}/fields`, `PATCH /{id}/fields/{field_id}`, `DELETE /{id}/fields/{field_id}`.
+- Added: explicit reorder — `PUT /{id}/fields/reorder`.
+- Added: bulk full-sync save — `PUT /{id}/fields` with full-delete semantics and status advance to `field_configured`.
+- Added: template lock enforcement (403) on every field write.
+- Updated: `.gitignore` (Windows `nul` guard).
+- Removed: none.
+
+#### Issues Fixed
+
+- Removed stray `nul` file at repo root (Windows `2>nul` redirect artifact) so it cannot be committed; gitignored to prevent recurrence.
+
+#### Notes For Next Push
+
+- Member 1 (frontend) can now build the field editor UI against these endpoints. Full-sync semantics: `PUT /fields` must send the COMPLETE field list — fields absent from the payload are deleted; the response is the fresh ordered set; the template status becomes `field_configured` on save (when >=1 field and `mark_configured` not disabled).
+- PR target for `feature/field-editor-endpoints` is `backend` (backend-only change + directly related docs/config).
+- Route ordering matters if routes are ever reordered: `/{template_id}/fields/reorder` must stay declared before `/{template_id}/fields/{field_id}`, and `/library` before `/{template_id}`.
+- Phase 4 (AI field suggestions) must NOT be added to these routes (spec DO NOT); keep writes owner-only and never store DOCX bytes in the DB.
+
+---
+
 ## Entry Template
 
 ```md
