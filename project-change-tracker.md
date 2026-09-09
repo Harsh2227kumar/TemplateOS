@@ -1471,6 +1471,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0030
+
+- Date: 2026-09-09
+- Member: Member 2 (AI)
+- Branch: `feature/field-editor-endpoints` (created from `backend`; Member 3's data layer landed there via PR #75)
+- Push status: before push
+- Range covered: after Checkpoint 0029 -> 2026-09-09
+
+#### Summary
+
+- Implemented the V1.3 Phase 3 Member 2 slice: the field-editor endpoints. Five owner-only write routes over Member 3's CRUD with lock enforcement, integrity error mapping (409/422), contiguous `display_order` after every operation, and the transactional bulk full-sync that advances the template to `field_configured` — plus 27 API tests proving the contract.
+
+#### Completed Tasks
+
+- Added `_require_owner_editable(db, template_id, current_user)` guard shared by every field-write route: 404 missing template, 403 non-owner, 403 locked (`Template is locked and cannot be edited`).
+- `POST /{template_id}/fields` — create one field (201). 409 duplicate `field_name` (pre-check + `IntegrityError` backstop); 422 invalid `field_type` (CRUD/`@validates` `ValueError` mapped cleanly); `display_order` defaults to append position, explicit values honored then the set renumbered contiguous 0..n-1.
+- `PUT /{template_id}/fields/reorder` — validates `ordered_ids` is a permutation of the template's current field ids (else 422); returns the fresh ordered set. Route declared BEFORE the parameterized `/{template_id}/fields/{field_id}` so "reorder" is never captured as a field id; `/library` stays first.
+- `PATCH /{template_id}/fields/{field_id}` — partial update (`exclude_unset` semantics via `TemplateFieldUpdate`); 404 missing field or field belonging to another template; 409 rename collision; 422 invalid type.
+- `DELETE /{template_id}/fields/{field_id}` — 204; reindex-after-delete lives inside Member 3's `delete_field` (as agreed in Checkpoint 0029).
+- `PUT /{template_id}/fields` — BULK SYNC (full-save): duplicate `field_name` in payload -> 422; id from another template -> 422; existing fields ABSENT from the payload are DELETED (full-sync semantics, documented in the route docstring/OpenAPI); `display_order` = array position; all-or-nothing via `sync_fields` rollback; cross-item rename collision `IntegrityError` -> 409 with nothing written; `mark_configured` (default true) with >=1 field -> `advance_status(db, template, "field_configured")` (forward-only — `active` is never downgraded); returns the fresh ordered `list[TemplateFieldRead]`.
+- Logging with counts on create/update/delete/reorder/sync.
+- Created `tests/test_field_editor_api.py` (27 tests): ordering + contiguity after every op, 404/403/409/422 mapping per route, locked-template rejection on all five writes, mixed full-sync payload (create/update/delete-by-omission), empty-payload clears without status advance, `mark_configured=false` keeps status, `active` never downgraded, stranger reads public template fields but cannot write them.
+- Full suite: 158 passed (131 prior + 27 new).
+- Repo hygiene: removed stray Windows `nul` artifact at repo root and added it to `.gitignore`.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/templates.py` (+282 lines: 5 field-write routes + `_require_owner_editable`, `_field_value_error`, `_ensure_contiguous_order` helpers; imports for Member 3 CRUD/schemas)
+- `backend/tests/test_field_editor_api.py` (new, 27 tests)
+- `.gitignore` (+ Windows `nul` artifact guard; verified all other backend/frontend artifacts — storage, `*.db`, `.venv`, caches, node_modules, dist, tsbuildinfo — already covered)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Added: owner-only field CRUD endpoints — `POST /{id}/fields`, `PATCH /{id}/fields/{field_id}`, `DELETE /{id}/fields/{field_id}`.
+- Added: explicit reorder — `PUT /{id}/fields/reorder`.
+- Added: bulk full-sync save — `PUT /{id}/fields` with full-delete semantics and status advance to `field_configured`.
+- Added: template lock enforcement (403) on every field write.
+- Updated: `.gitignore` (Windows `nul` guard).
+- Removed: none.
+
+#### Issues Fixed
+
+- Removed stray `nul` file at repo root (Windows `2>nul` redirect artifact) so it cannot be committed; gitignored to prevent recurrence.
+
+#### Notes For Next Push
+
+- Member 1 (frontend) can now build the field editor UI against these endpoints. Full-sync semantics: `PUT /fields` must send the COMPLETE field list — fields absent from the payload are deleted; the response is the fresh ordered set; the template status becomes `field_configured` on save (when >=1 field and `mark_configured` not disabled).
+- PR target for `feature/field-editor-endpoints` is `backend` (backend-only change + directly related docs/config).
+- Route ordering matters if routes are ever reordered: `/{template_id}/fields/reorder` must stay declared before `/{template_id}/fields/{field_id}`, and `/library` before `/{template_id}`.
+- Phase 4 (AI field suggestions) must NOT be added to these routes (spec DO NOT); keep writes owner-only and never store DOCX bytes in the DB.
+
+---
+
 ## Entry Template
 
 ```md
