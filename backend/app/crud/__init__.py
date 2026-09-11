@@ -1,3 +1,7 @@
+from app.crud.ai_generation_crud import (
+    get_ai_generations_by_template,
+    log_ai_generation,
+)
 from app.crud.template_crud import (
     advance_status,
     create_template,
