@@ -1525,6 +1525,58 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0032
+
+- Date: 2026-09-12
+- Member: Member 3 (AI)
+- Branch: `feature/ai-generations-data-layer` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0030 -> 2026-09-12
+- Note: Checkpoint 0031 (V1.3 Phase 3 Member 1 field-editor UI) lives on `feature/field-editor-ui` and is not merged into `backend` yet; numbering follows the global sequence.
+
+#### Summary
+
+- Implemented the V1.3 Phase 4 Member 3 data layer: the generic `ai_generations` audit table (model + additive migration), the logging CRUD, the field-suggestion schemas, and the test suite (endpoint tests skip-guarded with the AI provider mocked until Member 2 ships the service/route).
+
+#### Completed Tasks
+
+- Created `app/models/ai_generation.py` (`AiGeneration`): lean audit columns — `action_type`, `model`, `template_id` (FK `templates.id` ON DELETE SET NULL, indexed), `document_id` (plain nullable Integer RESERVED for V1.4 — no FK to a non-existent table), `field_key`, `created_by` (FK `users.id` ON DELETE CASCADE, indexed), `status` (default `"success"`), `suggestions_count`, `detail` (tiny optional note — never prompt/output dumps), `created_at`; custom `__init__` defaults `status` pre-flush (mirrors the `Template` pattern) and `@validates` rejects unknown statuses; registered in `app/models/__init__.py`.
+- Added migration `e5f2a8c6d4b7_add_ai_generations_table` chained off `b9e5d2c8a740` (single head): `CURRENT_TIMESTAMP` / `'success'` server defaults (cross-dialect rule), both FKs with the chosen ON DELETE behaviors, indexes `ix_ai_generations_template_id` + `ix_ai_generations_created_by`; verified upgrade/downgrade/re-upgrade clean.
+- Created `app/schemas/ai.py`: `FieldSuggestion` (`field_name` regex `^[a-z][a-z0-9_]*$` + `field_type` membership validator importing `FIELD_TYPES` from the model — single source of truth), `FieldSuggestionList` (the `instructor` response_model wrapper), `SuggestFieldsResponse` (endpoint envelope — persists nothing), `AiGenerationRead` (`from_attributes`).
+- Created `app/crud/ai_generation_crud.py`: `log_ai_generation` (ONE lean insert per AI call — success AND error paths) and `get_ai_generations_by_template` (newest first: `created_at desc, id desc`, limit); registered in `app/crud/__init__.py`.
+- Confirmed the `source="ai"` plumbing: `"ai"` is already an accepted `FIELD_SOURCES` value on `template_fields` (added in Phase 2), so suggestions accepted through the Phase 3 create/sync endpoints are tagged `source="ai"` — proven by tests.
+- Tests: `tests/test_ai_generations.py` (CRUD units incl. error rows, status validation, newest-first ordering + limit, FK SET NULL / CASCADE behavior with SQLite FKs enforced via PRAGMA, migration up/down/up with DDL + behavioral verification on the scratch DB) and `tests/test_field_suggestions.py` (schema validation incl. invalid key `"Bad Key"` and invalid type `"dropdown"`, accept path via `POST /{id}/fields` and `PUT /{id}/fields` sets `source="ai"`, default stays `detected`; endpoint tests are skip-guarded until Member 2 ships `ai_service` + the suggest-fields route, then activate automatically with the provider monkeypatched).
+- Full suite: 176 passed, 2 skipped (the two guarded suggest-endpoint tests).
+
+#### Code Changes
+
+- `backend/app/models/ai_generation.py` (new) + `backend/app/models/__init__.py` (import)
+- `backend/alembic/versions/e5f2a8c6d4b7_add_ai_generations_table.py` (new)
+- `backend/app/schemas/ai.py` (new)
+- `backend/app/crud/ai_generation_crud.py` (new) + `backend/app/crud/__init__.py` (register)
+- `backend/tests/test_ai_generations.py`, `backend/tests/test_field_suggestions.py` (new)
+- `backend/tests/test_field_editor.py` (downgrade-target fix, test-only)
+
+#### Features Added / Updated / Removed
+
+- Added: generic `ai_generations` audit table (forward-compatible for every future AI feature — grammar, tone, rewrite, MoM — not just suggestions), logging + newest-first read CRUD, `FieldSuggestion`/`FieldSuggestionList`/`SuggestFieldsResponse`/`AiGenerationRead` schemas.
+- Updated: `test_field_editor.py` migration test now downgrades to `3f8d2c6a9e41` explicitly (later revisions chain on top of `b9e5d2c8a740`, so `downgrade -1` no longer targets it).
+- Removed: none.
+
+#### Issues Fixed
+
+- None (product code); the field-editor migration-test downgrade target was a test-only correction caused by this slice chaining a new revision.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 4) builds `app/services/ai_service.py` + `POST /api/v1/templates/{id}/suggest-fields` against the locked contract: `log_ai_generation(db, *, action_type, model, template_id=None, created_by, field_key=None, status="success", suggestions_count=None, detail=None)` plus the schemas in `app/schemas/ai.py` — this matches the member-specific Phase 4 prompts; the older phase-wide prompt's `create_ai_log` naming is superseded, do not code against it.
+- The 2 skipped endpoint tests in `test_field_suggestions.py` activate automatically once the route + `ai_service` exist (they monkeypatch the provider — never real Bedrock).
+- Backend verification result: `pytest tests` -> 176 passed, 2 skipped.
+- Deploy note: `alembic upgrade head` on Neon applies `e5f2a8c6d4b7` (new table; additive and safe).
+- PR target for `feature/ai-generations-data-layer` is `backend` (backend-only change + directly related docs).
+
+---
+
 ## Entry Template
 
 ```md
