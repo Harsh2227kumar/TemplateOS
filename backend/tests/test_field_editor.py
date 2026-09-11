@@ -469,8 +469,11 @@ def test_field_type_check_constraint_enforced_and_reversible(tmp_path: Path) -> 
     finally:
         engine.dispose()
 
+    # Downgrade past the b9e5d2c8a740 check-constraint revision (to its
+    # parent 3f8d2c6a9e41). "downgrade -1" no longer targets it now that
+    # later migrations (Phase 4's ai_generations) chain on top of it.
     subprocess.run(
-        [*command, "downgrade", "-1"],
+        [*command, "downgrade", "3f8d2c6a9e41"],
         cwd=backend_dir,
         env=environment,
         check=True,
