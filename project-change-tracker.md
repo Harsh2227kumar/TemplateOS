@@ -1577,6 +1577,56 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0033
+
+- Date: 2026-09-13
+- Member: Member 2 (AI)
+- Branch: `feature/ai-field-suggestions` (created from `backend` after `feature/ai-generations-data-layer` merged via PR #82)
+- Push status: before push
+- Range covered: after Checkpoint 0032 -> 2026-09-13
+
+#### Summary
+
+- Implemented the V1.3 Phase 4 Member 2 slice: the first TemplateOS AI feature — validated field suggestions from Claude Sonnet on AWS Bedrock (Anthropic SDK + `instructor`) via the new `ai_service` and the owner-only, non-persisting `POST /templates/{id}/suggest-fields` endpoint, logged to `ai_generations` on every attempt.
+
+#### Completed Tasks
+
+- Added pinned AI-only dependencies to `backend/requirements.txt`: `anthropic[bedrock]==1.5.0` (pulls boto3) + `instructor==1.17.0`, with a comment noting the app boots and all non-AI features work without them (lazy imports).
+- Extended `Settings` (`backend/app/core/config.py`): `AWS_REGION` (default `None` -> AI stays off), `BEDROCK_MODEL_SUGGESTIONS` (default `anthropic.claude-3-5-sonnet-20241022-v2:0` — inference-profile id to be confirmed in the team's AWS account), `AI_MAX_OUTPUT_TOKENS` (default 1024), and the `ai_is_configured` property (region set AND credentials resolvable via env vars or the boto3 default chain; network-free, never raises).
+- Created `backend/app/services/ai_service.py`: `AiUnavailableError`; `_build_client()` imports `instructor`/`AnthropicBedrock` lazily so importing the module never breaks app boot or non-AI tests, and funnels every failure (missing deps/region/creds, SDK construction) into `AiUnavailableError`; `suggest_fields(document_text, existing_keys)` sends a concise system+user prompt (existing keys listed, document text truncated to 6000 chars) with `response_model=FieldSuggestionList` (instructor-validated — no hand-parsed JSON), then post-filters against Phase 1's `VALID_KEY_PATTERN` and dedupes vs existing keys; any provider error -> `AiUnavailableError`.
+- Added `POST /api/v1/templates/{template_id}/suggest-fields` to `backend/app/api/v1/endpoints/templates.py`: owner-only (403 otherwise), 404 missing template, 409 no/missing source file; document text via `docx_parser.extract_text_segments` and existing keys via `template_field_crud.get_fields_by_template`, all blocking work in `asyncio.to_thread`; exactly ONE `log_ai_generation` row per call on success AND error paths (status `error`, `suggestions_count=0`, lean `detail` on failure); `AiUnavailableError` -> 503 with a clear message; persists NOTHING to `template_fields` (manual confirmation — accepted suggestions are written only through the Phase 3 endpoints with `source="ai"`).
+- Documented the new AI env vars in `.env.example` (commented-out `AWS_REGION`, `BEDROCK_MODEL_SUGGESTIONS`, `AI_MAX_OUTPUT_TOKENS` + Bedrock credential guidance: env keys or boto3 default chain, never exposed to the frontend).
+- Full suite: `pytest tests` -> 178 passed, 0 skipped — the two previously skip-guarded endpoint tests from checkpoint 0032 now run (AI provider monkeypatched; never real Bedrock in CI).
+
+#### Code Changes
+
+- `backend/requirements.txt` (AI deps + comment)
+- `backend/app/core/config.py` (AI settings + `ai_is_configured`; cosmetic reflow of two existing field definitions only)
+- `backend/app/services/ai_service.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (suggest-fields endpoint + imports)
+- `.env.example` (AI section)
+
+#### Features Added / Updated / Removed
+
+- Added: first AI feature — `ai_service.suggest_fields` (Bedrock Claude Sonnet via `instructor`, validated structured output, model routing via `BEDROCK_MODEL_SUGGESTIONS`); owner-only `POST /templates/{id}/suggest-fields` returning `SuggestFieldsResponse` (proposals only); `AiUnavailableError` -> 503 graceful-degradation contract; `ai_is_configured` config check.
+- Updated: `.env.example` documents the AI configuration; `requirements.txt` gained the AI-only dependency block.
+- Removed: none.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Confirm the exact Bedrock model id / cross-region inference profile available in the team's AWS account + region (and enable model access there); override `BEDROCK_MODEL_SUGGESTIONS` / `AWS_REGION` env vars if the default id is not available.
+- AI is off by default: no `AWS_REGION` -> suggest-fields returns 503 "not configured"; deploys need no AWS setup unless the feature is enabled. With creds set, a manual smoke test of the endpoint against real Bedrock is still outstanding (tests mock the provider by design).
+- Member 1 can now wire the "Suggest fields with AI" UI to `POST /api/v1/templates/{id}/suggest-fields`; accepted suggestions flow through the Phase 3 create/sync endpoints with `source="ai"`.
+- No migration needed this slice (`ai_generations` shipped in checkpoint 0032, PR #82).
+- PR target for `feature/ai-field-suggestions` is `backend` (backend-only change + directly related docs/config).
+- Future AI features (grammar, tone, rewrite, MoM) should reuse the same `ai_service` pattern (lazy imports, `AiUnavailableError`, lean `ai_generations` logging).
+
+---
+
 ## Entry Template
 
 ```md
