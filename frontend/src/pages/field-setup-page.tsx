@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import {
   ArrowLeft,
-  Bot,
   ChevronDown,
   ChevronUp,
   ListTodo,
@@ -53,9 +52,11 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 import { useAuth } from "@/context/auth-context";
+import { AiSuggestionsPanel } from "@/components/fields/AiSuggestionsPanel";
 import {
   ApiError,
   templatesApi,
+  type FieldSuggestion,
   type TemplateField,
   type TemplateResponse,
 } from "@/lib/api";
@@ -211,6 +212,18 @@ export function FieldSetupPage() {
 
   const { isSubmitting } = form.formState;
 
+  // Live field keys (kept current so the AI panel can block duplicate
+  // accepts even after in-editor renames). useFieldArray's `fields` alone
+  // does not reflect input edits.
+  const watchedFields = useWatch({ control: form.control, name: "fields" });
+  const existingKeys = (watchedFields ?? [])
+    .map((field) => field?.field_name?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  // Keys accepted from the AI panel but not saved yet — used only for the
+  // visual "AI suggestion" highlight; cleared on successful save.
+  const [aiStagedKeys, setAiStagedKeys] = useState<string[]>([]);
+
   useEffect(() => {
     let active = true;
     const load = async () => {
@@ -270,6 +283,7 @@ export function FieldSetupPage() {
       });
       // Reseed from the response so ids/rows stay in sync with the server.
       form.reset({ fields: saved.map(seedField) });
+      setAiStagedKeys([]);
       // Reflect the configured status immediately (forward-only server-side;
       // active templates stay active).
       if (template.status !== "active" && template.status !== "field_configured") {
@@ -285,9 +299,34 @@ export function FieldSetupPage() {
     }
   };
 
+  // Accept an AI proposal: stage it as a NEW field row (no rowId — Save all
+  // creates it server-side). This is the ONLY effect of accepting; no second
+  // persistence path exists.
+  const handleAcceptSuggestion = (suggestion: FieldSuggestion) => {
+    append({
+      field_name: suggestion.field_name,
+      field_label: suggestion.field_label ?? "",
+      field_type: isFieldType(suggestion.field_type)
+        ? suggestion.field_type
+        : "text",
+      is_required: suggestion.is_required,
+      ai_enabled: true,
+      description: suggestion.reason ?? "",
+      example_value: suggestion.example_value ?? "",
+      validation_rule: "",
+      section: suggestion.section ?? "",
+    });
+    setAiStagedKeys((keys) => [...keys, suggestion.field_name]);
+    setSaveSuccess(false);
+  };
+
   const confirmDelete = () => {
     if (deleteIndex === null) return;
+    const removedKey = fields[deleteIndex]?.field_name;
     remove(deleteIndex);
+    if (removedKey) {
+      setAiStagedKeys((keys) => keys.filter((key) => key !== removedKey));
+    }
     setDeleteIndex(null);
     setSaveSuccess(false);
   };
@@ -470,8 +509,13 @@ export function FieldSetupPage() {
         </div>
       )}
 
-      <Form {...form}>
-        <form className="space-y-6" onSubmit={form.handleSubmit(onSubmit)} noValidate>
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <Form {...form}>
+          <form
+            className="space-y-6"
+            onSubmit={form.handleSubmit(onSubmit)}
+            noValidate
+          >
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-amber-800">
               Saving replaces the field set — removed rows are deleted.
@@ -526,9 +570,20 @@ export function FieldSetupPage() {
             </Card>
           ) : (
             <ol className="space-y-4">
-              {fields.map((field, index) => (
+              {fields.map((field, index) => {
+                // Live key (renames count) — drives the AI-staged highlight.
+                const rowKey =
+                  watchedFields?.[index]?.field_name ?? field.field_name;
+                const isAiStaged = aiStagedKeys.includes(rowKey);
+                return (
                 <li key={field.id}>
-                  <Card>
+                  <Card
+                    className={
+                      isAiStaged
+                        ? "border-indigo-200 ring-1 ring-indigo-100"
+                        : undefined
+                    }
+                  >
                     <CardHeader className="pb-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <CardTitle className="flex flex-wrap items-center gap-3 text-base">
@@ -539,6 +594,14 @@ export function FieldSetupPage() {
                             {field.field_label || field.field_name || "New field"}
                           </span>
                           <MonoKey name={field.field_name} />
+                          {isAiStaged && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 border-indigo-200 bg-indigo-50 text-indigo-700"
+                            >
+                              AI suggestion
+                            </Badge>
+                          )}
                         </CardTitle>
                         <div className="flex items-center gap-1">
                           <Button
@@ -790,7 +853,8 @@ export function FieldSetupPage() {
                     </CardContent>
                   </Card>
                 </li>
-              ))}
+                );
+              })}
             </ol>
           )}
 
@@ -812,20 +876,20 @@ export function FieldSetupPage() {
             </div>
           )}
         </form>
-      </Form>
+        </Form>
 
-      {/* ── Phase 4 mount point ─────────────────────────────────────────
-          AI Suggestions panel slots in here without touching the editor. */}
-      <section id="ai-suggestions">
-        <Card className="border-dashed">
-          <CardContent className="flex items-center gap-3 py-6 text-slate-500">
-            <Bot className="h-6 w-6 shrink-0" />
-            <p className="text-sm">
-              AI suggestions for missing fields arrive here in the next phase.
-            </p>
-          </CardContent>
-        </Card>
-      </section>
+        {/* ── V1.3 Phase 4: AI Suggestions panel ─────────────────────────
+            Owner-only (this whole view is owner-gated above; the locked
+            read-only view returns earlier). Proposals only — accepted rows
+            are staged in the editor and persisted by Save all. */}
+        <aside id="ai-suggestions" className="lg:sticky lg:top-6">
+          <AiSuggestionsPanel
+            templateId={templateId}
+            existingKeys={existingKeys}
+            onAccept={handleAcceptSuggestion}
+          />
+        </aside>
+      </div>
 
       <Dialog
         open={deleteIndex !== null}
