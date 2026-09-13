@@ -204,6 +204,26 @@ export interface CleanTemplatePayload {
   mark_configured?: boolean;
 }
 
+// --- V1.3 Phase 4: AI field suggestions (proposals only — nothing persists here) ---
+
+export interface FieldSuggestion {
+  field_name: string;
+  field_label: string | null;
+  field_type: string;
+  section: string | null;
+  is_required: boolean;
+  example_value: string | null;
+  reason: string | null;
+}
+
+export interface SuggestFieldsResponse {
+  template_id: number;
+  model: string;
+  existing_count: number;
+  suggestion_count: number;
+  suggestions: FieldSuggestion[];
+}
+
 export const templatesApi = {
   getLibrary: async (token: string, params?: {
     search?: string;
@@ -299,6 +319,17 @@ export const templatesApi = {
     return request<TemplateField[]>(
       `/templates/${id}/fields`,
       { method: "PUT", body: JSON.stringify(payload) },
+      token,
+    );
+  },
+
+  suggestFields: async (
+    token: string,
+    id: number,
+  ): Promise<SuggestFieldsResponse> => {
+    return request<SuggestFieldsResponse>(
+      `/templates/${id}/suggest-fields`,
+      { method: "POST" },
       token,
     );
   },
