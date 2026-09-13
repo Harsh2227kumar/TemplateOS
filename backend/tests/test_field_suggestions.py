@@ -34,6 +34,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
+# No model id is hardcoded in app code — tests provide one like .env would.
+os.environ.setdefault("BEDROCK_MODEL_SUGGESTIONS", "test-model-id")
+
+# Single test-wide constant (matches the env value above) so no real Bedrock
+# model id is hardcoded anywhere in the test suite.
+TEST_MODEL_ID = "test-model-id"
 
 from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.template_field_crud import get_fields_by_template
@@ -228,7 +234,7 @@ def test_field_suggestion_list_wraps_suggestions():
 def test_suggest_fields_response_envelope():
     response = SuggestFieldsResponse(
         template_id=7,
-        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        model=TEST_MODEL_ID,
         existing_count=2,
         suggestion_count=1,
         suggestions=[FieldSuggestion(field_name="meeting_date", field_type="date")],
@@ -253,7 +259,7 @@ def test_ai_generation_read_from_attributes(owner_id):
         row = log_ai_generation(
             session,
             action_type="suggest_fields",
-            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            model=TEST_MODEL_ID,
             template_id=template.id,
             created_by=owner_id,
             suggestions_count=4,
@@ -262,7 +268,7 @@ def test_ai_generation_read_from_attributes(owner_id):
         read = AiGenerationRead.model_validate(row)
         assert read.id == row.id
         assert read.action_type == "suggest_fields"
-        assert read.model == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        assert read.model == TEST_MODEL_ID
         assert read.template_id == template.id
         assert read.field_key is None
         assert read.status == "success"
