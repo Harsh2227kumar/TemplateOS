@@ -42,3 +42,6 @@ opencode.json
 
 # Windows artifacts (e.g. accidental `2>nul` redirect files)
 nul
+
+# graphify knowledge graph output (generated, regenerable via /graphify)
+graphify-out/
