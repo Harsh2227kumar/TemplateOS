@@ -7,7 +7,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
-from app.services import docx_parser
+from app.core.config import settings
+from app.services import ai_service, docx_parser
+from app.services.ai_service import AiUnavailableError
 from app.services.docx_cleaner import (
     apply_replacements_with_results,
     get_renderable_path,
@@ -18,6 +20,7 @@ from app.services.storage_service import (
     storage_service,
 )
 from app.services.template_access import user_can_view_template
+from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.template_crud import (
     advance_status,
     create_template,
@@ -45,6 +48,7 @@ from app.schemas.template import (
     TemplateListItem,
     TemplateLibraryResponse,
 )
+from app.schemas.ai import SuggestFieldsResponse
 from app.schemas.template_field import (
     DetectionSummary,
     DetectionWarnings,
@@ -614,6 +618,108 @@ async def clean_template(
             for result in results
         ],
         warnings=CleanWarnings(unmatched=unmatched, invalid_keys=invalid_keys),
+    )
+
+
+# --- V1.3 Phase 4: AI field suggestions (owner-only, proposals only) ---
+
+
+@router.post(
+    "/{template_id}/suggest-fields",
+    response_model=SuggestFieldsResponse,
+)
+async def suggest_template_fields(
+    template_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> SuggestFieldsResponse:
+    """
+    Ask Claude Sonnet on AWS Bedrock (via instructor, validated output) to
+    propose ADDITIONAL fields for this template based on its document text.
+
+    Owner-only. Persists NOTHING to template_fields — suggestions are
+    proposals the owner explicitly accepts through the Phase 3 field
+    endpoints (source="ai"). Every attempt (success AND error) is logged to
+    ai_generations. If AI is not configured or the provider fails, returns
+    503 — the rest of the app keeps working without AI.
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if template.uploaded_by != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the template owner can request AI field suggestions",
+        )
+    if not template.original_file_path:
+        raise HTTPException(status_code=409, detail="Template has no source file")
+
+    try:
+        docx_bytes = await asyncio.to_thread(
+            storage_service.read_bytes, template.original_file_path
+        )
+    except StoredFileNotFoundError:
+        raise HTTPException(
+            status_code=409, detail="Source file missing on disk"
+        ) from None
+
+    try:
+        segments = await asyncio.to_thread(
+            docx_parser.extract_text_segments, docx_bytes
+        )
+    except Exception as e:
+        logger.error(f"Content extraction failed for template {template_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not read the template document"
+        ) from None
+
+    document_text = "\n".join(segment["text"] for segment in segments)
+    existing_keys = [
+        field.field_name for field in get_fields_by_template(db, template_id)
+    ]
+
+    logger.info(
+        f"AI field suggestion started for template {template_id} "
+        f"by user {current_user.id} (existing_fields={len(existing_keys)})"
+    )
+    try:
+        suggestions = await asyncio.to_thread(
+            ai_service.suggest_fields, document_text, existing_keys
+        )
+    except AiUnavailableError as e:
+        log_ai_generation(
+            db,
+            action_type="suggest_fields",
+            model=settings.bedrock_model_suggestions,
+            template_id=template_id,
+            created_by=current_user.id,
+            status="error",
+            suggestions_count=0,
+            detail=str(e),
+        )
+        logger.warning(f"AI unavailable for template {template_id}: {e}")
+        raise HTTPException(status_code=503, detail=str(e)) from None
+
+    log_ai_generation(
+        db,
+        action_type="suggest_fields",
+        model=settings.bedrock_model_suggestions,
+        template_id=template_id,
+        created_by=current_user.id,
+        status="success",
+        suggestions_count=len(suggestions),
+    )
+    logger.info(
+        f"AI field suggestion finished for template {template_id}: "
+        f"{len(suggestions)} suggestion(s) (nothing persisted)"
+    )
+
+    return SuggestFieldsResponse(
+        template_id=template_id,
+        model=settings.bedrock_model_suggestions,
+        existing_count=len(existing_keys),
+        suggestion_count=len(suggestions),
+        suggestions=suggestions,
     )
 
 

@@ -1415,45 +1415,6 @@ Add all future updates below this section.
 - Frontend follow-up (separate PR into `frontend`): super-admin-only Delete button on the template detail page behind a type-"confirm" dialog; `templatesApi.deleteTemplate` must handle the 204 empty body.
 - Deletion order is deliberate: DB first, files second — orphan files are harmless, a row pointing at deleted files is not.
 
----
-
-### Checkpoint 0028
-
-- Date: 2026-08-28
-- Member: Member 1 (AI)
-- Branch: feature/super-admin-template-delete-ui
-- Push status: before push
-- Range covered: after Checkpoint 0026 (frontend branch) -> 2026-08-28
-- Note: Checkpoint 0027 (the backend deletion endpoint) lives on the `backend` branch (`feature/super-admin-template-delete`, PR #69) and is not merged here yet.
-
-#### Summary
-
-- Added the frontend half of super-admin template deletion: a super-admin-only destructive Delete action on the template detail page behind a type-"confirm" dialog, plus the `deleteTemplate` API client method with 204 empty-body handling.
-
-#### Completed Tasks
-
-- Extended `frontend/src/lib/api.ts`: `request<T>` now returns `undefined` for 204 No Content responses (DELETE endpoints send no body); added `templatesApi.deleteTemplate(token, id)`.
-- Updated `frontend/src/pages/template-detail-page.tsx`: a destructive "Delete Template" button rendered only when `user?.role === "super_admin"` (owners and regular users never see it); clicking opens a Dialog explaining the irreversible consequences (template, its fields, and the original + processed DOCX files are removed) and requiring the user to type `confirm` exactly (trimmed, case-insensitive) before the destructive button enables; Enter submits when valid; ApiError surfaces inside the dialog with the state preserved; on success the dialog closes and the user is navigated to `/templates`.
-- Verified `npm run build` (strict TS) on the feature branch and on a combined backend+frontend integration tree, plus a live e2e against the real backend.
-
-#### Code Changes
-
-- `frontend/src/lib/api.ts` (204 handling + deleteTemplate)
-- `frontend/src/pages/template-detail-page.tsx` (delete button + confirm dialog)
-
-#### Features Added / Updated / Removed
-
-- Added: super-admin-only template deletion UI with typed confirmation; `deleteTemplate` API method; 204 no-content support in the shared request helper.
-
-#### Issues Fixed
-
-- None.
-
-#### Notes For Next Push
-
-- Live e2e verified against the merged backend (temp integration branch, deleted after): owner DELETE → 403 "Only a super admin can delete templates"; `/auth/me` returns `role` for the UI gate; super-admin DELETE → 204 with 0-byte body; DB record + fields gone, stored DOCX removed from disk; subsequent GET → 404. Backend suite 106/106 and strict TS build pass on the combined tree.
-- Backend half is PR #69 into `backend`; this PR + #69 integrate into `dev` via the usual frontend/backend sync flow.
-- When integrating, the tracker union order is 0026 → 0027 → 0028.
 
 ---
 
@@ -1621,6 +1582,108 @@ Add all future updates below this section.
 - Phase 4 can slot the AI suggestions panel into `<section id="ai-suggestions">` without touching the editor; the `Switch` primitive and the `TemplateFieldUpsert` type are the reuse points for accept-suggestion.
 - Client validation intentionally mirrors the backend contract (key regex, MVP type set, unique keys, max lengths); server 409/422 remain the backstop and surface through `ApiError.message`.
 - The editor intentionally uses only the bulk sync for persistence (spec: "Save all" is the primary write path); `createField`/`updateField`/`deleteField`/`reorderFields` are shipped in the API client for Phase 4+ consumers.
+
+---
+
+### Checkpoint 0032
+
+- Date: 2026-09-12
+- Member: Member 3 (AI)
+- Branch: `feature/ai-generations-data-layer` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0030 -> 2026-09-12
+- Note: Checkpoint 0031 (V1.3 Phase 3 Member 1 field-editor UI) lives on `feature/field-editor-ui` and is not merged into `backend` yet; numbering follows the global sequence.
+
+#### Summary
+
+- Implemented the V1.3 Phase 4 Member 3 data layer: the generic `ai_generations` audit table (model + additive migration), the logging CRUD, the field-suggestion schemas, and the test suite (endpoint tests skip-guarded with the AI provider mocked until Member 2 ships the service/route).
+
+#### Completed Tasks
+
+- Created `app/models/ai_generation.py` (`AiGeneration`): lean audit columns — `action_type`, `model`, `template_id` (FK `templates.id` ON DELETE SET NULL, indexed), `document_id` (plain nullable Integer RESERVED for V1.4 — no FK to a non-existent table), `field_key`, `created_by` (FK `users.id` ON DELETE CASCADE, indexed), `status` (default `"success"`), `suggestions_count`, `detail` (tiny optional note — never prompt/output dumps), `created_at`; custom `__init__` defaults `status` pre-flush (mirrors the `Template` pattern) and `@validates` rejects unknown statuses; registered in `app/models/__init__.py`.
+- Added migration `e5f2a8c6d4b7_add_ai_generations_table` chained off `b9e5d2c8a740` (single head): `CURRENT_TIMESTAMP` / `'success'` server defaults (cross-dialect rule), both FKs with the chosen ON DELETE behaviors, indexes `ix_ai_generations_template_id` + `ix_ai_generations_created_by`; verified upgrade/downgrade/re-upgrade clean.
+- Created `app/schemas/ai.py`: `FieldSuggestion` (`field_name` regex `^[a-z][a-z0-9_]*$` + `field_type` membership validator importing `FIELD_TYPES` from the model — single source of truth), `FieldSuggestionList` (the `instructor` response_model wrapper), `SuggestFieldsResponse` (endpoint envelope — persists nothing), `AiGenerationRead` (`from_attributes`).
+- Created `app/crud/ai_generation_crud.py`: `log_ai_generation` (ONE lean insert per AI call — success AND error paths) and `get_ai_generations_by_template` (newest first: `created_at desc, id desc`, limit); registered in `app/crud/__init__.py`.
+- Confirmed the `source="ai"` plumbing: `"ai"` is already an accepted `FIELD_SOURCES` value on `template_fields` (added in Phase 2), so suggestions accepted through the Phase 3 create/sync endpoints are tagged `source="ai"` — proven by tests.
+- Tests: `tests/test_ai_generations.py` (CRUD units incl. error rows, status validation, newest-first ordering + limit, FK SET NULL / CASCADE behavior with SQLite FKs enforced via PRAGMA, migration up/down/up with DDL + behavioral verification on the scratch DB) and `tests/test_field_suggestions.py` (schema validation incl. invalid key `"Bad Key"` and invalid type `"dropdown"`, accept path via `POST /{id}/fields` and `PUT /{id}/fields` sets `source="ai"`, default stays `detected`; endpoint tests are skip-guarded until Member 2 ships `ai_service` + the suggest-fields route, then activate automatically with the provider monkeypatched).
+- Full suite: 176 passed, 2 skipped (the two guarded suggest-endpoint tests).
+
+#### Code Changes
+
+- `backend/app/models/ai_generation.py` (new) + `backend/app/models/__init__.py` (import)
+- `backend/alembic/versions/e5f2a8c6d4b7_add_ai_generations_table.py` (new)
+- `backend/app/schemas/ai.py` (new)
+- `backend/app/crud/ai_generation_crud.py` (new) + `backend/app/crud/__init__.py` (register)
+- `backend/tests/test_ai_generations.py`, `backend/tests/test_field_suggestions.py` (new)
+- `backend/tests/test_field_editor.py` (downgrade-target fix, test-only)
+
+#### Features Added / Updated / Removed
+
+- Added: generic `ai_generations` audit table (forward-compatible for every future AI feature — grammar, tone, rewrite, MoM — not just suggestions), logging + newest-first read CRUD, `FieldSuggestion`/`FieldSuggestionList`/`SuggestFieldsResponse`/`AiGenerationRead` schemas.
+- Updated: `test_field_editor.py` migration test now downgrades to `3f8d2c6a9e41` explicitly (later revisions chain on top of `b9e5d2c8a740`, so `downgrade -1` no longer targets it).
+- Removed: none.
+
+#### Issues Fixed
+
+- None (product code); the field-editor migration-test downgrade target was a test-only correction caused by this slice chaining a new revision.
+
+#### Notes For Next Push
+
+- Member 2 (V1.3 Phase 4) builds `app/services/ai_service.py` + `POST /api/v1/templates/{id}/suggest-fields` against the locked contract: `log_ai_generation(db, *, action_type, model, template_id=None, created_by, field_key=None, status="success", suggestions_count=None, detail=None)` plus the schemas in `app/schemas/ai.py` — this matches the member-specific Phase 4 prompts; the older phase-wide prompt's `create_ai_log` naming is superseded, do not code against it.
+- The 2 skipped endpoint tests in `test_field_suggestions.py` activate automatically once the route + `ai_service` exist (they monkeypatch the provider — never real Bedrock).
+- Backend verification result: `pytest tests` -> 176 passed, 2 skipped.
+- Deploy note: `alembic upgrade head` on Neon applies `e5f2a8c6d4b7` (new table; additive and safe).
+- PR target for `feature/ai-generations-data-layer` is `backend` (backend-only change + directly related docs).
+
+---
+
+### Checkpoint 0033
+
+- Date: 2026-09-13
+- Member: Member 2 (AI)
+- Branch: `feature/ai-field-suggestions` (created from `backend` after `feature/ai-generations-data-layer` merged via PR #82)
+- Push status: before push
+- Range covered: after Checkpoint 0032 -> 2026-09-13
+
+#### Summary
+
+- Implemented the V1.3 Phase 4 Member 2 slice: the first TemplateOS AI feature — validated field suggestions from Claude Sonnet on AWS Bedrock (Anthropic SDK + `instructor`) via the new `ai_service` and the owner-only, non-persisting `POST /templates/{id}/suggest-fields` endpoint, logged to `ai_generations` on every attempt.
+
+#### Completed Tasks
+
+- Added pinned AI-only dependencies to `backend/requirements.txt`: `anthropic[bedrock]==1.5.0` (pulls boto3) + `instructor==1.17.0`, with a comment noting the app boots and all non-AI features work without them (lazy imports).
+- Extended `Settings` (`backend/app/core/config.py`): `AWS_REGION` (default `None` -> AI stays off), `BEDROCK_MODEL_SUGGESTIONS` (default `anthropic.claude-3-5-sonnet-20241022-v2:0` — inference-profile id to be confirmed in the team's AWS account), `AI_MAX_OUTPUT_TOKENS` (default 1024), and the `ai_is_configured` property (region set AND credentials resolvable via env vars or the boto3 default chain; network-free, never raises).
+- Created `backend/app/services/ai_service.py`: `AiUnavailableError`; `_build_client()` imports `instructor`/`AnthropicBedrock` lazily so importing the module never breaks app boot or non-AI tests, and funnels every failure (missing deps/region/creds, SDK construction) into `AiUnavailableError`; `suggest_fields(document_text, existing_keys)` sends a concise system+user prompt (existing keys listed, document text truncated to 6000 chars) with `response_model=FieldSuggestionList` (instructor-validated — no hand-parsed JSON), then post-filters against Phase 1's `VALID_KEY_PATTERN` and dedupes vs existing keys; any provider error -> `AiUnavailableError`.
+- Added `POST /api/v1/templates/{template_id}/suggest-fields` to `backend/app/api/v1/endpoints/templates.py`: owner-only (403 otherwise), 404 missing template, 409 no/missing source file; document text via `docx_parser.extract_text_segments` and existing keys via `template_field_crud.get_fields_by_template`, all blocking work in `asyncio.to_thread`; exactly ONE `log_ai_generation` row per call on success AND error paths (status `error`, `suggestions_count=0`, lean `detail` on failure); `AiUnavailableError` -> 503 with a clear message; persists NOTHING to `template_fields` (manual confirmation — accepted suggestions are written only through the Phase 3 endpoints with `source="ai"`).
+- Documented the new AI env vars in `.env.example` (commented-out `AWS_REGION`, `BEDROCK_MODEL_SUGGESTIONS`, `AI_MAX_OUTPUT_TOKENS` + Bedrock credential guidance: env keys or boto3 default chain, never exposed to the frontend).
+- Full suite: `pytest tests` -> 178 passed, 0 skipped — the two previously skip-guarded endpoint tests from checkpoint 0032 now run (AI provider monkeypatched; never real Bedrock in CI).
+
+#### Code Changes
+
+- `backend/requirements.txt` (AI deps + comment)
+- `backend/app/core/config.py` (AI settings + `ai_is_configured`; cosmetic reflow of two existing field definitions only)
+- `backend/app/services/ai_service.py` (new)
+- `backend/app/api/v1/endpoints/templates.py` (suggest-fields endpoint + imports)
+- `.env.example` (AI section)
+
+#### Features Added / Updated / Removed
+
+- Added: first AI feature — `ai_service.suggest_fields` (Bedrock Claude Sonnet via `instructor`, validated structured output, model routing via `BEDROCK_MODEL_SUGGESTIONS`); owner-only `POST /templates/{id}/suggest-fields` returning `SuggestFieldsResponse` (proposals only); `AiUnavailableError` -> 503 graceful-degradation contract; `ai_is_configured` config check.
+- Updated: `.env.example` documents the AI configuration; `requirements.txt` gained the AI-only dependency block.
+- Removed: none.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- Confirm the exact Bedrock model id / cross-region inference profile available in the team's AWS account + region (and enable model access there); override `BEDROCK_MODEL_SUGGESTIONS` / `AWS_REGION` env vars if the default id is not available.
+- AI is off by default: no `AWS_REGION` -> suggest-fields returns 503 "not configured"; deploys need no AWS setup unless the feature is enabled. With creds set, a manual smoke test of the endpoint against real Bedrock is still outstanding (tests mock the provider by design).
+- Member 1 can now wire the "Suggest fields with AI" UI to `POST /api/v1/templates/{id}/suggest-fields`; accepted suggestions flow through the Phase 3 create/sync endpoints with `source="ai"`.
+- No migration needed this slice (`ai_generations` shipped in checkpoint 0032, PR #82).
+- PR target for `feature/ai-field-suggestions` is `backend` (backend-only change + directly related docs/config).
+- Future AI features (grammar, tone, rewrite, MoM) should reuse the same `ai_service` pattern (lazy imports, `AiUnavailableError`, lean `ai_generations` logging).
 
 ---
 
