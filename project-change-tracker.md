@@ -1947,6 +1947,55 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0039
+
+- Date: 2026-09-13
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: test/v14-p1-form-rendering-data
+- Push status: before push
+- Range covered: after Checkpoint 0038 -> completion of remaining Member 3 Phase 1 tasks
+
+#### Summary
+
+Completed the two remaining Member 3 Phase 1 tasks: (1) Verified existing database template_fields data for malformed rows, and (2) Enhanced integration tests to include API-level tests calling GET /templates/{id}/fields endpoint. All verification passed successfully.
+
+#### Completed Tasks
+
+- Created `backend/scripts/verify_template_fields.py` to query database and verify existing template_fields data
+- Verified database contains no malformed rows (checked: valid field_type, contiguous display_order, no null required fields)
+- Found 1 template with 12 fields, all data is clean and valid
+- Enhanced `backend/tests/test_form_rendering_data.py` with 4 new API-level integration tests
+- API tests now verify: ordered response, complete metadata, section grouping, null section handling
+- Total test count increased from 5 (database-level) to 9 tests (5 database + 4 API-level)
+- All 9 tests pass successfully
+
+#### Code Changes
+
+- `backend/scripts/verify_template_fields.py` (new, 150 lines)
+- `backend/tests/test_form_rendering_data.py` (modified, added 130 lines for API tests)
+
+#### Features Added / Updated / Removed
+
+- Added: Database verification script to check existing template_fields data
+- Added: 4 API-level integration tests calling GET /templates/{id}/fields
+- Updated: test_form_rendering_data.py now tests both database and API layers
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed: Member 3 Phase 1 verification was incomplete (now fully verified database data)
+- Fixed: Integration tests were database-only (now include API-level tests)
+
+#### Notes For Next Push
+
+- Database verification confirms: 1 template with 12 fields, all valid, no malformed data
+- All 9 integration tests pass: `pytest tests/test_form_rendering_data.py -v`
+- Verification script can be run manually: `python backend/scripts/verify_template_fields.py`
+- Member 3 Phase 1 work now 100% complete per the original prompt requirements
+- Ready to proceed to Member 2 Phase 1 tasks
+
+---
+
 ## Entry Template
 
 ```md
