@@ -1891,6 +1891,62 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0038
+
+- Date: 2026-09-13
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `test/v14-p1-form-rendering-data`
+- Push status: before push
+- Range covered: after Checkpoint 0037 -> 2026-09-13
+
+#### Summary
+
+- Completed V1.4 Phase 1 Member 3 tasks (Database/Integration Developer). Verified existing `template_fields` data structure is ready for dynamic form rendering, created integration tests confirming the form-rendering data contract, drafted comprehensive Phase 2 table DDL documentation for `documents` and `document_values` tables, and created an optional demo template seeder for Member 1 UI testing.
+
+#### Completed Tasks
+
+- Verified existing `template_fields` model has all required metadata columns for form rendering
+- Confirmed FIELD_TYPES matches MVP set: `text, textarea, date, number, list, signature`
+- Created `backend/tests/test_form_rendering_data.py` with 5 integration tests
+- All tests verify: field types, metadata completeness, display_order sorting, section grouping, and validation rule persistence
+- All 5 tests pass successfully
+- Drafted comprehensive Phase 2 table DDL documentation in `backend/docs/phase2-tables.md`
+- Documented `documents` table schema (id, template_id, created_by, name, status, timestamps)
+- Documented `document_values` table schema (id, document_id, field_name, value, timestamps)
+- Included design rationale, cascade behavior, migration notes, and testing checklist
+- Created optional `backend/scripts/seed_demo_template.py` for Member 1 UI testing
+- Seed script creates a template with 3 sections, 8 fields, and varied field types
+
+#### Code Changes
+
+- `backend/tests/test_form_rendering_data.py` (new, 5 tests)
+- `backend/docs/phase2-tables.md` (new, comprehensive Phase 2 DDL documentation)
+- `backend/scripts/seed_demo_template.py` (new, demo template seeder)
+
+#### Features Added / Updated / Removed
+
+- Added: Integration test suite for form rendering data contract (5 tests, all passing)
+- Added: Phase 2 table DDL documentation for `documents` and `document_values`
+- Added: Demo template seeder script for frontend testing
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Phase 1 Member 3 work is complete with NO new tables or migrations (verification/testing/prep only)
+- All 5 integration tests pass: `pytest tests/test_form_rendering_data.py -v`
+- Member 2 can now begin Phase 1 tasks (verification, validation rule documentation)
+- Member 1 can use `seed_demo_template.py` to create test data for UI development
+- Phase 2 will implement the `documents` and `document_values` tables per the documented DDL
+- Run tests with `unset API_V1_PREFIX VITE_API_BASE_URL` to avoid env variable conflicts
+- PR target: `test/v14-p1-form-rendering-data` -> `backend` (backend-only testing + docs)
+
+---
+
 ## Entry Template
 
 ```md
