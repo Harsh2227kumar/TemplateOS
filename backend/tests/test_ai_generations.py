@@ -35,6 +35,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
+# No model id is hardcoded in app code — tests provide one like .env would.
+os.environ.setdefault("BEDROCK_MODEL_SUGGESTIONS", "test-model-id")
+
+# Single test-wide constant (matches the env value above) so no real Bedrock
+# model id is hardcoded anywhere in the test suite.
+TEST_MODEL_ID = "test-model-id"
 
 from app.crud.ai_generation_crud import (
     get_ai_generations_by_template,
@@ -112,7 +118,7 @@ def test_log_ai_generation_writes_row_with_metadata(db):
     row = log_ai_generation(
         db,
         action_type="suggest_fields",
-        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        model=TEST_MODEL_ID,
         template_id=template.id,
         created_by=user.id,
         suggestions_count=3,
@@ -120,7 +126,7 @@ def test_log_ai_generation_writes_row_with_metadata(db):
 
     assert row.id is not None
     assert row.action_type == "suggest_fields"
-    assert row.model == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    assert row.model == TEST_MODEL_ID
     assert row.template_id == template.id
     assert row.created_by == user.id
     assert row.status == "success"
@@ -146,7 +152,7 @@ def test_log_ai_generation_error_row(db):
     row = log_ai_generation(
         db,
         action_type="suggest_fields",
-        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        model=TEST_MODEL_ID,
         created_by=user.id,
         status="error",
         suggestions_count=0,
