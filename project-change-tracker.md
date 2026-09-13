@@ -1743,6 +1743,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0035
+
+- Date: 2026-09-13
+- Member: Member 2 (AI)
+- Branch: `feature/bedrock-diagnostics` (created from `backend`, which is identical to `dev` after sync PRs #88/#89)
+- Push status: before push
+- Range covered: after Checkpoint 0034 -> 2026-09-13
+- Note: covers work done on the `dev` working tree (config edits + diagnostics) moved onto a backend-scoped task branch. Integrations of checkpoints 0032-0034 into `dev` happened via PRs #85-#89.
+
+#### Summary
+
+- Added Bedrock/AI operational diagnostics: a standalone `scripts/verify_bedrock.py` (config-only + `--live` real-call verification) and WHY/WHERE-classified failure logging inside `ai_service.py`, so any AWS/Bedrock failure reports exactly what broke and how to fix it — in the uvicorn console, the 503 detail, and the `ai_generations` error row. Plus `.env.example` (V1.3 P4 AI section rewrite) and `.gitignore` (graphify output) updates done post-0034.
+
+#### Completed Tasks
+
+- Rewrote the AI section of `.env.example` per V1.3 P4: documents `AWS_REGION` (region + on/off semantics — unset keeps AI off, matching `ai_is_configured`), `BEDROCK_MODEL_SUGGESTIONS` (with the cross-region inference-profile id caveat + console model-access step), `AI_MAX_OUTPUT_TOKENS`, and credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/optional `AWS_SESSION_TOKEN`, or boto3 default chain) with the backend-only rule. Documents the names the shipped code actually reads (the P4 prompt's `BEDROCK_ENABLED`/`BEDROCK_MODEL_SONNET`/etc. were consolidated in checkpoint 0033).
+- Added `graphify-out/` to `.gitignore` (generated knowledge-graph output, regenerable via the graphify tool).
+- `backend/app/services/ai_service.py` diagnostics upgrade:
+  - New `_config_problem()`: returns a human-readable description of the FIRST missing config piece (region unset / no env creds / no profile creds / chain check failed) or None; shared by the 503 path and the verify script.
+  - New `_classify_ai_error()`: maps provider/SDK exceptions to WHY text by exception name/HTTP status (no SDK imports — module stays import-safe without AI deps): 400 malformed model id (shows current value + inference-profile format), 401 invalid/expired keys, 403 IAM lacks `bedrock:InvokeModel` or console model access off, 404 model not found/access not enabled, 429 throttled, 5xx AWS-side, timeout/connection network egress hint, `InstructorRetryException` schema-validation, credential-chain errors, generic fallback.
+  - `_build_client()` and `suggest_fields()` failures now log `[ai] ... — WHERE: <stage> — WHY: <cause+fix>` at ERROR (visible in the uvicorn console like normal request logs) with the full traceback at DEBUG; the same reason text flows into the `AiUnavailableError` message -> 503 `detail` -> `ai_generations` `detail` column. Previously failures logged a bare exception with no cause classification.
+- Created `backend/scripts/verify_bedrock.py` (mirrors `test_db_connection.py`'s standalone-script convention): 4-stage check — settings (prints the actual AI values), dependencies (anthropic/instructor/boto3 versions), credential chain (reports WHICH chain resolved: env vars vs shared profile vs instance role), and `--live` for one tiny REAL Bedrock probe call (the only way to verify IAM permission + console model access end-to-end); prints latency + returned proposals. Exit code 0/1; failures print the same WHY text the API server logs on 503. No database involved.
+- Verified: `pytest tests` -> 178 passed (endpoint tests unaffected — they mock at the module boundary); ran the script config-only against the current (unconfigured) state — correctly reports "AI is intentionally OFF" + the one missing piece; demoed the ERROR log line + 503 detail for the unset-region case.
+
+#### Code Changes
+
+- `backend/app/services/ai_service.py` (+~110: `_config_problem`, `_classify_ai_error`, staged logging; `settings.ai_is_configured` call replaced by `_config_problem`)
+- `backend/scripts/verify_bedrock.py` (new, ~185 lines)
+- `.env.example` (AI section rewrite, ~2x comments)
+- `.gitignore` (+2: graphify-out entry)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Added: `scripts/verify_bedrock.py` — pre-flight Bedrock verification (config-only default; `--live` real-call mode validating IAM + model access).
+- Added: WHY/WHERE failure classification — every AI failure names its stage and a fix hint across console log, 503 detail, and audit row.
+- Updated: `.env.example` AI section now fully documents the V1.3 P4 contract (toggle semantics, model-id caveat, credential chain).
+- Updated: `.gitignore` ignores `graphify-out/`.
+- Removed: none.
+
+#### Issues Fixed
+
+- 503 responses and logs previously said only "AI is not configured (missing AWS region or credentials)" / bare exception text — no indication of WHICH piece was missing or WHY a call failed. Now each failure names the exact missing config piece or the classified AWS-side cause with a fix hint.
+
+#### Notes For Next Push
+
+- PR target: `feature/bedrock-diagnostics` -> `backend` (backend change + directly related config/docs). After merge, a routine `backend` -> `dev` integration PR will carry it to `dev`; `frontend` needs no sync for this (no frontend files touched).
+- The Bedrock model id default (`anthropic.claude-3-5-sonnet-20241022-v2:0` in code) is still a guess — the team MUST confirm the id in their AWS account (Bedrock console -> Model access) and set `BEDROCK_MODEL_SUGGESTIONS` + `AWS_REGION` in `.env`; then run `python scripts/verify_bedrock.py --live` from `backend/` for the end-to-end smoke test (checkpoint 0033's outstanding item).
+- `settings.ai_is_configured` in `config.py` is now only used by tests/`verify` indirectly via `_config_problem` (same logic, richer output); leave it as the public property.
+- Live smoke test against real Bedrock remains outstanding until AWS creds exist (by design — tests never hit AWS).
+- `.env.example`/`.gitignore` ride along in this branch (repo-root config, backend-scoped change per the change-scope table).
+
+---
+
 ## Entry Template
 
 ```md
