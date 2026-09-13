@@ -224,6 +224,10 @@ export interface SuggestFieldsResponse {
   suggestions: FieldSuggestion[];
 }
 
+// --- V1.4 Phase 1: Dynamic form rendering ---
+
+export type DocumentFormValues = Record<string, any>;
+
 export const templatesApi = {
   getLibrary: async (token: string, params?: {
     search?: string;

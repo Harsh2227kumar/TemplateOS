@@ -2059,6 +2059,71 @@ Completed V1.4 Phase 1 Member 2 (Backend/Service Developer) tasks: verified exis
 
 ---
 
+### Checkpoint 0041
+
+- Date: 2026-09-13
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: feature/dynamic-form
+- Push status: before push
+- Range covered: after Checkpoint 0040 -> V1.4 Phase 1 Member 1 tasks complete
+
+#### Summary
+
+Completed V1.4 Phase 1 Member 1 (Frontend Developer) tasks: built dynamic form rendering page with metadata-driven inputs, section grouping, client-side validation, and full field type support. No hardcoded logic - 100% driven by template_fields metadata.
+
+#### Completed Tasks
+
+- **Task 1: API Types** - Added DocumentFormValues type to lib/api.ts
+- **Task 2: ListInput Component** - Created reusable array input with add/remove functionality
+- **Task 3: Validation Helper** - Created validation.ts to parse validation_rule strings into Zod validators
+- **Task 4: DynamicField Component** - Created component that switches on field_type to render appropriate inputs
+- **Task 5: CreateDocumentPage** - Built main form page with:
+  - Dynamic Zod schema generation from field metadata
+  - Section grouping (preserves display_order within sections)
+  - Field rendering with labels, help text, examples, validation
+  - Form submission (Phase 2 placeholder)
+- **Task 6: Template Detail Page** - Enabled "Use This Template" button for field_configured and active templates
+- **Task 7: Routing** - Added /documents/create route to App.tsx
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (modified) - Added DocumentFormValues type
+- `frontend/src/lib/validation.ts` (new, 56 lines) - Validation rule parser
+- `frontend/src/components/forms/ListInput.tsx` (new, 61 lines) - Array input component
+- `frontend/src/components/forms/DynamicField.tsx` (new, 105 lines) - Dynamic field renderer
+- `frontend/src/pages/create-document-page.tsx` (new, 322 lines) - Main form page
+- `frontend/src/pages/template-detail-page.tsx` (modified) - Added "Use This Template" button
+- `frontend/src/App.tsx` (modified) - Added /documents/create route
+
+#### Features Added / Updated / Removed
+
+- Added: Dynamic form rendering from template_fields metadata
+- Added: Section grouping with cards (preserves display_order)
+- Added: All field types supported: text, textarea, date, number, list, signature (stub)
+- Added: Client-side validation via Zod (email, min, max, required)
+- Added: Help text and example values display
+- Added: "Use This Template" button on template detail page
+- Added: /documents/create route (protected, inside DashboardLayout)
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Member 1 Phase 1 work is complete - all 7 tasks done
+- Build passes with strict TypeScript: `npm run build` ✓
+- Form is 100% metadata-driven (no hardcoded templates)
+- Validation rules parsed: email, min:N, max:N (regex ignored - server-only)
+- "Save Draft" button exists but shows Phase 2 placeholder message
+- Ready for Member 1 Phase 2: wire actual save endpoints
+- PR target: `feature/dynamic-form` -> `frontend` (frontend-only work)
+- Test with: seed_demo_template.py to create realistic test data
+
+---
+
 ## Entry Template
 
 ```md

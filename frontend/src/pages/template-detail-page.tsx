@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Download, Eraser, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
+import { ArrowLeft, Download, Eraser, FileText, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
@@ -236,8 +236,21 @@ export function TemplateDetailPage() {
       </div>
 
       <div className="flex flex-wrap gap-4 pt-4 border-t">
+        {(template.status === "field_configured" || template.status === "active") && (
+          <Button
+            className="gap-2"
+            onClick={() => navigate(`/documents/create?template_id=${template.id}`)}
+          >
+            <FileText className="h-4 w-4" />
+            Use This Template
+          </Button>
+        )}
         {isOwner && configAction && (
-          <Button className="gap-2" onClick={() => navigate(configAction.target)}>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => navigate(configAction.target)}
+          >
             <configAction.icon className="h-4 w-4" />
             {configAction.label}
           </Button>

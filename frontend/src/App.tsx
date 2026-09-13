@@ -11,6 +11,7 @@ import { TemplateDetailPage } from "./pages/template-detail-page";
 import { PlaceholderReviewPage } from "./pages/placeholder-review-page";
 import { TemplateCleaningPage } from "./pages/template-cleaning-page";
 import { FieldSetupPage } from "./pages/field-setup-page";
+import CreateDocumentPage from "./pages/create-document-page";
 
 export function App() {
   return (
@@ -29,6 +30,7 @@ export function App() {
           <Route path="/templates/:id/placeholders" element={<PlaceholderReviewPage />} />
           <Route path="/templates/:id/clean" element={<TemplateCleaningPage />} />
           <Route path="/templates/:id/fields" element={<FieldSetupPage />} />
+          <Route path="/documents/create" element={<CreateDocumentPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
