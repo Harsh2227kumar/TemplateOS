@@ -1624,6 +1624,62 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0034
+
+- Date: 2026-09-13
+- Member: Member 1 (AI)
+- Branch: `feature/ai-suggestions-panel` (created from `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0031 -> 2026-09-13
+- Note: Checkpoints 0032 (ai_generations data layer) and 0033 (Bedrock suggest-fields backend) were merged into `backend` via PRs #82/#83 and are not on `frontend` yet; they arrive with the next `dev` sync. Numbering follows the global sequence.
+
+#### Summary
+
+- Implemented the V1.3 Phase 4 Member 1 slice: the AI Suggestions panel inside the Field Setup page. The owner can request AI field suggestions, review each proposal with its reason, and Accept/Dismiss — accepted rows are staged into the Phase 3 editor (tagged) and persisted only by the existing "Save all" bulk sync. A 503 (AI unavailable) shows a calm notice without touching the manual editor.
+
+#### Completed Tasks
+
+- Extended `src/lib/api.ts`: `FieldSuggestion` and `SuggestFieldsResponse` types (matching the backend Phase 4 schemas, incl. `reason`) + `templatesApi.suggestFields(token, id)` calling `POST /templates/{id}/suggest-fields` via the existing `request<T>` helper — the only AI call, never Bedrock from the browser.
+- Created `src/components/fields/AiSuggestionsPanel.tsx`:
+  - Card with Sparkles header and a primary "Suggest fields with AI" button; indigo/violet accent on the slate palette, responsive.
+  - States: idle (button + in-control description), loading (3 Skeleton rows, disabled button, "Thinking…"), success, error; "Suggest again" re-runs the request.
+  - Each proposal row: mono `{{key}}`, label, type/section/required badges, muted example value, italic "Why: …" reason, and Accept/Dismiss buttons.
+  - Accept calls `onAccept` (parent stages it), marks the key accepted, removes the row; Dismiss removes the row only. Accept is disabled with "Already added" when the key exists in the editor's live field keys or was already accepted — no double accepts.
+  - Empty result: "No additional fields suggested — your field set looks complete."
+  - Error handling: `ApiError.status === 503` -> calm amber notice "AI suggestions aren't available right now (the AI service isn't configured). You can keep configuring fields manually."; other errors -> red banner with the message. The manual editor is never blocked.
+  - All state local to the panel except accepts, which flow up via `onAccept`; token read from `localStorage("templateos_access_token")` per convention.
+- Wired the panel into `src/pages/field-setup-page.tsx` at the reserved mount point — new two-column layout (`lg:grid-cols-[minmax(0,1fr)_360px]`): editor left, panel as a sticky `<aside id="ai-suggestions">` right on desktop, stacked below on mobile. Owner-only is inherited from the page's owner gate; the locked read-only view returns before the panel renders.
+- `onAccept` stages the suggestion into the `useFieldArray` as a new `TemplateFieldUpsert` (no rowId): key, label, type (guarded by `isFieldType`), required, `ai_enabled: true` (AI-suggested descriptive fields default on; owner can toggle), `description` = the AI reason, example, section. Staged rows get a subtle indigo ring + "AI suggestion" Badge until saved; removing a staged row clears its highlight.
+- Live duplicate guard: `existingKeys` derives from `useWatch` over the field array (renames count), not the static `fields` snapshot.
+- No second persistence path: staged rows save via the existing "Save all" (`saveFields`); on success the form reseeds and the staged-key highlights clear. Helper text after accepting: "N suggestion(s) accepted — added to the field editor. Click Save all to keep them."
+- Verified `npm run build` (`tsc -b && vite build`, strict TS) passes; no new dependencies (reused Card/Badge/Button/Skeleton + lucide icons).
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts` (+31: 2 types + 1 method)
+- `frontend/src/components/fields/AiSuggestionsPanel.tsx` (new, ~270 lines)
+- `frontend/src/pages/field-setup-page.tsx` (panel wiring, grid layout, accept handler, staged-row highlight; removed the dashed placeholder)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Added: AI Suggestions panel — owner-triggered `POST /{id}/suggest-fields` with loading/empty/error states, per-proposal Accept/Dismiss, duplicate-accept guard, and the 503 calm-degradation notice.
+- Added: `FieldSuggestion`/`SuggestFieldsResponse` client types + `suggestFields` API method.
+- Updated: Field Setup page layout — two-column desktop grid with the panel as a sticky aside (mount point `#ai-suggestions` preserved); accepted AI rows highlighted (indigo ring + badge) until saved.
+- Removed: the "AI suggestions arrive here in the next phase" dashed placeholder card.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- PR target: `feature/ai-suggestions-panel` -> `frontend` (frontend-only change). The live endpoint is already merged into `backend` (PR #83) — to test end-to-end, run the backend from `backend` with `AWS_REGION` set (otherwise the panel correctly shows the calm 503 notice).
+- After merge, integrate `frontend` -> `dev` (merge-commit PR) so Phase 4 is complete on the integrated branch; `backend` -> `dev` is still pending too (checkpoints 0032/0033).
+- The panel is the reuse template for future AI features (grammar/tone/rewrite): local state + `onAccept`-style flow-up, 503 calm notice, no auto-apply.
+
+---
+
 ## Entry Template
 
 ```md
