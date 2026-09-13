@@ -1797,6 +1797,46 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0036
+
+- Date: 2026-09-13
+- Member: Member 2 (AI)
+- Branch: `fix/bedrock-error-classification` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0035 -> 2026-09-13
+
+#### Summary
+
+- Bug fix from the first live `verify_bedrock.py --live` run: instructor wraps provider errors in `InstructorRetryException`, so a real AWS 403 (missing IAM `bedrock:InvokeModel` permission) was misclassified as "schema validation failed". The classifier now unwraps the exception chain and classifies by the underlying HTTP status, and 403 messages include the raw AWS error detail (which names the exact IAM user/ARN).
+
+#### Completed Tasks
+
+- Added `_status_error()` to `ai_service.py`: walks the exception chain (up to depth 4, via `last_exception` and `__cause__`) to find the deepest exception carrying an HTTP `status_code`.
+- `_classify_ai_error()` now unwraps instructor/SDK wrappers FIRST — an `InstructorRetryException` around an AWS 403 is classified as the 403 (permission problem), not schema validation. `InstructorRetryException` without an underlying status still maps to the schema-validation message.
+- 403 WHY text now appends the raw AWS message (truncated to 220 chars) — it names the exact IAM user and model ARN, as seen in the live failure.
+- Verified: simulated the exact live failure shape (instructor wrapper around a 403 with the real ARN message) — now classified correctly as HTTP 403 with the AWS detail; `pytest tests` -> 178 passed.
+
+#### Code Changes
+
+- `backend/app/services/ai_service.py` (+~30: `_status_error`, unwrap-first classification, 403 detail)
+- `project-change-tracker.md` (this checkpoint)
+
+#### Features Added / Updated / Removed
+
+- Updated: AI failure diagnostics — instructor-wrapped provider errors are classified by their underlying HTTP status; 403 messages carry the raw AWS detail.
+
+#### Issues Fixed
+
+- Misclassification found in the first real `--live` run: AWS 403 "not authorized to perform bedrock:InvokeModel" was reported as "model output failed schema validation after retries". Root cause: instructor wraps provider exceptions, and the classifier checked the wrapper's name before the status.
+
+#### Notes For Next Push
+
+- PR target: `fix/bedrock-error-classification` -> `backend`. After merge, routine `backend` -> `dev` integration carries both 0035 and 0036.
+- The ACTUAL blocker for live AI remains AWS-side (not code): the IAM user `templatesos-ai` (account 014548222374) needs a policy granting `bedrock:InvokeModel` on the model/inference-profile ARN, AND Claude model access must be enabled in the Bedrock console for ap-south-1. Then re-run `python scripts/verify_bedrock.py --live`.
+- The uvicorn backend terminal showed a DIFFERENT AWS identity (`customerpulse-backend-read-dev`, account 132762007359) than the script shell — the running server was started with stale env vars. After fixing `.env`, restart the backend so both use the same credentials.
+
+---
+
 ## Entry Template
 
 ```md

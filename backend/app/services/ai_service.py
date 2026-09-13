@@ -79,13 +79,42 @@ def _config_problem() -> str | None:
         return f"AWS_REGION is set but the credential chain check failed ({exc})"
 
 
+def _status_error(exc: BaseException, _depth: int = 0):
+    """
+    Find the deepest exception in the chain carrying an HTTP status_code.
+    instructor wraps provider errors (e.g. an AWS 403) in
+    InstructorRetryException, so the wrapper's name alone would misclassify
+    a permission failure as a schema-validation failure. Unwrap first.
+    Returns None when no exception in the chain has a status.
+    """
+    if _depth > 4:
+        return None
+    if getattr(exc, "status_code", None) is not None:
+        return exc
+    for attr in ("last_exception", "__cause__"):
+        nested = getattr(exc, attr, None)
+        if isinstance(nested, BaseException):
+            found = _status_error(nested, _depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
 def _classify_ai_error(exc: Exception) -> str:
     """
     Map a provider/SDK exception to a human-readable WHY (what to fix).
     Classifies by exception name / HTTP status_code so no SDK imports are
     needed here — keeps the module import-safe without AI dependencies.
+    Wrapped errors are unwrapped first: an InstructorRetryException around
+    an AWS 403 is a PERMISSION problem, not a schema-validation problem.
     """
     name = type(exc).__name__
+
+    # Unwrap instructor/SDK wrappers to the underlying provider error.
+    underlying = _status_error(exc)
+    if underlying is not None and underlying is not exc:
+        return _classify_ai_error(underlying)
+
     status = getattr(exc, "status_code", None)
 
     if name == "InstructorRetryException":
@@ -107,10 +136,14 @@ def _classify_ai_error(exc: Exception) -> str:
             "are invalid or expired; rotate them in AWS IAM and update .env"
         )
     if status == 403:
+        aws_detail = str(exc).strip().replace("\n", " ")
+        if len(aws_detail) > 220:
+            aws_detail = aws_detail[:220] + "…"
         return (
             "AWS denied the call (HTTP 403) — the IAM user lacks "
             "bedrock:InvokeModel permission for this model, or model "
             "access is not enabled in the Bedrock console for this region"
+            + (f" [{aws_detail}]" if aws_detail else "")
         )
     if status == 404:
         return (
