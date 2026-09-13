@@ -14,6 +14,10 @@ Rules (MD/features.md §10):
   provider failure raises AiUnavailableError, which the endpoint maps to
   503. The rest of the app keeps working without AI.
 
+Diagnostics: every failure is logged with a WHY (classified cause + fix
+hint) and a WHERE (the failing stage), so the uvicorn console shows exactly
+what broke — the same information `scripts/verify_bedrock.py` reports.
+
 Import safety: anthropic/instructor are imported INSIDE _build_client, so
 importing this module (and booting the app, and running non-AI tests) works
 even when the AI dependencies are not installed.
@@ -45,6 +49,152 @@ class AiUnavailableError(Exception):
     """AI (Bedrock) is not configured or the provider call failed."""
 
 
+def _config_problem() -> str | None:
+    """
+    Return a human-readable description of the FIRST configuration problem,
+    or None when AI could actually be called. Says exactly WHICH piece is
+    missing (region, env credentials, profile credentials) so the 503
+    response and scripts/verify_bedrock.py can tell the user what to fix.
+    """
+    if not settings.aws_region:
+        return (
+            "AWS_REGION is not set — leave it unset to keep AI off, or set "
+            "it to your Bedrock region (e.g. ap-south-1)"
+        )
+    if not settings.bedrock_model_suggestions:
+        return (
+            "BEDROCK_MODEL_SUGGESTIONS is not set — set it in .env to the "
+            "model / inference-profile id from the Bedrock console (Model "
+            "access); there is no default model id in code"
+        )
+    import os
+
+    if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+        return None
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return None
+    try:
+        from boto3.session import Session
+
+        if Session(region_name=settings.aws_region).get_credentials() is not None:
+            return None
+        return (
+            "AWS_REGION is set but no AWS auth was found — set "
+            "AWS_BEARER_TOKEN_BEDROCK (Bedrock long-term API key from the "
+            "console) or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY in .env, "
+            "or run 'aws configure' once"
+        )
+    except Exception as exc:
+        return f"AWS_REGION is set but the credential chain check failed ({exc})"
+
+
+def _status_error(exc: BaseException, _depth: int = 0):
+    """
+    Find the deepest exception in the chain carrying an HTTP status_code.
+    instructor wraps provider errors (e.g. an AWS 403) in
+    InstructorRetryException, so the wrapper's name alone would misclassify
+    a permission failure as a schema-validation failure. Unwrap first.
+    Returns None when no exception in the chain has a status.
+    """
+    if _depth > 4:
+        return None
+    if getattr(exc, "status_code", None) is not None:
+        return exc
+    for attr in ("last_exception", "__cause__"):
+        nested = getattr(exc, attr, None)
+        if isinstance(nested, BaseException):
+            found = _status_error(nested, _depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _classify_ai_error(exc: Exception) -> str:
+    """
+    Map a provider/SDK exception to a human-readable WHY (what to fix).
+    Classifies by exception name / HTTP status_code so no SDK imports are
+    needed here — keeps the module import-safe without AI dependencies.
+    Wrapped errors are unwrapped first: an InstructorRetryException around
+    an AWS 403 is a PERMISSION problem, not a schema-validation problem.
+    """
+    name = type(exc).__name__
+
+    # Unwrap instructor/SDK wrappers to the underlying provider error.
+    underlying = _status_error(exc)
+    if underlying is not None and underlying is not exc:
+        return _classify_ai_error(underlying)
+
+    status = getattr(exc, "status_code", None)
+
+    if name == "InstructorRetryException":
+        return (
+            "the AI model returned output that failed schema validation "
+            "after retries — retry the request; if it persists, report it"
+        )
+    if status == 400:
+        aws_detail = str(exc).strip().replace("\n", " ")
+        if len(aws_detail) > 220:
+            aws_detail = aws_detail[:220] + "…"
+        return (
+            "AWS rejected the request (HTTP 400) — usually a malformed or "
+            "unavailable model id: check BEDROCK_MODEL_SUGGESTIONS="
+            f"'{settings.bedrock_model_suggestions}' in .env against the "
+            "exact id shown in the Bedrock console (Model access)"
+            + (f" [{aws_detail}]" if aws_detail else "")
+        )
+    if status == 401:
+        return (
+            "AWS credentials were rejected (HTTP 401) — your access keys "
+            "are invalid or expired; rotate them in AWS IAM and update .env"
+        )
+    if status == 403:
+        aws_detail = str(exc).strip().replace("\n", " ")
+        if len(aws_detail) > 220:
+            aws_detail = aws_detail[:220] + "…"
+        return (
+            "AWS denied the call (HTTP 403) — the API key or IAM user lacks "
+            "permission for this model, or model access is not enabled in "
+            "the Bedrock console for this region"
+            + (f" [{aws_detail}]" if aws_detail else "")
+        )
+    if status == 404:
+        return (
+            "Bedrock model not found / access not enabled (HTTP 404) — "
+            f"check BEDROCK_MODEL_SUGGESTIONS="
+            f"'{settings.bedrock_model_suggestions}' and enable model "
+            "access in the AWS Bedrock console (Model access -> Claude)"
+        )
+    if status == 429:
+        return "Bedrock throttled the request (HTTP 429) — wait a moment and retry"
+    if status is not None and status >= 500:
+        return (
+            f"AWS-side Bedrock error (HTTP {status}) — retry; if it "
+            "persists, check the AWS health dashboard"
+        )
+    if name == "APITimeoutError":
+        return (
+            "the Bedrock call timed out — retry, or check network egress "
+            "to bedrock-runtime.<region>.amazonaws.com"
+        )
+    if name == "APIConnectionError":
+        return (
+            "could not reach AWS Bedrock — network/DNS/firewall issue "
+            "between this server and AWS"
+        )
+    if name in (
+        "NoCredentialsError",
+        "CredentialRetrievalError",
+        "TokenRetrievalError",
+    ):
+        return (
+            "AWS credentials disappeared mid-flight — re-run "
+            "scripts/verify_bedrock.py to re-check the credential chain"
+        )
+    if name in ("ClientError", "BotoClientError"):
+        return f"AWS SDK error: {exc}"
+    return f"unexpected AI error ({name}): {exc}"
+
+
 def _build_client():
     """
     Return an instructor-wrapped AnthropicBedrock client, or raise
@@ -52,14 +202,19 @@ def _build_client():
     unresolvable credentials, SDK construction error) funnels into
     AiUnavailableError so FastAPI never sees a raw 500.
     """
-    if not settings.ai_is_configured:
-        raise AiUnavailableError(
-            "AI is not configured (missing AWS region or credentials)"
-        )
+    problem = _config_problem()
+    if problem is not None:
+        logger.error(f"[ai] Bedrock NOT configured — WHY: {problem}")
+        raise AiUnavailableError(f"AI is not configured: {problem}")
     try:
         import instructor
         from anthropic import AnthropicBedrock
     except ImportError as exc:
+        logger.error(
+            f"[ai] dependencies missing — WHY: {exc} (install with "
+            "'pip install -r requirements.txt': anthropic[bedrock] + "
+            "instructor)"
+        )
         raise AiUnavailableError(
             "AI dependencies are not installed (anthropic/instructor)"
         ) from exc
@@ -68,8 +223,13 @@ def _build_client():
             AnthropicBedrock(aws_region=settings.aws_region)
         )
     except Exception as exc:
-        logger.error(f"Could not initialize the Bedrock AI client: {exc}")
-        raise AiUnavailableError("AI is currently unavailable") from exc
+        reason = _classify_ai_error(exc)
+        logger.error(
+            f"[ai] Bedrock client init failed — WHERE: "
+            f"ai_service._build_client — WHY: {reason}"
+        )
+        logger.debug("[ai] traceback:", exc_info=True)
+        raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
 
 
 def suggest_fields(
@@ -78,7 +238,8 @@ def suggest_fields(
     """
     Ask Claude Sonnet on Bedrock for ADDITIONAL template fields and return
     the validated, deduplicated suggestions. Provider/dependency failures
-    raise AiUnavailableError (the endpoint maps that to 503).
+    raise AiUnavailableError (the endpoint maps that to 503) and are logged
+    with a classified WHY + the failing stage.
     """
     client = _build_client()
 
@@ -104,8 +265,14 @@ def suggest_fields(
     except AiUnavailableError:
         raise
     except Exception as exc:
-        logger.error(f"AI field suggestion call failed: {exc}")
-        raise AiUnavailableError("AI is currently unavailable") from exc
+        reason = _classify_ai_error(exc)
+        logger.error(
+            f"[ai] field suggestion call failed — WHERE: "
+            f"ai_service.suggest_fields -> Bedrock "
+            f"(model={settings.bedrock_model_suggestions}) — WHY: {reason}"
+        )
+        logger.debug("[ai] traceback:", exc_info=True)
+        raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
 
     # instructor already validated the schema; still enforce the key rule
     # and dedupe against existing keys (and within the model's own reply).
