@@ -49,6 +49,8 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     }
     throw new ApiError(message, response.status);
   }
+  // 204 No Content (e.g. DELETE endpoints) has no body to parse.
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -132,6 +134,27 @@ export interface PlaceholderDetectionResponse {
   };
 }
 
+// --- V1.3 Phase 3: field metadata editor ---
+
+export interface TemplateFieldUpsert {
+  id?: number;
+  field_name: string;
+  field_label?: string;
+  field_type: string;
+  default_value?: string;
+  is_required: boolean;
+  description?: string;
+  example_value?: string;
+  validation_rule?: string;
+  section?: string;
+  ai_enabled: boolean;
+}
+
+export interface FieldSyncPayload {
+  fields: TemplateFieldUpsert[];
+  mark_configured?: boolean;
+}
+
 // --- V1.3 Phase 2: manual template cleaning ---
 
 export interface DocSegment {
@@ -181,6 +204,26 @@ export interface CleanTemplatePayload {
   mark_configured?: boolean;
 }
 
+// --- V1.3 Phase 4: AI field suggestions (proposals only — nothing persists here) ---
+
+export interface FieldSuggestion {
+  field_name: string;
+  field_label: string | null;
+  field_type: string;
+  section: string | null;
+  is_required: boolean;
+  example_value: string | null;
+  reason: string | null;
+}
+
+export interface SuggestFieldsResponse {
+  template_id: number;
+  model: string;
+  existing_count: number;
+  suggestion_count: number;
+  suggestions: FieldSuggestion[];
+}
+
 export const templatesApi = {
   getLibrary: async (token: string, params?: {
     search?: string;
@@ -223,6 +266,74 @@ export const templatesApi = {
     return request<TemplateField[]>(`/templates/${id}/fields`, {}, token);
   },
 
+  createField: async (
+    token: string,
+    id: number,
+    body: TemplateFieldUpsert,
+  ): Promise<TemplateField> => {
+    return request<TemplateField>(
+      `/templates/${id}/fields`,
+      { method: "POST", body: JSON.stringify(body) },
+      token,
+    );
+  },
+
+  updateField: async (
+    token: string,
+    id: number,
+    fieldId: number,
+    body: Partial<TemplateFieldUpsert>,
+  ): Promise<TemplateField> => {
+    return request<TemplateField>(
+      `/templates/${id}/fields/${fieldId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token,
+    );
+  },
+
+  deleteField: async (token: string, id: number, fieldId: number): Promise<void> => {
+    return request<void>(
+      `/templates/${id}/fields/${fieldId}`,
+      { method: "DELETE" },
+      token,
+    );
+  },
+
+  reorderFields: async (
+    token: string,
+    id: number,
+    orderedIds: number[],
+  ): Promise<TemplateField[]> => {
+    return request<TemplateField[]>(
+      `/templates/${id}/fields/reorder`,
+      { method: "PUT", body: JSON.stringify({ ordered_ids: orderedIds }) },
+      token,
+    );
+  },
+
+  saveFields: async (
+    token: string,
+    id: number,
+    payload: FieldSyncPayload,
+  ): Promise<TemplateField[]> => {
+    return request<TemplateField[]>(
+      `/templates/${id}/fields`,
+      { method: "PUT", body: JSON.stringify(payload) },
+      token,
+    );
+  },
+
+  suggestFields: async (
+    token: string,
+    id: number,
+  ): Promise<SuggestFieldsResponse> => {
+    return request<SuggestFieldsResponse>(
+      `/templates/${id}/suggest-fields`,
+      { method: "POST" },
+      token,
+    );
+  },
+
   getContent: async (token: string, id: number): Promise<TemplateContent> => {
     return request<TemplateContent>(`/templates/${id}/content`, {}, token);
   },
@@ -237,6 +348,10 @@ export const templatesApi = {
       { method: "POST", body: JSON.stringify(payload) },
       token,
     );
+  },
+
+  deleteTemplate: async (token: string, id: number): Promise<void> => {
+    return request<void>(`/templates/${id}`, { method: "DELETE" }, token);
   },
 
   upload: async (
