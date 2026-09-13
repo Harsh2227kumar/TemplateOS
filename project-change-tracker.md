@@ -1891,6 +1891,174 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0038
+
+- Date: 2026-09-13
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `test/v14-p1-form-rendering-data`
+- Push status: before push
+- Range covered: after Checkpoint 0037 -> 2026-09-13
+
+#### Summary
+
+- Completed V1.4 Phase 1 Member 3 tasks (Database/Integration Developer). Verified existing `template_fields` data structure is ready for dynamic form rendering, created integration tests confirming the form-rendering data contract, drafted comprehensive Phase 2 table DDL documentation for `documents` and `document_values` tables, and created an optional demo template seeder for Member 1 UI testing.
+
+#### Completed Tasks
+
+- Verified existing `template_fields` model has all required metadata columns for form rendering
+- Confirmed FIELD_TYPES matches MVP set: `text, textarea, date, number, list, signature`
+- Created `backend/tests/test_form_rendering_data.py` with 5 integration tests
+- All tests verify: field types, metadata completeness, display_order sorting, section grouping, and validation rule persistence
+- All 5 tests pass successfully
+- Drafted comprehensive Phase 2 table DDL documentation in `backend/docs/phase2-tables.md`
+- Documented `documents` table schema (id, template_id, created_by, name, status, timestamps)
+- Documented `document_values` table schema (id, document_id, field_name, value, timestamps)
+- Included design rationale, cascade behavior, migration notes, and testing checklist
+- Created optional `backend/scripts/seed_demo_template.py` for Member 1 UI testing
+- Seed script creates a template with 3 sections, 8 fields, and varied field types
+
+#### Code Changes
+
+- `backend/tests/test_form_rendering_data.py` (new, 5 tests)
+- `backend/docs/phase2-tables.md` (new, comprehensive Phase 2 DDL documentation)
+- `backend/scripts/seed_demo_template.py` (new, demo template seeder)
+
+#### Features Added / Updated / Removed
+
+- Added: Integration test suite for form rendering data contract (5 tests, all passing)
+- Added: Phase 2 table DDL documentation for `documents` and `document_values`
+- Added: Demo template seeder script for frontend testing
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Phase 1 Member 3 work is complete with NO new tables or migrations (verification/testing/prep only)
+- All 5 integration tests pass: `pytest tests/test_form_rendering_data.py -v`
+- Member 2 can now begin Phase 1 tasks (verification, validation rule documentation)
+- Member 1 can use `seed_demo_template.py` to create test data for UI development
+- Phase 2 will implement the `documents` and `document_values` tables per the documented DDL
+- Run tests with `unset API_V1_PREFIX VITE_API_BASE_URL` to avoid env variable conflicts
+- PR target: `test/v14-p1-form-rendering-data` -> `backend` (backend-only testing + docs)
+
+---
+
+### Checkpoint 0039
+
+- Date: 2026-09-13
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: test/v14-p1-form-rendering-data
+- Push status: before push
+- Range covered: after Checkpoint 0038 -> completion of remaining Member 3 Phase 1 tasks
+
+#### Summary
+
+Completed the two remaining Member 3 Phase 1 tasks: (1) Verified existing database template_fields data for malformed rows, and (2) Enhanced integration tests to include API-level tests calling GET /templates/{id}/fields endpoint. All verification passed successfully.
+
+#### Completed Tasks
+
+- Created `backend/scripts/verify_template_fields.py` to query database and verify existing template_fields data
+- Verified database contains no malformed rows (checked: valid field_type, contiguous display_order, no null required fields)
+- Found 1 template with 12 fields, all data is clean and valid
+- Enhanced `backend/tests/test_form_rendering_data.py` with 4 new API-level integration tests
+- API tests now verify: ordered response, complete metadata, section grouping, null section handling
+- Total test count increased from 5 (database-level) to 9 tests (5 database + 4 API-level)
+- All 9 tests pass successfully
+
+#### Code Changes
+
+- `backend/scripts/verify_template_fields.py` (new, 150 lines)
+- `backend/tests/test_form_rendering_data.py` (modified, added 130 lines for API tests)
+
+#### Features Added / Updated / Removed
+
+- Added: Database verification script to check existing template_fields data
+- Added: 4 API-level integration tests calling GET /templates/{id}/fields
+- Updated: test_form_rendering_data.py now tests both database and API layers
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed: Member 3 Phase 1 verification was incomplete (now fully verified database data)
+- Fixed: Integration tests were database-only (now include API-level tests)
+
+#### Notes For Next Push
+
+- Database verification confirms: 1 template with 12 fields, all valid, no malformed data
+- All 9 integration tests pass: `pytest tests/test_form_rendering_data.py -v`
+- Verification script can be run manually: `python backend/scripts/verify_template_fields.py`
+- Member 3 Phase 1 work now 100% complete per the original prompt requirements
+- Ready to proceed to Member 2 Phase 1 tasks
+
+---
+
+### Checkpoint 0040
+
+- Date: 2026-09-13
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: test/v14-p1-validation-and-schemas
+- Push status: before push
+- Range covered: after Checkpoint 0039 -> V1.4 Phase 1 Member 2 tasks complete
+
+#### Summary
+
+Completed V1.4 Phase 1 Member 2 (Backend/Service Developer) tasks: verified existing V1.3 endpoints work correctly, documented validation_rule format for frontend and backend, and drafted Phase 2 Pydantic schemas for document persistence. No new endpoints added (Phase 1 is frontend-only).
+
+#### Completed Tasks
+
+- **Task 1: Verified existing endpoints** - Confirmed GET /templates/{id} and GET /templates/{id}/fields work correctly
+  - GET /templates/{id} returns TemplateResponse with correct shape
+  - GET /templates/{id}/fields returns list[TemplateFieldRead] ordered by display_order
+  - Both enforce RBAC via user_can_view_template()
+  - No V1.3 regressions found
+- **Task 2: Documented validation_rule format** - Created comprehensive validation-rules.md
+  - Defined format: email, min:N, max:N, regex:<pattern>, multi-rule with |
+  - Documented Phase 1 (frontend) parsing rules for Zod
+  - Documented Phase 2 (backend) enforcement with Python examples
+  - Included field type context, error response format, and testing checklist
+- **Task 3: Drafted Phase 2 Pydantic schemas** - Created document.py with 11 schemas
+  - DocumentCreate, DocumentUpdate, DocumentRead
+  - DocumentValueCreate, DocumentValueUpdate, DocumentValueRead
+  - DocumentValuesBulkUpsert, DocumentValuesBulkRead
+  - FieldValidationError, DocumentValidationErrorResponse, DocumentListItem
+  - Registered all schemas in app/schemas/__init__.py
+- **Task 4: Demo template seeder** - Already completed by Member 3 (seed_demo_template.py exists)
+
+#### Code Changes
+
+- `backend/docs/validation-rules.md` (new, 338 lines) - Comprehensive validation rule documentation
+- `backend/app/schemas/document.py` (new, 220 lines) - Phase 2 document persistence schemas
+- `backend/app/schemas/__init__.py` (modified) - Registered 11 document schemas
+
+#### Features Added / Updated / Removed
+
+- Added: Validation rule format documentation (email, min, max, regex, multi-rule)
+- Added: Phase 2 Pydantic schemas for documents and document_values
+- Added: Phase 1 frontend parsing guide (Zod validation)
+- Added: Phase 2 backend enforcement guide (server-side validation)
+- Updated: Schema registry in __init__.py (11 new document schemas)
+- Removed: None
+
+#### Issues Fixed
+
+- None (verification found no regressions in V1.3 endpoints)
+
+#### Notes For Next Push
+
+- Member 2 Phase 1 work is complete (NO new endpoints, Phase 1 is frontend-only)
+- Existing V1.3 endpoints verified working: GET /templates/{id}, GET /templates/{id}/fields
+- validation_rule format documented for Member 1 (Zod) and Member 2 Phase 2 (server-side)
+- Phase 2 schemas ready for Member 2 to implement endpoints in Phase 2
+- Member 3 will create documents + document_values tables in Phase 2
+- Member 1 can now start Phase 1 UI work with documented validation rules
+- PR target: `test/v14-p1-validation-and-schemas` -> `backend` (backend-only docs + schemas)
+
+---
+
 ## Entry Template
 
 ```md
