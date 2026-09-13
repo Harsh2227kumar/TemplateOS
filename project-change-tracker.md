@@ -1837,6 +1837,60 @@ Add all future updates below this section.
 
 ---
 
+### Checkpoint 0037
+
+- Date: 2026-09-13
+- Member: Member 2 (AI)
+- Branch: `fix/bedrock-marketplace-auth` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0036 -> 2026-09-13
+
+#### Summary
+
+- First fully working live AI configuration: `verify_bedrock.py --live` now passes end-to-end. The team's AWS account had been unable to complete the AWS Marketplace subscription required for Anthropic model access (account stuck in "being verified" state, affecting even the root user, and temporarily granting then revoking access across all Claude models). The fix: switched to Bedrock LONG-TERM API KEYS (bearer auth), which bypass the Marketplace subscription entirely. `BEDROCK_MODEL_SUGGESTIONS` was also migrated to Claude Sonnet 4.5 via its `global.` inference profile id, and all marketplace-era workaround code was cleaned up afterward.
+
+#### Completed Tasks
+
+- Diagnosed the persistent 403 marketplace error through live probes: confirmed it was account-level (root also failed), NOT an IAM problem; found the account had no working Sonnet model access (every Sonnet variant denied; only Claude 3 Haiku worked transiently before being revoked).
+- Identified the correct model routing for this account: Sonnet 4.5 must be invoked via `global.anthropic.claude-sonnet-4-5-20250929-v1:0` (newer Claude models use `global.` cross-region inference profiles, NOT the `apac.` prefix used by older models in ap-south-1).
+- Implemented Bedrock long-term API key auth: the user created the key in the Bedrock console (API keys -> long-term) and set `AWS_BEARER_TOKEN_BEDROCK` in `.env`. Verified the installed `anthropic` 1.5.0 SDK natively supports it (auto-reads the env var, sends `Authorization: Bearer`, skips IAM SigV4).
+- Wired the API key through the stack: `config.py` `_load_ai_env_from_file` now exports `AWS_BEARER_TOKEN_BEDROCK` into `os.environ`; `ai_is_configured` and `_config_problem` accept the API key OR IAM credentials; `verify_bedrock.py` reports which auth method resolved.
+- Verified end-to-end: `python scripts/verify_bedrock.py --live` -> Result: OK (Sonnet 4.5 replied in ~7s with 5 validated field proposals); `pytest tests` -> 178 passed.
+- Cleaned up marketplace-era workaround code after the API-key fix landed (this is the state being pushed).
+- Diagnosed and worked around a pre-existing pytest failure ("A path prefix must start with '/'"): a stale MSYS-mangled `API_V1_PREFIX='C:/Program Files/Git/api/v1'` shell variable was overriding `.env`; not persistent (absent from Windows user/system registry), `unset` in the session fixes it. No code change needed.
+
+#### Code Changes
+
+- `backend/app/core/config.py`: `AWS_BEARER_TOKEN_BEDROCK` added to the `.env`-to-`os.environ` export list; `ai_is_configured` property accepts the bearer token (short-circuit) or IAM credentials; removed the hardcoded default model id (was `anthropic.claude-3-5-sonnet-20241022-v2:0`, now `""` — model id must come from `.env`).
+- `backend/app/services/ai_service.py`: `_config_problem` accepts `AWS_BEARER_TOKEN_BEDROCK`; 400/403 WHY messages rewritten to be concise and generic (removed the marketplace-specific 403 branch and the inference-profile-prefix 400 hint added while debugging).
+- `backend/scripts/verify_bedrock.py`: step [3/4] renamed "AWS auth", reports bearer-token vs env-var vs profile resolution.
+- `backend/tests/test_ai_generations.py` + `backend/tests/test_field_suggestions.py`: replaced hardcoded Bedrock model ids with a single `TEST_MODEL_ID` constant (matches the env value tests set).
+- `.env.example`: documented `AWS_BEARER_TOKEN_BEDROCK` (preferred) alongside IAM key auth; updated the model-routing example to Sonnet 4.5's global profile id.
+- `project-change-tracker.md` (this checkpoint).
+
+#### Features Added / Updated / Removed
+
+- Added: Bedrock long-term API key support (`AWS_BEARER_TOKEN_BEDROCK`) across config checks, the AI service, and the verification script — bearer auth, no IAM SigV4, not tied to the IAM user.
+- Updated: AI model routing migrated to Claude Sonnet 4.5 (`global.anthropic.claude-sonnet-4-5-20250929-v1:0`).
+- Updated: `.env.example` AI credentials + model-routing documentation.
+- Removed: hardcoded default Bedrock model id in `Settings`; marketplace-era workaround/diagnostic message branches in `_classify_ai_error`.
+
+#### Issues Fixed
+
+- The AI feature was fully broken live (503 on every suggest-fields call) due to the AWS account's inability to complete the Anthropic Marketplace subscription (account "being verified"; even root hit the 403). Root cause was AWS-side, not code. Fixed by switching authentication to Bedrock long-term API keys, which are not subject to that Marketplace subscription flow.
+- `apac.anthropic.claude-sonnet-4-5-*` model ids were rejected with HTTP 400 in this account — Sonnet 4.5+ models are routed via `global.` inference profiles. `.env`/`.env.example` now use the correct id.
+- Post-fix pytest failures ("A path prefix must start with '/'") traced to a stale MSYS-mangled `API_V1_PREFIX` session variable overriding `.env` — no code defect; `unset API_V1_PREFIX VITE_API_BASE_URL` before running tests.
+
+#### Notes For Next Push
+
+- PR target: `fix/bedrock-marketplace-auth` -> `backend`. Squash-merge after review; then routine `backend` -> `dev` integration.
+- The running uvicorn server must be restarted to pick up the new `.env` (bearer token + Sonnet 4.5 model id).
+- Local `.env` still carries `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (now unused since the API key short-circuits auth) — the team may remove them for hygiene, keeping `AWS_BEARER_TOKEN_BEDROCK`.
+- The AWS Marketplace verification issue may still resolve itself within 24–48h; if the team later prefers IAM SigV4 auth, the IAM path still works as before (it was kept, not removed).
+- For frontend awareness: suggest-fields responses now come from Sonnet 4.5 (better quality, slightly longer latency ~7s observed).
+
+---
+
 ## Entry Template
 
 ```md
