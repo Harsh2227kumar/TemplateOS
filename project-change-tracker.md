@@ -1996,6 +1996,69 @@ Completed the two remaining Member 3 Phase 1 tasks: (1) Verified existing databa
 
 ---
 
+### Checkpoint 0040
+
+- Date: 2026-09-13
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: test/v14-p1-validation-and-schemas
+- Push status: before push
+- Range covered: after Checkpoint 0039 -> V1.4 Phase 1 Member 2 tasks complete
+
+#### Summary
+
+Completed V1.4 Phase 1 Member 2 (Backend/Service Developer) tasks: verified existing V1.3 endpoints work correctly, documented validation_rule format for frontend and backend, and drafted Phase 2 Pydantic schemas for document persistence. No new endpoints added (Phase 1 is frontend-only).
+
+#### Completed Tasks
+
+- **Task 1: Verified existing endpoints** - Confirmed GET /templates/{id} and GET /templates/{id}/fields work correctly
+  - GET /templates/{id} returns TemplateResponse with correct shape
+  - GET /templates/{id}/fields returns list[TemplateFieldRead] ordered by display_order
+  - Both enforce RBAC via user_can_view_template()
+  - No V1.3 regressions found
+- **Task 2: Documented validation_rule format** - Created comprehensive validation-rules.md
+  - Defined format: email, min:N, max:N, regex:<pattern>, multi-rule with |
+  - Documented Phase 1 (frontend) parsing rules for Zod
+  - Documented Phase 2 (backend) enforcement with Python examples
+  - Included field type context, error response format, and testing checklist
+- **Task 3: Drafted Phase 2 Pydantic schemas** - Created document.py with 11 schemas
+  - DocumentCreate, DocumentUpdate, DocumentRead
+  - DocumentValueCreate, DocumentValueUpdate, DocumentValueRead
+  - DocumentValuesBulkUpsert, DocumentValuesBulkRead
+  - FieldValidationError, DocumentValidationErrorResponse, DocumentListItem
+  - Registered all schemas in app/schemas/__init__.py
+- **Task 4: Demo template seeder** - Already completed by Member 3 (seed_demo_template.py exists)
+
+#### Code Changes
+
+- `backend/docs/validation-rules.md` (new, 338 lines) - Comprehensive validation rule documentation
+- `backend/app/schemas/document.py` (new, 220 lines) - Phase 2 document persistence schemas
+- `backend/app/schemas/__init__.py` (modified) - Registered 11 document schemas
+
+#### Features Added / Updated / Removed
+
+- Added: Validation rule format documentation (email, min, max, regex, multi-rule)
+- Added: Phase 2 Pydantic schemas for documents and document_values
+- Added: Phase 1 frontend parsing guide (Zod validation)
+- Added: Phase 2 backend enforcement guide (server-side validation)
+- Updated: Schema registry in __init__.py (11 new document schemas)
+- Removed: None
+
+#### Issues Fixed
+
+- None (verification found no regressions in V1.3 endpoints)
+
+#### Notes For Next Push
+
+- Member 2 Phase 1 work is complete (NO new endpoints, Phase 1 is frontend-only)
+- Existing V1.3 endpoints verified working: GET /templates/{id}, GET /templates/{id}/fields
+- validation_rule format documented for Member 1 (Zod) and Member 2 Phase 2 (server-side)
+- Phase 2 schemas ready for Member 2 to implement endpoints in Phase 2
+- Member 3 will create documents + document_values tables in Phase 2
+- Member 1 can now start Phase 1 UI work with documented validation rules
+- PR target: `test/v14-p1-validation-and-schemas` -> `backend` (backend-only docs + schemas)
+
+---
+
 ## Entry Template
 
 ```md
