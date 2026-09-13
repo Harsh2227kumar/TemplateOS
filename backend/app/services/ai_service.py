@@ -61,8 +61,16 @@ def _config_problem() -> str | None:
             "AWS_REGION is not set — leave it unset to keep AI off, or set "
             "it to your Bedrock region (e.g. ap-south-1)"
         )
+    if not settings.bedrock_model_suggestions:
+        return (
+            "BEDROCK_MODEL_SUGGESTIONS is not set — set it in .env to the "
+            "model / inference-profile id from the Bedrock console (Model "
+            "access); there is no default model id in code"
+        )
     import os
 
+    if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+        return None
     if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
         return None
     try:
@@ -71,9 +79,10 @@ def _config_problem() -> str | None:
         if Session(region_name=settings.aws_region).get_credentials() is not None:
             return None
         return (
-            "AWS_REGION is set but no AWS credentials were found — set "
-            "AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY in .env, or run "
-            "'aws configure' once"
+            "AWS_REGION is set but no AWS auth was found — set "
+            "AWS_BEARER_TOKEN_BEDROCK (Bedrock long-term API key from the "
+            "console) or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY in .env, "
+            "or run 'aws configure' once"
         )
     except Exception as exc:
         return f"AWS_REGION is set but the credential chain check failed ({exc})"
@@ -123,12 +132,15 @@ def _classify_ai_error(exc: Exception) -> str:
             "after retries — retry the request; if it persists, report it"
         )
     if status == 400:
+        aws_detail = str(exc).strip().replace("\n", " ")
+        if len(aws_detail) > 220:
+            aws_detail = aws_detail[:220] + "…"
         return (
-            "AWS rejected the request (HTTP 400) — usually a malformed "
-            f"model id: check BEDROCK_MODEL_SUGGESTIONS="
-            f"'{settings.bedrock_model_suggestions}' (cross-region "
-            "inference profile ids look like 'us.anthropic.claude-3-5-"
-            "sonnet-...:0')"
+            "AWS rejected the request (HTTP 400) — usually a malformed or "
+            "unavailable model id: check BEDROCK_MODEL_SUGGESTIONS="
+            f"'{settings.bedrock_model_suggestions}' in .env against the "
+            "exact id shown in the Bedrock console (Model access)"
+            + (f" [{aws_detail}]" if aws_detail else "")
         )
     if status == 401:
         return (
@@ -140,9 +152,9 @@ def _classify_ai_error(exc: Exception) -> str:
         if len(aws_detail) > 220:
             aws_detail = aws_detail[:220] + "…"
         return (
-            "AWS denied the call (HTTP 403) — the IAM user lacks "
-            "bedrock:InvokeModel permission for this model, or model "
-            "access is not enabled in the Bedrock console for this region"
+            "AWS denied the call (HTTP 403) — the API key or IAM user lacks "
+            "permission for this model, or model access is not enabled in "
+            "the Bedrock console for this region"
             + (f" [{aws_detail}]" if aws_detail else "")
         )
     if status == 404:

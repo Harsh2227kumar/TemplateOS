@@ -8,8 +8,8 @@ Usage (from backend/):
 What it checks (in order):
   1. Settings resolve (.env present, required keys, AI values)
   2. Python dependencies (anthropic / instructor / boto3)
-  3. AWS credential chain (env vars -> shared profile -> instance role)
-  4. --live only: a real model invocation (validates IAM permission AND
+  3. AWS auth (Bedrock long-term API key -> env vars -> shared profile -> instance role)
+  4. --live only: a real model invocation (validates auth AND
      console model access — the only way to know for sure)
 
 Exit code 0 = everything it checked passed; 1 = something failed.
@@ -105,18 +105,19 @@ def main() -> None:
         report(False, f"boto3 missing ({exc}) — pip install 'anthropic[bedrock]'")
 
     # ── 3. Credential chain ────────────────────────────────────────
-    print("\n[3/4] AWS credential chain")
+    print("\n[3/4] AWS auth")
     from app.services.ai_service import _config_problem
 
     problem = _config_problem()
     if problem is None:
         import os
 
-        via = (
-            "environment variables (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)"
-            if os.environ.get("AWS_ACCESS_KEY_ID")
-            else "shared AWS profile / instance role (boto3 default chain)"
-        )
+        if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+            via = "Bedrock long-term API key (AWS_BEARER_TOKEN_BEDROCK)"
+        elif os.environ.get("AWS_ACCESS_KEY_ID"):
+            via = "environment variables (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)"
+        else:
+            via = "shared AWS profile / instance role (boto3 default chain)"
         report(True, f"credentials resolve via {via}")
     else:
         report(False, problem)
