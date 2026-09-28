@@ -1956,6 +1956,75 @@ Completed V1.4 Phase 1 Member 1 (Frontend Developer) tasks: built dynamic form r
 
 ---
 
+### Checkpoint 0044
+
+- Date: 2026-09-14
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/v1.4-p2-m1-frontend-drafts` (created from `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0043 -> 2026-09-14
+
+#### Summary
+
+Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functionality. Implemented validation helper, dynamic form components (DynamicField, ListInput), Create Document page with two-step save (POST /create + PUT /values), Edit Document page with pre-filled form and update via PUT, and Dashboard "My Drafts" section with Continue action. All components are metadata-driven with full field type support and validation.
+
+#### Completed Tasks
+
+- **Task 1: Validation Helper** - Created `src/lib/validation.ts` with `parseValidationRule()` and `buildFormSchema()` supporting email, min:N, max:N, required checks, and pipe-separated combined rules
+- **Task 2: Form Components** - Created `src/components/forms/DynamicField.tsx` with DynamicField (renders all field types: text, textarea, number, date, email, list, signature) and ListInput (array input with add/remove, JSON stringify on save)
+- **Task 3: API Client** - Extended `src/lib/api.ts` with Document types (Document, DocumentValue, DocumentCreate, DocumentValuesSave, DocumentValuesResponse) and documentsApi methods (createDocument, saveValues, getMyDocuments, getDocument) with ApiError detail property for 422 errors
+- **Task 4: Create Document Page** - Created `src/pages/create-document-page.tsx` with two-step save flow, loading states, success/error banners, field-specific inline validation errors from backend, auto-navigation to edit page on success
+- **Task 5: Edit Document Page** - Created `src/pages/edit-document-page.tsx` with pre-filled form from GET /documents/{id}, list field JSON parsing, Update Draft via PUT /{id}/values, Reset Form action, success banner
+- **Task 6: Dashboard My Drafts** - Updated `src/pages/dashboard-page.tsx` with My Drafts section showing name, template, status, last-modified, and Continue button navigating to edit page; grid layout with My Drafts (2/3) and My Templates (1/3)
+- **Task 7: Routing** - Added `/documents/create/:id` and `/documents/:id/edit` routes to `src/App.tsx` inside ProtectedRoute + DashboardLayout
+
+#### Code Changes
+
+- `frontend/src/lib/validation.ts` (new, ~80 lines)
+- `frontend/src/components/forms/DynamicField.tsx` (new, ~260 lines)
+- `frontend/src/lib/api.ts` (modified — added Document types, documentsApi, ApiError.detail)
+- `frontend/src/pages/create-document-page.tsx` (new, ~250 lines)
+- `frontend/src/pages/edit-document-page.tsx` (new, ~315 lines)
+- `frontend/src/pages/dashboard-page.tsx` (modified — added My Drafts section)
+- `frontend/src/App.tsx` (modified — added 2 routes)
+- `frontend/src/components/ui/card.tsx` (modified — added CardFooter)
+- `frontend/src/components/ui/separator.tsx` (new)
+- `frontend/package.json` (dependency: date-fns)
+
+#### Features Added / Updated / Removed
+
+- Added: Dynamic form rendering from template_fields metadata (100% metadata-driven)
+- Added: Section grouping with visual separators (preserves display_order within sections)
+- Added: All field types supported: text, textarea, date, number, email, list, signature (stub)
+- Added: Client-side validation via Zod + server-side 422 inline errors
+- Added: List fields as JSON arrays with add/remove UI
+- Added: Help text, example values, validation rule badges
+- Added: "Save Draft" two-step flow with success/error UX
+- Added: "Update Draft" in edit mode
+- Added: Dashboard "My Drafts" card with Continue action
+- Added: CardFooter and Separator UI primitives
+- Updated: Dashboard layout to 3-column grid (My Drafts 2/3, My Templates 1/3)
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed: ApiError class now includes `detail` property for structured 422 error arrays
+- Fixed: request() function parses validation error arrays from backend
+- Verified: `npm run build` passes with strict TypeScript
+- Verified: All 201 backend tests pass
+
+#### Notes For Next Push
+
+- Member 1 Phase 2 work is complete — all Definition of Done items checked
+- Frontend build passes with strict TypeScript: `npm run build` ✓
+- Form is 100% metadata-driven (no hardcoded templates)
+- Validation rules parsed: email, min:N, max:N (regex ignored - server-only)
+- List fields save/load as JSON strings
+- Phase 2 complete end-to-end: Member 3 (DB), Member 2 (API), Member 1 (UI) all done
+- PR target: `feature/v1.4-p2-m1-frontend-drafts` -> `frontend` (frontend-only work)
+
+---
+
 ## Entry Template
 
 ```md
