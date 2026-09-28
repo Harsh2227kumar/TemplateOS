@@ -2116,6 +2116,58 @@ Completed V1.4 Phase 2 Member 3 tasks: implemented the database layer for persis
 
 ---
 
+### Checkpoint 0043
+
+- Date: 2026-09-14
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/v1.4-p2-m2-document-endpoints` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0042 -> 2026-09-14
+
+#### Summary
+
+Completed V1.4 Phase 2 Member 2 tasks: implemented the 5 save-draft endpoints on top of Member 3's documents/document_values CRUD layer. Built validation service enforcing required fields, type checks (number, email), and validation_rule (email, min:N, max:N) with structured 422 error responses.
+
+#### Completed Tasks
+
+- **Task 1: Validation Service** - Created `app/services/document_validator.py` with `validate_document_values()` and `_parse_validation_rule()` supporting required, number type, email format, min/max length/value, and combined pipe-separated rules
+- **Task 2: Document Endpoints** - Created `app/api/v1/endpoints/documents.py` with 5 endpoints:
+  - `POST /documents/create` — creates draft, validates template access via `user_can_view_template`, auto-generates name if null
+  - `PUT /documents/{id}/values` — validates each value against template fields, returns 422 with field-specific errors, upserts via `upsert_values`
+  - `GET /documents` — lists user's drafts with joined template_name, ordered by updated_at desc
+  - `GET /documents/{id}` — returns document with joined values, enforces ownership (403 if not owner)
+  - `GET /documents/{id}/values` — returns values array only (for edit mode), enforces ownership
+- **Task 3: Router Registration** - Added documents router to `app/api/v1/api.py` with prefix `/documents` and tag `documents`
+
+#### Code Changes
+
+- `backend/app/services/document_validator.py` (new, ~120 lines)
+- `backend/app/api/v1/endpoints/documents.py` (new, ~200 lines)
+- `backend/app/api/v1/api.py` (modified — registered documents router)
+
+#### Features Added / Updated / Removed
+
+- Added: Validation service with structured 422 error format (`detail=[{field_name, error}, ...]`)
+- Added: 5 draft persistence endpoints with ownership enforcement
+- Added: Auto-name generation: `"{template.name} Draft - {timestamp}"`
+- Added: validation_rule parsing for email, min:N, max:N (combined with `|`)
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None (all validation logic works as specified)
+
+#### Notes For Next Push
+
+- Member 1 (V1.4 Phase 1 frontend) can now wire the Smart Form Generator UI to these endpoints
+- Member 2 Phase 2 is complete — all Definition of Done items checked
+- All 201 backend tests pass (1 pre-existing failure in test_ai_generations.py unrelated)
+- Migration from Checkpoint 0042 already applied (documents/document_values tables exist)
+- PR target: `feature/v1.4-p2-m2-document-endpoints` -> `backend` (backend-only change)
+
+---
+
 ## Entry Template
 
 ```md
