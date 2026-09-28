@@ -2,6 +2,18 @@ from app.crud.ai_generation_crud import (
     get_ai_generations_by_template,
     log_ai_generation,
 )
+from app.crud.document_crud import (
+    create_document,
+    delete_document,
+    get_document_by_id,
+    get_documents_by_user,
+    update_document_status,
+)
+from app.crud.document_value_crud import (
+    delete_values_by_document,
+    get_values_by_document,
+    upsert_values,
+)
 from app.crud.template_crud import (
     advance_status,
     create_template,

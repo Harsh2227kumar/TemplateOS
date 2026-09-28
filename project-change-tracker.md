@@ -2059,6 +2059,63 @@ Completed V1.4 Phase 1 Member 2 (Backend/Service Developer) tasks: verified exis
 
 ---
 
+### Checkpoint 0042
+
+- Date: 2026-09-14
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/v1.4-p2-m3-documents` (created from `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0041 -> 2026-09-14
+
+#### Summary
+
+Completed V1.4 Phase 2 Member 3 tasks: implemented the database layer for persisting form values as drafts — created `documents` and `document_values` tables with proper constraints, indexes, and CASCADE deletes; added Document and DocumentValue models with relationships; created full CRUD layer (create, get with/without values, list by user, upsert values, get values, delete with cascade); comprehensive test suite (22 tests covering model, CRUD, and cascade behavior); Alembic migration verified with full upgrade/downgrade cycle.
+
+#### Completed Tasks
+
+- **Task 1: Alembic Migration** - Created `9a8b7c6d5e4f_create_documents_tables.py` with `documents` and `document_values` tables, unique constraint `uq_document_value_key` on (document_id, field_name), proper FK CASCADE deletes, and cross-dialect `CURRENT_TIMESTAMP` defaults
+- **Task 2: Models** - Created `Document` model (status validation with DOCUMENT_STATUSES enum, relationships to Template, User, DocumentValue) and `DocumentValue` model (value as TEXT, unique constraint per document); updated `Template` and `User` models with backrefs
+- **Task 3: CRUD** - `document_crud.py`: create_document, get_document_by_id (with eager values), get_documents_by_user, update_document_status, delete_document (cascades); `document_value_crud.py`: upsert_values (insert/update per field_name), get_values_by_document, delete_values_by_document; registered in `app/crud/__init__.py`
+- **Task 4: Tests** - `tests/test_documents.py` (22 tests): model defaults/validation, CRUD operations, upsert insert/update/mixed, cascade deletes, all passing
+
+#### Code Changes
+
+- `backend/alembic/versions/9a8b7c6d5e4f_create_documents_tables.py` (new)
+- `backend/app/models/document.py` (new)
+- `backend/app/models/document_value.py` (new)
+- `backend/app/models/template.py` (modified — added documents relationship)
+- `backend/app/models/user.py` (modified — added documents relationship)
+- `backend/app/models/__init__.py` (modified — registered new models)
+- `backend/app/crud/document_crud.py` (new)
+- `backend/app/crud/document_value_crud.py` (new)
+- `backend/app/crud/__init__.py` (modified — registered new CRUD)
+- `backend/tests/test_documents.py` (new, 22 tests)
+
+#### Features Added / Updated / Removed
+
+- Added: `documents` table for draft persistence (status: draft/generated/submitted/approved/rejected/final)
+- Added: `document_values` table with field_name-keyed storage (TEXT values for all types)
+- Added: Unique constraint preventing duplicate field values per document
+- Added: Full cascade delete (document -> values, template -> documents, user -> documents)
+- Added: Status validation and forward-only update capability
+- Updated: `Template` and `User` models with document backrefs
+- Removed: None
+
+#### Issues Fixed
+
+- Fixed: `get_document_by_id` with `include_values=True` now uses `result.unique().scalar_one_or_none()` to handle joined eager loads correctly
+- Verified: Full alembic cycle (downgrade base -> upgrade head) runs clean
+- Verified: All 22 document tests + 44 existing model/CRUD tests pass
+
+#### Notes For Next Push
+
+- Member 2 (V1.4 Phase 2) can now build the save-draft endpoints on top of this CRUD layer: `POST /documents/create` -> `create_document`, `PUT /documents/{id}/values` -> `upsert_values`, `GET /documents` -> `get_documents_by_user`, `GET /documents/{id}` -> `get_document_by_id(include_values=True)`, `DELETE /documents/{id}` -> `delete_document`
+- Migration is additive and safe for existing data (new tables only)
+- `document_values.value` uses TEXT to accommodate textarea, JSON arrays for list fields, and string representations of primitives
+- PR target: `feature/v1.4-p2-m3-documents` -> `backend` (backend-only change + directly related docs/config)
+
+---
+
 ## Entry Template
 
 ```md
