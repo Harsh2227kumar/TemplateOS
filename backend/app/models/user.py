@@ -7,6 +7,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.template import Template
+    from app.models.document import Document
 
 USER_ROLES = (
     "super_admin",
@@ -42,4 +43,9 @@ class User(Base):
             raise ValueError(f"Unsupported user role: {role}")
         return role
 
-    templates: Mapped[list["Template"]] = relationship("Template", back_populates="uploader")
+    templates: Mapped[list["Template"]] = relationship(
+        "Template", back_populates="uploader"
+    )
+    documents: Mapped[list["Document"]] = relationship(
+        "Document", back_populates="creator"
+    )
