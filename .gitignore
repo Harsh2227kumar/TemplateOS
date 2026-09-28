@@ -39,6 +39,8 @@ coverage/
 
 # Local AI tool config
 opencode.json
+.opencode/
+AGENTS.md
 
 # Windows artifacts (e.g. accidental `2>nul` redirect files)
 nul
