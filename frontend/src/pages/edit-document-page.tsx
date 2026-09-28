@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
-import { Loader2, Save, AlertCircle, CheckCircle, ChevronLeft } from "lucide-react";
+import { Loader2, Save, AlertCircle, CheckCircle, ChevronLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -11,43 +11,63 @@ import { DynamicField } from "@/components/forms/DynamicField";
 import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError } from "@/lib/api";
 import { buildFormSchema } from "@/lib/validation";
 
-export function CreateDocumentPage() {
+export function EditDocumentPage() {
   const navigate = useNavigate();
-  const { id: templateIdParam } = useParams<{ id: string }>();
-  const templateId = templateIdParam ? parseInt(templateIdParam, 10) : 0;
+  const { id: documentIdParam } = useParams<{ id: string }>();
+  const documentId = documentIdParam ? parseInt(documentIdParam, 10) : 0;
 
   const [template, setTemplate] = useState<any>(null);
   const [fields, setFields] = useState<TemplateField[]>([]);
+  const [document, setDocument] = useState<Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const token = localStorage.getItem("templateos_access_token") || "";
 
   useEffect(() => {
-    if (!templateId) {
-      navigate("/templates");
+    if (!documentId) {
+      navigate("/dashboard");
       return;
     }
     async function fetchData() {
       try {
+        const doc = await documentsApi.getDocument(token, documentId);
+        setDocument(doc);
         const [templateData, fieldsData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, templateId),
-          templatesApi.getFields(token, templateId),
+          templatesApi.getTemplateDetail(token, doc.template_id),
+          templatesApi.getFields(token, doc.template_id),
         ]);
         setTemplate(templateData);
         setFields(fieldsData);
+
+        // Pre-fill form with document values
+        const defaultValues: DocumentFormValues = {};
+        if (doc.values) {
+          for (const val of doc.values) {
+            const field = fieldsData.find(f => f.field_name === val.field_name);
+            if (field && field.field_type === "list") {
+              try {
+                defaultValues[val.field_name] = JSON.parse(val.value);
+              } catch {
+                defaultValues[val.field_name] = [val.value];
+              }
+            } else {
+              defaultValues[val.field_name] = val.value;
+            }
+          }
+        }
+        form.reset(defaultValues);
       } catch (err) {
-        console.error("Failed to load template:", err);
-        setSaveError("Failed to load template. Please try again.");
+        console.error("Failed to load document:", err);
+        setSaveError("Failed to load document. Please try again.");
       } finally {
         setLoading(false);
       }
     }
     fetchData();
-  }, [templateId, token]);
+  }, [documentId, token]);
 
   const schema = buildFormSchema(fields);
   const form = useForm<DocumentFormValues>({
@@ -56,18 +76,14 @@ export function CreateDocumentPage() {
     mode: "onBlur",
   });
 
-  const handleSaveDraft = async (formData: DocumentFormValues) => {
-    if (!templateId) return;
+  const handleUpdateDraft = async (formData: DocumentFormValues) => {
+    if (!documentId) return;
 
     setSaving(true);
     setSaveError(null);
-    setFieldErrors({});
 
     try {
-      // Step 1: Create document
-      const doc = await documentsApi.createDocument(token, { template_id: templateId });
-
-      // Step 2: Prepare values (stringify lists)
+      // Prepare values (stringify lists)
       const values = fields.map((field) => {
         const value = formData[field.field_name];
         const stringValue = Array.isArray(value) ? JSON.stringify(value) : String(value ?? "");
@@ -77,27 +93,24 @@ export function CreateDocumentPage() {
         };
       });
 
-      // Step 3: Save values
-      await documentsApi.saveValues(token, doc.id, { values });
+      // Save values
+      await documentsApi.saveValues(token, documentId, { values });
 
       setSaveSuccess(true);
       setTimeout(() => {
-        navigate(`/documents/${doc.id}/edit`);
-      }, 1500);
+        setSaveSuccess(false);
+      }, 2000);
     } catch (err: any) {
       if (err instanceof ApiError && err.status === 422 && err.detail) {
-        // Field-specific validation errors from backend
         const errors: Record<string, string> = {};
         for (const e of err.detail as Array<{ field_name: string; error: string }>) {
           errors[e.field_name] = e.error;
         }
-        setFieldErrors(errors);
-        // Set form errors for inline display
         Object.entries(errors).forEach(([fieldName, message]) => {
           form.setError(fieldName, { message, type: "server" });
         });
       } else {
-        setSaveError(err?.message || "Failed to save draft. Please try again.");
+        setSaveError(err?.message || "Failed to update draft. Please try again.");
       }
     } finally {
       setSaving(false);
@@ -113,14 +126,14 @@ export function CreateDocumentPage() {
     );
   }
 
-  if (!template) {
+  if (!document || !template) {
     return (
       <div className="mx-auto max-w-3xl text-center py-12">
         <AlertCircle className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-        <h2 className="text-xl font-semibold text-slate-900">Template not found</h2>
-        <p className="mt-2 text-slate-500">The template you're looking for doesn't exist or you don't have access to it.</p>
+        <h2 className="text-xl font-semibold text-slate-900">Document not found</h2>
+        <p className="mt-2 text-slate-500">The draft you're looking for doesn't exist or you don't have access to it.</p>
         <Button asChild className="mt-6">
-          <a href="/templates">Browse Templates</a>
+          <a href="/dashboard">Go to Dashboard</a>
         </Button>
       </div>
     );
@@ -138,22 +151,26 @@ export function CreateDocumentPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} className="h-8 w-8">
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-2xl font-bold text-slate-900">{template.name}</h1>
-          <p className="text-sm text-slate-500 mt-1">{template.description || "No description"}</p>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Editing: {document.name || `Draft ${document.id}`}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Template: {template.name} · Last saved: {new Date(document.updated_at).toLocaleString()}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="px-2 py-1 text-xs font-medium bg-slate-100 text-slate-700 rounded">
             {template.category}
           </span>
           <span className={`px-2 py-1 text-xs font-medium rounded ${
-            template.status === "draft" ? "bg-yellow-100 text-yellow-700" :
-            template.status === "active" ? "bg-green-100 text-green-700" :
+            document.status === "draft" ? "bg-yellow-100 text-yellow-700" :
+            document.status === "active" ? "bg-green-100 text-green-700" :
             "bg-blue-100 text-blue-700"
           }`}>
-            {template.status.replace("_", " ")}
+            {document.status.replace("_", " ")}
           </span>
         </div>
       </div>
@@ -163,8 +180,7 @@ export function CreateDocumentPage() {
         <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-lg">
           <CheckCircle className="h-5 w-5 text-green-600" />
           <div>
-            <p className="font-medium text-green-800">Draft saved successfully!</p>
-            <p className="text-sm text-green-700">Redirecting to editor...</p>
+            <p className="font-medium text-green-800">Draft updated successfully!</p>
           </div>
         </div>
       )}
@@ -178,12 +194,12 @@ export function CreateDocumentPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={form.handleSubmit(handleSaveDraft)} className="space-y-6">
+      <form onSubmit={form.handleSubmit(handleUpdateDraft)} className="space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>Fill in the Form</CardTitle>
+            <CardTitle>Edit Draft</CardTitle>
             <CardDescription>
-              All fields are driven by the template configuration. Required fields are marked.
+              Make changes to your draft and save to update it.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -212,33 +228,44 @@ export function CreateDocumentPage() {
               </div>
             ))}
           </CardContent>
-          <CardFooter className="flex justify-end gap-3 border-t bg-slate-50">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => navigate(-1)}
-              disabled={saving}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving || saveSuccess}>
-              {saving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : saveSuccess ? (
-                <>
-                  <CheckCircle className="mr-2 h-4 w-4" />
-                  Saved!
-                </>
-              ) : (
-                <>
-                  <Save className="mr-2 h-4 w-4" />
-                  Save Draft
-                </>
-              )}
-            </Button>
+          <CardFooter className="flex justify-between gap-3 border-t bg-slate-50">
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => navigate("/dashboard")} disabled={saving}>
+                Back to Dashboard
+              </Button>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  form.reset(form.getValues());
+                  setSaveError(null);
+                }}
+                disabled={saving}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Reset Form
+              </Button>
+              <Button type="submit" disabled={saving || saveSuccess}>
+                {saving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : saveSuccess ? (
+                  <>
+                    <CheckCircle className="mr-2 h-4 w-4" />
+                    Saved!
+                  </>
+                ) : (
+                  <>
+                    <Save className="mr-2 h-4 w-4" />
+                    Update Draft
+                  </>
+                )}
+              </Button>
+            </div>
           </CardFooter>
         </Card>
       </form>
