@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import React, { useEffect, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, Save, AlertCircle, CheckCircle, ChevronLeft } from "lucide-react";
@@ -22,7 +22,6 @@ export function CreateDocumentPage() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const token = localStorage.getItem("templateos_access_token") || "";
 
@@ -49,19 +48,36 @@ export function CreateDocumentPage() {
     fetchData();
   }, [templateId, token]);
 
-  const schema = buildFormSchema(fields);
+  const schema = React.useMemo(() => buildFormSchema(fields), [fields]);
   const form = useForm<DocumentFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {},
     mode: "onBlur",
   });
 
+  useEffect(() => {
+    if (fields.length > 0) {
+      const defaultValues: Record<string, any> = {};
+      fields.forEach(f => {
+        if (f.field_type === "list" && f.default_value) {
+          try {
+            defaultValues[f.field_name] = JSON.parse(f.default_value);
+          } catch {
+            defaultValues[f.field_name] = [];
+          }
+        } else {
+          defaultValues[f.field_name] = f.default_value || "";
+        }
+      });
+      form.reset(defaultValues);
+    }
+  }, [fields, form]);
+
   const handleSaveDraft = async (formData: DocumentFormValues) => {
     if (!templateId) return;
 
     setSaving(true);
     setSaveError(null);
-    setFieldErrors({});
 
     try {
       // Step 1: Create document
@@ -91,7 +107,6 @@ export function CreateDocumentPage() {
         for (const e of err.detail as Array<{ field_name: string; error: string }>) {
           errors[e.field_name] = e.error;
         }
-        setFieldErrors(errors);
         // Set form errors for inline display
         Object.entries(errors).forEach(([fieldName, message]) => {
           form.setError(fieldName, { message, type: "server" });
@@ -178,8 +193,9 @@ export function CreateDocumentPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={form.handleSubmit(handleSaveDraft)} className="space-y-6">
-        <Card>
+      <FormProvider {...form}>
+        <form onSubmit={form.handleSubmit(handleSaveDraft)} className="space-y-6">
+          <Card>
           <CardHeader>
             <CardTitle>Fill in the Form</CardTitle>
             <CardDescription>
@@ -241,7 +257,8 @@ export function CreateDocumentPage() {
             </Button>
           </CardFooter>
         </Card>
-      </form>
+        </form>
+      </FormProvider>
     </div>
   );
 }

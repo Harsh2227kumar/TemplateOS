@@ -73,7 +73,11 @@ export function getFieldSchema(field: {
       });
     }
   } else {
-    schema = schema.optional().or(z.literal(""));
+    if (field.field_type === "list") {
+      schema = schema.optional();
+    } else {
+      schema = schema.optional().or(z.literal(""));
+    }
   }
 
   if (rule.min !== undefined) {
@@ -84,7 +88,7 @@ export function getFieldSchema(field: {
       );
     } else if (field.field_type === "list") {
       schema = schema.refine(
-        (val) => !Array.isArray(val) || val.length >= rule.min!,
+        (val) => Array.isArray(val) && val.length >= rule.min!,
         { message: `Must have at least ${rule.min} items` }
       );
     } else {
@@ -103,7 +107,7 @@ export function getFieldSchema(field: {
       );
     } else if (field.field_type === "list") {
       schema = schema.refine(
-        (val) => !Array.isArray(val) || val.length <= rule.max!,
+        (val) => Array.isArray(val) && val.length <= rule.max!,
         { message: `Must have at most ${rule.max} items` }
       );
     } else {

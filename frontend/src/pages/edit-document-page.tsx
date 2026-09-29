@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import React, { useEffect, useState } from "react";
+import { useForm, FormProvider } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
 import { Loader2, Save, AlertCircle, CheckCircle, ChevronLeft, RefreshCw } from "lucide-react";
@@ -41,24 +41,6 @@ export function EditDocumentPage() {
         ]);
         setTemplate(templateData);
         setFields(fieldsData);
-
-        // Pre-fill form with document values
-        const defaultValues: DocumentFormValues = {};
-        if (doc.values) {
-          for (const val of doc.values) {
-            const field = fieldsData.find(f => f.field_name === val.field_name);
-            if (field && field.field_type === "list") {
-              try {
-                defaultValues[val.field_name] = JSON.parse(val.value);
-              } catch {
-                defaultValues[val.field_name] = [val.value];
-              }
-            } else {
-              defaultValues[val.field_name] = val.value;
-            }
-          }
-        }
-        form.reset(defaultValues);
       } catch (err) {
         console.error("Failed to load document:", err);
         setSaveError("Failed to load document. Please try again.");
@@ -69,12 +51,32 @@ export function EditDocumentPage() {
     fetchData();
   }, [documentId, token]);
 
-  const schema = buildFormSchema(fields);
+  const schema = React.useMemo(() => buildFormSchema(fields), [fields]);
   const form = useForm<DocumentFormValues>({
     resolver: zodResolver(schema),
     defaultValues: {},
     mode: "onBlur",
   });
+
+  // Re-run reset when schema (fields) or document values change
+  useEffect(() => {
+    if (fields.length > 0 && document?.values) {
+      const defaultValues: DocumentFormValues = {};
+      for (const val of document.values) {
+        const field = fields.find(f => f.field_name === val.field_name);
+        if (field && field.field_type === "list") {
+          try {
+            defaultValues[val.field_name] = JSON.parse(val.value);
+          } catch {
+            defaultValues[val.field_name] = [val.value];
+          }
+        } else {
+          defaultValues[val.field_name] = val.value;
+        }
+      }
+      form.reset(defaultValues);
+    }
+  }, [fields, document, form]);
 
   const handleUpdateDraft = async (formData: DocumentFormValues) => {
     if (!documentId) return;
@@ -194,8 +196,9 @@ export function EditDocumentPage() {
       )}
 
       {/* Form */}
-      <form onSubmit={form.handleSubmit(handleUpdateDraft)} className="space-y-6">
-        <Card>
+      <FormProvider {...form}>
+        <form onSubmit={form.handleSubmit(handleUpdateDraft)} className="space-y-6">
+          <Card>
           <CardHeader>
             <CardTitle>Edit Draft</CardTitle>
             <CardDescription>
@@ -268,7 +271,8 @@ export function EditDocumentPage() {
             </div>
           </CardFooter>
         </Card>
-      </form>
+        </form>
+      </FormProvider>
     </div>
   );
 }
