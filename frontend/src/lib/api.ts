@@ -28,6 +28,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly detail?: any,
   ) {
     super(message);
   }
@@ -41,13 +42,19 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   if (!response.ok) {
     let message = "Something went wrong. Please try again.";
+    let detail: any = undefined;
     try {
-      const body = (await response.json()) as { detail?: string };
-      if (typeof body.detail === "string") message = body.detail;
+      const body = await response.json();
+      if (typeof body.detail === "string") {
+        message = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        message = "Validation failed";
+        detail = body.detail;
+      }
     } catch {
       // Keep a safe user-facing fallback when the server does not return JSON.
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, detail);
   }
   // 204 No Content (e.g. DELETE endpoints) has no body to parse.
   if (response.status === 204) return undefined as T;
@@ -224,6 +231,8 @@ export interface SuggestFieldsResponse {
   suggestions: FieldSuggestion[];
 }
 
+// --- V1.4 Phase 1: Dynamic form rendering ---
+
 export const templatesApi = {
   getLibrary: async (token: string, params?: {
     search?: string;
@@ -387,5 +396,62 @@ export const templatesApi = {
       throw new ApiError(message, response.status);
     }
     return response.json() as Promise<TemplateResponse>;
+  },
+};
+
+// --- V1.4 Phase 2: Document Drafts ---
+
+export interface DocumentValue {
+  id: number;
+  document_id: number;
+  field_name: string;
+  value: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Document {
+  id: number;
+  template_id: number;
+  created_by: number;
+  name: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  template_name?: string;
+  values?: DocumentValue[];
+}
+
+export type DocumentFormValues = Record<string, any>;
+
+export interface DocumentCreate {
+  template_id: number;
+  name?: string;
+}
+
+export interface DocumentValuesSave {
+  values: Array<{ field_name: string; value: string }>;
+}
+
+export interface DocumentValuesResponse {
+  document_id: number;
+  values: DocumentValue[];
+}
+
+export const documentsApi = {
+  createDocument: async (token: string, body: DocumentCreate): Promise<Document> => {
+    return request<Document>("/documents/create", { method: "POST", body: JSON.stringify(body) }, token);
+  },
+
+  saveValues: async (token: string, documentId: number, body: DocumentValuesSave): Promise<DocumentValuesResponse> => {
+    return request<DocumentValuesResponse>(`/documents/${documentId}/values`, { method: "PUT", body: JSON.stringify(body) }, token);
+  },
+
+  getMyDocuments: async (token: string): Promise<Document[]> => {
+    return request<Document[]>("/documents", {}, token);
+  },
+
+  getDocument: async (token: string, id: number): Promise<Document> => {
+    return request<Document>(`/documents/${id}`, {}, token);
   },
 };
