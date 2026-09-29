@@ -1890,7 +1890,6 @@ Add all future updates below this section.
 - For frontend awareness: suggest-fields responses now come from Sonnet 4.5 (better quality, slightly longer latency ~7s observed).
 
 ---
-
 ### Checkpoint 0038
 
 - Date: 2026-09-13
