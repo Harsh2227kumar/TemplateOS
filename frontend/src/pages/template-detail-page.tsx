@@ -239,7 +239,7 @@ export function TemplateDetailPage() {
         {(template.status === "field_configured" || template.status === "active") && (
           <Button
             className="gap-2"
-            onClick={() => navigate(`/documents/create?template_id=${template.id}`)}
+            onClick={() => navigate(`/documents/create/${template.id}`)}
           >
             <FileText className="h-4 w-4" />
             Use This Template
