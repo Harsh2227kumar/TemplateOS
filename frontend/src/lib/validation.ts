@@ -1,55 +1,137 @@
 import { z } from "zod";
 
-/**
- * Parses validation_rule string and applies appropriate Zod validators.
- *
- * Supported rules:
- * - "email" → z.string().email()
- * - "min:N" → z.string().min(N) or z.number().min(N)
- * - "max:N" → z.string().max(N) or z.number().max(N)
- * - "min:5|max:100" → chained validators
- *
- * Phase 1: regex rules are ignored (server-side only in Phase 2)
- */
-export function applyValidationRule(
-  schema: z.ZodString | z.ZodNumber | z.ZodArray<any>,
-  validationRule: string | null,
-  fieldLabel: string
-): z.ZodString | z.ZodNumber | z.ZodArray<any> {
-  if (!validationRule) return schema;
+export interface ValidationRule {
+  email?: boolean;
+  min?: number;
+  max?: number;
+}
 
-  const rules = validationRule.split("|").map((r) => r.trim());
+export function parseValidationRule(rule: string | null): ValidationRule {
+  if (!rule) return {};
 
-  for (const rule of rules) {
-    if (rule === "email") {
-      if (schema instanceof z.ZodString) {
-        schema = schema.email(`${fieldLabel} must be a valid email address`);
-      }
-    } else if (rule.startsWith("min:")) {
-      const minValue = parseInt(rule.split(":")[1], 10);
-      if (isNaN(minValue)) continue;
+  const parsed: ValidationRule = {};
+  const parts = rule.split("|");
 
-      if (schema instanceof z.ZodString) {
-        schema = schema.min(minValue, `${fieldLabel} must be at least ${minValue} characters`);
-      } else if (schema instanceof z.ZodNumber) {
-        schema = schema.min(minValue, `${fieldLabel} must be at least ${minValue}`);
-      } else if (schema instanceof z.ZodArray) {
-        schema = schema.min(minValue, `${fieldLabel} must have at least ${minValue} items`);
-      }
-    } else if (rule.startsWith("max:")) {
-      const maxValue = parseInt(rule.split(":")[1], 10);
-      if (isNaN(maxValue)) continue;
-
-      if (schema instanceof z.ZodString) {
-        schema = schema.max(maxValue, `${fieldLabel} must be at most ${maxValue} characters`);
-      } else if (schema instanceof z.ZodNumber) {
-        schema = schema.max(maxValue, `${fieldLabel} must be at most ${maxValue}`);
-      } else if (schema instanceof z.ZodArray) {
-        schema = schema.max(maxValue, `${fieldLabel} must have at most ${maxValue} items`);
-      }
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (trimmed === "email") {
+      parsed.email = true;
+    } else if (trimmed.startsWith("min:")) {
+      const num = parseInt(trimmed.split(":")[1], 10);
+      if (!isNaN(num)) parsed.min = num;
+    } else if (trimmed.startsWith("max:")) {
+      const num = parseInt(trimmed.split(":")[1], 10);
+      if (!isNaN(num)) parsed.max = num;
     }
-    // regex rules are ignored (server-side only in Phase 2)
+  }
+
+  return parsed;
+}
+
+export function getFieldSchema(field: {
+  field_type: string;
+  is_required: boolean;
+  validation_rule: string | null;
+}) {
+  const rule = parseValidationRule(field.validation_rule);
+  let schema: z.ZodType<any> = z.string();
+
+  switch (field.field_type) {
+    case "number":
+      schema = z.string().refine(
+        (val) => val === "" || !isNaN(Number(val)),
+        { message: "Must be a valid number" }
+      );
+      break;
+    case "email":
+      schema = z.string().email("Must be a valid email address");
+      break;
+    case "date":
+      schema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be a valid date (YYYY-MM-DD)");
+      break;
+    case "textarea":
+      schema = z.string();
+      break;
+    case "list":
+      schema = z.array(z.string());
+      break;
+    case "signature":
+      schema = z.string();
+      break;
+    default:
+      schema = z.string();
+  }
+
+  if (field.is_required) {
+    if (field.field_type === "list") {
+      schema = schema.refine((val) => Array.isArray(val) && val.length > 0, {
+        message: "This field is required",
+      });
+    } else {
+      schema = schema.refine((val) => val !== "" && val !== undefined, {
+        message: "This field is required",
+      });
+    }
+  } else {
+    if (field.field_type === "list") {
+      schema = schema.optional();
+    } else {
+      schema = schema.optional().or(z.literal(""));
+    }
+  }
+
+  if (rule.min !== undefined) {
+    if (field.field_type === "number") {
+      schema = schema.refine(
+        (val) => val === "" || Number(val) >= rule.min!,
+        { message: `Must be at least ${rule.min}` }
+      );
+    } else if (field.field_type === "list") {
+      schema = schema.refine(
+        (val) => Array.isArray(val) && val.length >= rule.min!,
+        { message: `Must have at least ${rule.min} items` }
+      );
+    } else {
+      schema = schema.refine(
+        (val) => val === "" || String(val).length >= rule.min!,
+        { message: `Must be at least ${rule.min} characters` }
+      );
+    }
+  }
+
+  if (rule.max !== undefined) {
+    if (field.field_type === "number") {
+      schema = schema.refine(
+        (val) => val === "" || Number(val) <= rule.max!,
+        { message: `Must be at most ${rule.max}` }
+      );
+    } else if (field.field_type === "list") {
+      schema = schema.refine(
+        (val) => Array.isArray(val) && val.length <= rule.max!,
+        { message: `Must have at most ${rule.max} items` }
+      );
+    } else {
+      schema = schema.refine(
+        (val) => val === "" || String(val).length <= rule.max!,
+        { message: `Must be at most ${rule.max} characters` }
+      );
+    }
   }
 
   return schema;
+}
+
+export function buildFormSchema(fields: Array<{
+  field_name: string;
+  field_type: string;
+  is_required: boolean;
+  validation_rule: string | null;
+}>) {
+  const shape: Record<string, z.ZodType<any>> = {};
+
+  for (const field of fields) {
+    shape[field.field_name] = getFieldSchema(field);
+  }
+
+  return z.object(shape);
 }
