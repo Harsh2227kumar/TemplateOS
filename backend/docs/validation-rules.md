@@ -120,25 +120,20 @@ def validate_field_value(field: TemplateField, value: str) -> None:
 ```
 
 ### Error Response
-When validation fails, return HTTP 422 with structured errors:
+When validation fails, the API returns HTTP 422 with one entry per failing
+field (shape produced by `app/services/document_validator.py`):
 ```json
 {
   "detail": [
-    {
-      "field_name": "prepared_by_email",
-      "field_label": "Prepared By (Email)",
-      "message": "Invalid email format",
-      "rule": "email"
-    },
-    {
-      "field_name": "meeting_title",
-      "field_label": "Meeting Title",
-      "message": "Minimum 5 characters",
-      "rule": "min:5"
-    }
+    { "field_name": "prepared_by_email", "error": "Must be a valid email address" },
+    { "field_name": "meeting_title", "error": "Must be at least 5 characters" }
   ]
 }
 ```
+
+Request-shape errors caught by Pydantic before the validator runs (e.g. an
+empty `values` array) use FastAPI's default `{loc, msg, type}` items instead;
+the frontend handles both shapes.
 
 ## Field Type Context
 
