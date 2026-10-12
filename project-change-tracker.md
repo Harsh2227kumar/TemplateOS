@@ -2634,3 +2634,56 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge order: PR #122 -> `backend`, then PR #123 (rebase onto `backend` first) -> `backend`, PR #124 -> `frontend`, then integrate `backend` and `frontend` into `dev`.
 - Before using AI for real: run `alembic upgrade head` on Neon and add `BEDROCK_MODEL_NOVA_MICRO` / `BEDROCK_MODEL_NOVA_LITE` to `.env`. No live Bedrock call has been made yet.
 - V1.5 Phase 1 is complete across all three members.
+
+### Checkpoint 0052
+
+- Date: 2026-10-12
+- Member: AI Assistant (for Member 1)
+- Branch: `fix/backend-security-hardening` (from `backend`, PR into `backend`) and `fix/frontend-auth-session-handling` (from `frontend`, PR into `frontend`); this entry on `docs/project-change-tracker-audit-fixes` (from `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0051 -> 2026-10-12
+
+#### Summary
+
+- Full-codebase audit: security hardening, dependency upgrades and bug fixes, split into one backend-only and one frontend-only branch.
+
+#### Completed Tasks
+
+- Upgraded vulnerable dependencies (pip-audit clean; non-breaking npm audit fixes).
+- Hardened backend config, login, upload, db-check and input limits.
+- Fixed frontend session handling and removed the stale compiled Vite config.
+- Verified V1.5 Phase 1 Member 1 deliverables (Checkpoint 0051) are present on `frontend` and `dev`.
+
+#### Code Changes
+
+- backend: `requirements.txt`, `requirements-dev.txt`, `pytest.ini` (new), `app/core/config.py`, `app/core/security.py`, `app/main.py`, `app/db/session.py`, `app/api/v1/endpoints/auth.py`, `app/api/v1/endpoints/templates.py`, `app/crud/template_crud.py`, `app/schemas/document.py`, `app/services/storage_service.py`, `scripts/test_db_connection.py`, tests (`test_config.py` new; auth, upload, library, document endpoint tests)
+- frontend: `src/lib/auth-token.ts` (new), `src/lib/api.ts`, `src/context/auth-context.tsx`, `src/pages/login-page.tsx`, `src/components/forms/DynamicField.tsx`, 10 other pages/components (token helper), `tsconfig.node.json`, `package-lock.json`
+- config: `.env.example` (backend branch), `.gitignore` (frontend branch)
+- Removed: `frontend/vite.config.js`, `frontend/vite.config.d.ts`
+
+#### Features Added / Updated / Removed
+
+- Added: production safety checks (`APP_ENV=production` refuses a weak/example `JWT_SECRET_KEY`, `APP_DEBUG=true`, `*` CORS); automatic sign-out on any 401.
+- Updated: `APP_DEBUG` defaults to false; `STORAGE_BASE_PATH` resolves against the repo root; CORS without credentials and with explicit methods/headers; upload accepts only real DOCX files (zip with `word/document.xml`, max 100 MB uncompressed); document values max 50k chars / 500 per request; dependencies: fastapi 0.143.0, python-multipart 0.0.32, PyJWT 2.15.1, python-dotenv 1.2.4, pytest 9.0.3.
+- Removed: committed demo-user passwords in `.env.example` (now placeholders); committed tsc output of `vite.config.ts`.
+
+#### Issues Fixed
+
+- Reloading right after login signed the user out (any failed `/auth/me`, even an aborted request, cleared the token).
+- Expired tokens left pages showing errors instead of returning to login.
+- Running uvicorn from `backend/` stored files in `backend/backend/storage`.
+- Stale `frontend/vite.config.js` shadowed `vite.config.ts`.
+- `pytest` from `backend/` crashed collecting `scripts/test_db_connection.py`.
+- Login timing revealed which emails have accounts.
+- `/system/db-check` (no auth) returned the raw database error (host/user/db name).
+- Upload read the whole file before the size check and accepted any bytes named `.docx` (incl. zip bombs).
+- Re-cleaning a template left the old processed file orphaned; storage errors there returned an unhandled 500.
+
+#### Notes For Next Push
+
+- Merge order: `fix/backend-security-hardening` -> `backend`, `fix/frontend-auth-session-handling` -> `frontend`, this docs branch -> `dev`, then integrate `backend` and `frontend` into `dev`.
+- Verification: backend 317 passed; frontend `npm run build` passes; browser smoke test (login, reload, library page, expired-token sign-out) passed.
+- Action needed: if the old `.env.example` demo passwords were ever seeded into the shared Neon DB, change or delete those users. Copy `STORAGE_BASE_PATH` into local `.env` if you set it.
+- Not done (needs a team decision): login rate limiting; request-body size limit at the reverse proxy; react-router 7 / vite 8 / tailwind 4 major upgrades for the remaining npm advisories; moving tokens out of localStorage.
+- PR #126 (`fix/backend-ai-test-env-order`) merged after Checkpoint 0051 without its own checkpoint.
+- Minor follow-up for Member 1: `create-document-page.tsx` passes `createdDocIdRef.current` to `aiContext`; a ref change does not re-render, so `document_id` may be logged as null until the next re-render after the draft is created.
