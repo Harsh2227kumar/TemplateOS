@@ -26,6 +26,10 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
 os.environ["API_V1_PREFIX"] = "/api/v1"
+# This module sorts before the other AI test files, so it may be the first to
+# import app.core.config: set the same model default they rely on, or the
+# settings singleton is created without it on machines with no .env.
+os.environ.setdefault("BEDROCK_MODEL_SUGGESTIONS", "test-model-id")
 
 from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.document_crud import create_document, delete_document
