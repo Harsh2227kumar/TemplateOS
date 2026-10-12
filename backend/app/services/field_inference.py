@@ -97,8 +97,8 @@ DATE_VALUE = re.compile(
     re.IGNORECASE,
 )
 TIME_VALUE = re.compile(
-    r"\b\d{1,2}(?:[:.]\d{2})\s*(?:[ap]\.?\s?m\.?|hrs|hours)?(?![\d/])"
-    r"|\b\d{1,2}\s*(?:[ap]\.m\.|[ap]m)\b",
+    r"\b\d{1,2}[:.]\d{2}\s*(?:[ap]\.m\.|[ap]m\b|hrs\b|hours\b)?(?![\d/])"
+    r"|\b\d{1,2}\s*(?:[ap]\.m\.|[ap]m\b)",
     re.IGNORECASE,
 )
 EMAIL_VALUE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
@@ -274,8 +274,14 @@ def infer_ai_enabled(key: str, field_type: str) -> bool:
     return bool(token_set & _AI_TOKENS) or field_type == "textarea"
 
 
+_SIGNATORY_ROLE_NAME = re.compile(
+    r"^(director|principal|dean|hod|head_of_department|registrar|"
+    r"\w+_incharge|\w*coordinator|convener|convenor|secretary|president)_name$"
+)
+
+
 def infer_section_override(key: str, field_type: str) -> str | None:
-    if field_type == "signature" or _SIGNATORY_KEY.search(key):
+    if field_type == "signature" or _SIGNATORY_KEY.search(key) or _SIGNATORY_ROLE_NAME.match(key):
         return "Signatures"
     return None
 
