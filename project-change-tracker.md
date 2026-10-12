@@ -2549,3 +2549,45 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Full backend suite: 276 passed. Migration up/down/up verified on SQLite; PostgreSQL SQL checked offline.
 - Endpoint integration tests (mocked `improve_text`, logged `document_id`) move to Member 2, since the endpoint is built there.
 - Member 2 builds `POST /api/v1/ai/improve-text` on a branch stacked on this one.
+
+### Checkpoint 0050
+
+- Date: 2026-10-12
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v15-p1-ai-improve-text-endpoint` (stacked on `feature/backend-v15-p1-ai-improve-data-layer`; PR #123, retarget to `backend` after PR #122 merges)
+- Push status: before push
+- Range covered: after Checkpoint 0049 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 backend: `POST /api/v1/ai/improve-text` rewrites one form field with Amazon Nova on Bedrock and logs every call to `ai_generations`.
+
+#### Completed Tasks
+
+- `ai_service.improve_text()` with model routing: `grammar` -> Nova Micro; `tone` / `concise` / `formal` -> Nova Lite (Bedrock Converse API via `boto3` + `instructor.from_bedrock`, validated `TextImprovement` output).
+- `_build_bedrock_client()`; region/auth check split into `_auth_problem()` so text actions do not need `BEDROCK_MODEL_SUGGESTIONS`.
+- New router `app/api/v1/endpoints/ai.py`, registered under `/ai`.
+- Endpoint integration tests handed over from Member 3, plus service tests.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/ai.py` (new), `backend/app/api/v1/api.py`
+- `backend/app/services/ai_service.py`, `backend/app/core/config.py`, `.env.example`
+- `backend/tests/test_ai_endpoints.py` (+27 tests)
+
+#### Features Added / Updated / Removed
+
+- Added: improve-text endpoint; `BEDROCK_MODEL_NOVA_MICRO` / `BEDROCK_MODEL_NOVA_LITE` settings.
+- Updated: botocore `ClientError` is classified by HTTP status; error hints name the right model env var.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviation from prompt: Nova model ids are not hardcoded (the prompt suggested `amazon.nova-*-v1:0` defaults). The existing `config.py` rule says no model id in code, and ap-south-1 needs the `apac.` inference-profile ids. Add both to `.env` before using the feature.
+- Added beyond the prompt: template view access, document ownership, document/template match, and field must be an `ai_enabled` text/textarea field (otherwise 403/404/422, no AI call, no audit row).
+- Full backend suite: 303 passed (Bedrock mocked). No live Bedrock call has been made yet.
+- Member 1 can build the toolbar against: `POST /api/v1/ai/improve-text` `{template_id, document_id?, field_name, original_text, action_type}` -> `{improved_text}`; 503 `{detail}` when AI is unavailable.
