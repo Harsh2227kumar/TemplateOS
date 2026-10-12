@@ -7,8 +7,10 @@ CRUD for ai_generations (V1.3 Phase 4 — Member 3).
 
 Keyword signature is the locked Member 2 <-> Member 3 contract:
     log_ai_generation(db, *, action_type, model, template_id=None,
-        created_by, field_key=None, status="success",
+        document_id=None, created_by, field_key=None, status="success",
         suggestions_count=None, detail=None)
+
+document_id (V1.5 Phase 1) is optional, so V1.3 callers are unchanged.
 """
 
 from sqlalchemy import select
@@ -23,6 +25,7 @@ def log_ai_generation(
     action_type: str,
     model: str,
     template_id: int | None = None,
+    document_id: int | None = None,
     created_by: int,
     field_key: str | None = None,
     status: str = "success",
@@ -37,6 +40,7 @@ def log_ai_generation(
         action_type=action_type,
         model=model,
         template_id=template_id,
+        document_id=document_id,
         field_key=field_key,
         created_by=created_by,
         status=status,

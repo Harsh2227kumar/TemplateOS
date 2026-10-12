@@ -10,6 +10,8 @@ Contracts:
 - SuggestFieldsResponse is the POST /templates/{id}/suggest-fields
   envelope (model + counts + suggestions; no fields are written).
 - AiGenerationRead exposes lean audit rows if the UI shows an AI history.
+- ImproveTextRequest / ImproveTextResponse (V1.5 Phase 1) are the
+  POST /ai/improve-text contract: one field's text in, improved text out.
 
 field_type validates against FIELD_TYPES imported from the model — a
 single source of truth (no "dropdown"; the MVP set has "textarea"/"list").
@@ -17,6 +19,7 @@ single source of truth (no "dropdown"; the MVP set has "textarea"/"list").
 
 import re
 from datetime import datetime
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -92,7 +95,43 @@ class AiGenerationRead(BaseModel):
     action_type: str
     model: str
     template_id: int | None
+    document_id: int | None
     field_key: str | None
     status: str
     suggestions_count: int | None
     created_at: datetime
+
+
+# --- V1.5 Phase 1: basic AI writing actions on a single field ---
+
+AiTextAction = Literal["grammar", "tone", "concise", "formal"]
+AI_TEXT_ACTIONS: tuple[str, ...] = get_args(AiTextAction)
+
+# Cap the text sent to the model per call (token/cost control).
+MAX_IMPROVE_TEXT_CHARS = 5000
+
+
+class ImproveTextRequest(BaseModel):
+    """
+    POST /ai/improve-text body. document_id is optional: the user may run an
+    action on a new form before the draft has been saved for the first time.
+    """
+
+    template_id: int
+    document_id: int | None = None
+    field_name: str = Field(..., min_length=1, max_length=100)
+    original_text: str = Field(..., min_length=1, max_length=MAX_IMPROVE_TEXT_CHARS)
+    action_type: AiTextAction
+
+    @field_validator("original_text")
+    @classmethod
+    def validate_original_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("original_text must not be blank")
+        return value
+
+
+class ImproveTextResponse(BaseModel):
+    """The improved text that replaces the field's value in the form."""
+
+    improved_text: str
