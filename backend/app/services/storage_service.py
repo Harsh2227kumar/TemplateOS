@@ -7,8 +7,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Use the configured storage base path instead of hardcoding
-DEFAULT_STORAGE_ROOT = Path(settings.storage_base_path).resolve()
+# Configured via STORAGE_BASE_PATH; relative values resolve against the repo root.
+DEFAULT_STORAGE_ROOT = settings.storage_root
 
 STORAGE_FOLDERS = {
     "templates_original": Path("templates/original"),
