@@ -39,6 +39,8 @@ def _load_ai_env_from_file() -> None:
         "AWS_PROFILE",
         "AWS_REGION",
         "BEDROCK_MODEL_SUGGESTIONS",
+        "BEDROCK_MODEL_NOVA_LITE",
+        "BEDROCK_MODEL_NOVA_MICRO",
         "AI_MAX_OUTPUT_TOKENS",
         "AWS_BEARER_TOKEN_BEDROCK",
     ):
@@ -75,6 +77,14 @@ class Settings(BaseSettings):
     bedrock_model_suggestions: str = Field(
         default="",
         alias="BEDROCK_MODEL_SUGGESTIONS",
+    )
+    # V1.5 Phase 1 text actions (Amazon Nova via the Bedrock Converse API).
+    # Same rule: ids come from .env only. In ap-south-1 Nova is invoked via
+    # the APAC inference profile, e.g. "apac.amazon.nova-lite-v1:0".
+    # Micro handles "grammar"; Lite handles "tone" / "concise" / "formal".
+    bedrock_model_nova_lite: str = Field(default="", alias="BEDROCK_MODEL_NOVA_LITE")
+    bedrock_model_nova_micro: str = Field(
+        default="", alias="BEDROCK_MODEL_NOVA_MICRO"
     )
     ai_max_output_tokens: int = Field(default=1024, alias="AI_MAX_OUTPUT_TOKENS")
 
