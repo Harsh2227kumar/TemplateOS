@@ -35,12 +35,27 @@ export function dismissToast(id: number) {
   emit();
 }
 
+const timers = new Map<number, number>();
+
 export function toast(options: ToastOptions): number {
-  const id = nextId++;
+  // An identical toast already on screen (e.g. "AI is unavailable" from two
+  // fields) is moved to the end and its timer restarted, not stacked.
+  const duplicate = toasts.find(
+    (t) => t.title === options.title && t.description === options.description && t.variant === options.variant,
+  );
+  const id = duplicate ? duplicate.id : nextId++;
   // Keep at most 3 on screen; the newest goes last.
-  toasts = [...toasts, { ...options, id }].slice(-3);
+  toasts = [...toasts.filter((t) => t.id !== id), { ...options, id }].slice(-3);
   emit();
-  window.setTimeout(() => dismissToast(id), options.duration ?? 5000);
+  const existing = timers.get(id);
+  if (existing !== undefined) window.clearTimeout(existing);
+  timers.set(
+    id,
+    window.setTimeout(() => {
+      timers.delete(id);
+      dismissToast(id);
+    }, options.duration ?? 5000),
+  );
   return id;
 }
 
@@ -61,7 +76,7 @@ export function Toaster() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 right-4 z-[100] flex w-full max-w-sm flex-col gap-2 px-4 sm:px-0"
+      className="pointer-events-none fixed inset-x-0 bottom-4 z-[100] flex flex-col gap-2 px-4 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm sm:px-0"
     >
       {items.map((item) => {
         const destructive = item.variant === "destructive";
