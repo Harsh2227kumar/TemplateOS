@@ -2768,3 +2768,41 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Live result: Claude Sonnet 4.5 OK (8.0 s), Nova Micro OK (1.1 s), Nova Lite OK (1.0 s).
 - `.env` now has `BEDROCK_MODEL_NOVA_MICRO=apac.amazon.nova-micro-v1:0` and `BEDROCK_MODEL_NOVA_LITE=apac.amazon.nova-lite-v1:0`; restart the backend after changing `.env`.
 - Windows consoles: set `PYTHONIOENCODING=utf-8` if the script's dashes print as `?`.
+
+### Checkpoint 0055
+
+- Date: 2026-10-12
+- Member: AI Assistant (V1.5 Phase 1 verification, all members)
+- Branch: `fix/frontend-empty-list-field-default` (from `frontend`, PR #140 into `frontend`); this entry on `docs/project-change-tracker-v15-p1-verification` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0054 -> 2026-10-12
+
+#### Summary
+
+- Verified V1.5 Phase 1 (Basic AI Actions) is complete for Member 1, 2 and 3 on `dev`, including an end-to-end browser run against real Amazon Nova on Bedrock (throwaway SQLite DB, Neon untouched). Found and fixed one V1.4 bug that blocked saving drafts.
+
+#### Completed Tasks
+
+- Re-checked every prompt item for M1/M2/M3 on current `dev`, including after the security and auth PRs #132-#136.
+- Backend suite: 319 passed (51 AI tests). Frontend `tsc --noEmit` and `npm run build` pass.
+- Live UI run: toolbar only on `ai_enabled` text/textarea fields; spinner, read-only field and disabled buttons while running; Fix grammar (Nova Micro), Professional / Concise / Formal (Nova Lite) replaced text in ~1-3 s; Undo shown; draft saved; AI on the edit page logged with the draft's `document_id`; AI text persisted after save + reload. 8 `ai_generations` rows with correct model ids.
+- Fixed: list fields without a default were reset to `""`, so an untouched optional list blocked Save Draft ("Expected array, received string").
+
+#### Code Changes
+
+- `frontend/src/pages/create-document-page.tsx`, `frontend/src/pages/edit-document-page.tsx` (list fields always start as an array)
+
+#### Features Added / Updated / Removed
+
+- Added: None
+- Updated: list-field initialisation on both draft pages
+- Removed: None
+
+#### Issues Fixed
+
+- Save Draft silently failed for any template with an optional list field left empty (V1.4 bug, found during the V1.5 end-to-end run).
+
+#### Notes For Next Push
+
+- V1.5 Phase 1 is complete across all three members once PR #140 is merged and `frontend` is integrated into `dev`.
+- Console noise seen in local testing (`ERR_CONNECTION_REFUSED`) came from Vite's dev-server reconnect polling after a test server stopped, not from app code.
