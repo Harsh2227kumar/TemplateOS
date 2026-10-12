@@ -2730,3 +2730,41 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Action needed: if the old `.env.example` demo passwords were ever seeded into the shared Neon DB, change or delete those users. Copy `STORAGE_BASE_PATH` into local `.env` if you set it.
 - Not done (needs a team decision): login rate limiting; request-body size limit at the reverse proxy; react-router 7 / vite 8 / tailwind 4 major upgrades for the remaining npm advisories; moving tokens out of localStorage.
 - Minor follow-up for Member 1: `create-document-page.tsx` passes `createdDocIdRef.current` to `aiContext`; a ref change does not re-render, so `document_id` may be logged as null until the next re-render after the draft is created.
+
+### Checkpoint 0054
+
+- Date: 2026-10-12
+- Member: AI Assistant (Backend/Service)
+- Branch: `feature/backend-verify-bedrock-per-model` (from `backend`, PR #137 into `backend`); this entry on `docs/project-change-tracker-bedrock-verify` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0053 -> 2026-10-12
+
+#### Summary
+
+- `scripts/verify_bedrock.py` now verifies every Bedrock model the app uses individually, and the live check confirmed all three work on the team AWS account (`ap-south-1`).
+
+#### Completed Tasks
+
+- Per-model config check for `BEDROCK_MODEL_SUGGESTIONS`, `BEDROCK_MODEL_NOVA_MICRO`, `BEDROCK_MODEL_NOVA_LITE`.
+- `--live`: one tiny call per model through the real service functions (`suggest_fields`, `improve_text`); one failure no longer stops the remaining checks.
+- `--model <suggestions|nova-micro|nova-lite>` to check a single model.
+
+#### Code Changes
+
+- `backend/scripts/verify_bedrock.py`
+
+#### Features Added / Updated / Removed
+
+- Added: per-model live verification and `--model` filter.
+- Updated: auth step uses `_auth_problem()` (Nova checks no longer depend on the Claude model id).
+- Removed: None
+
+#### Issues Fixed
+
+- The script only checked the Claude suggestions model; Nova models used by V1.5 improve-text were unverified.
+
+#### Notes For Next Push
+
+- Live result: Claude Sonnet 4.5 OK (8.0 s), Nova Micro OK (1.1 s), Nova Lite OK (1.0 s).
+- `.env` now has `BEDROCK_MODEL_NOVA_MICRO=apac.amazon.nova-micro-v1:0` and `BEDROCK_MODEL_NOVA_LITE=apac.amazon.nova-lite-v1:0`; restart the backend after changing `.env`.
+- Windows consoles: set `PYTHONIOENCODING=utf-8` if the script's dashes print as `?`.
