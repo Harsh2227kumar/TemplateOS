@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { templatesApi, documentsApi, TemplateListItem, Document } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth-token";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -20,7 +21,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     async function fetchTemplates() {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       if (!token) {
         setTemplatesLoading(false);
         return;
@@ -35,7 +36,7 @@ export function DashboardPage() {
       }
     }
     async function fetchDrafts() {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       if (!token) {
         setDraftsLoading(false);
         return;

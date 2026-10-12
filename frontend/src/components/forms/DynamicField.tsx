@@ -9,6 +9,7 @@ import { ListField } from "./ListField";
 import { AiActionToolbar } from "@/components/fields/AiActionToolbar";
 import { useToast } from "@/components/ui/toast";
 import { aiApi, ApiError, MAX_AI_TEXT_CHARS, type AiTextAction } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth-token";
 
 interface FieldProps {
   field: {
@@ -93,7 +94,7 @@ export function DynamicField({ field, aiContext }: FieldProps) {
 
     setAiAction(actionType);
     try {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       const response = await aiApi.improveText(token, {
         template_id: aiContext.templateId,
         document_id: aiContext.documentId ?? null,
