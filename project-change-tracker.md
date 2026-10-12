@@ -2507,3 +2507,45 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge the three backend PRs into `backend` and the frontend PR into `frontend`, then integrate `backend` and `frontend` into `dev` as usual.
 - Not changed: `regex:` validation rules are still not enforced server-side; GET `/documents/{id}/values` keeps the `{document_id, values}` shape (frontend does not use it); no unsaved-changes warning on form pages.
 - `test_template_cleaning` writes to real local storage and can flake when two test runs execute at the same time.
+
+### Checkpoint 0049
+
+- Date: 2026-10-12
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v15-p1-ai-improve-data-layer` (created from `backend`, PR #122 into `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0048 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 (Basic AI Actions) data layer: request/response schemas for `POST /ai/improve-text` and a real foreign key from `ai_generations.document_id` to the V1.4 `documents` table.
+
+#### Completed Tasks
+
+- `ImproveTextRequest` (`template_id`, optional `document_id`, `field_name`, `original_text`, `action_type`) and `ImproveTextResponse` (`improved_text`) in `app/schemas/ai.py`.
+- `ai_generations.document_id` -> `documents.id` ON DELETE SET NULL (model + Alembic migration `c4d8e2f6a1b3`, down_revision `9a8b7c6d5e4f`).
+- `log_ai_generation` accepts `document_id` (needed so the endpoint can log it; not in the original prompt).
+- Tests in `tests/test_ai_endpoints.py`.
+
+#### Code Changes
+
+- `backend/app/schemas/ai.py`, `backend/app/models/ai_generation.py`, `backend/app/crud/ai_generation_crud.py`
+- `backend/alembic/versions/c4d8e2f6a1b3_add_ai_generations_document_fk.py` (new)
+- `backend/tests/test_ai_endpoints.py` (new, 24 tests)
+
+#### Features Added / Updated / Removed
+
+- Added: improve-text schemas; `action_type` is strictly `grammar | tone | concise | formal`; `original_text` must be non-blank and at most 5000 characters (cost control).
+- Updated: `ai_generations.document_id` is now a foreign key; `AiGenerationRead` exposes `document_id`.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Migration nulls any orphaned `ai_generations.document_id` before adding the FK. Run `alembic upgrade head` on Neon after merge.
+- Full backend suite: 276 passed. Migration up/down/up verified on SQLite; PostgreSQL SQL checked offline.
+- Endpoint integration tests (mocked `improve_text`, logged `document_id`) move to Member 2, since the endpoint is built there.
+- Member 2 builds `POST /api/v1/ai/improve-text` on a branch stacked on this one.
