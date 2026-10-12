@@ -2591,3 +2591,46 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Added beyond the prompt: template view access, document ownership, document/template match, and field must be an `ai_enabled` text/textarea field (otherwise 403/404/422, no AI call, no audit row).
 - Full backend suite: 303 passed (Bedrock mocked). No live Bedrock call has been made yet.
 - Member 1 can build the toolbar against: `POST /api/v1/ai/improve-text` `{template_id, document_id?, field_name, original_text, action_type}` -> `{improved_text}`; 503 `{detail}` when AI is unavailable.
+
+### Checkpoint 0051
+
+- Date: 2026-10-12
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v15-p1-ai-action-toolbar` (created from `frontend`, PR #124 into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0050 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 frontend: AI writing actions below AI-enabled text/textarea fields on the create and edit draft pages.
+
+#### Completed Tasks
+
+- `aiApi.improveText` and `ImproveTextRequest` / `ImproveTextResponse` types in `src/lib/api.ts`.
+- `AiActionToolbar` (`src/components/fields/`): Fix grammar, Professional (`tone`), Concise, Formal.
+- `DynamicField`: toolbar only for `ai_enabled` text/textarea fields; replaces the value via `setValue(..., { shouldDirty: true })`; spinner and read-only input while running; failure toast keeps the user's text.
+- Create page passes `templateId` (and the draft id once created); edit page passes the document's `template_id` and `id`.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`, `frontend/src/components/forms/DynamicField.tsx`, `frontend/src/main.tsx`
+- `frontend/src/pages/create-document-page.tsx`, `frontend/src/pages/edit-document-page.tsx`
+- `frontend/src/components/fields/AiActionToolbar.tsx` (new), `frontend/src/components/ui/toast.tsx` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: AI action toolbar; Undo after an AI replacement (dropped once the user edits); 5000-character guard matching the backend; dependency-free toast (`toast()` / `useToast()` / `<Toaster />`).
+- Updated: `DynamicField` accepts an optional `aiContext`.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviations from prompt: 4 buttons instead of 3 so every backend action (`grammar`, `tone`, `concise`, `formal`) is reachable; shadcn `useToast` was not installed, so a minimal in-house toast was added instead of a new Radix dependency.
+- Verification: `tsc --noEmit` and `npm run build` pass. Browser-tested against the Member 2 backend on a throwaway SQLite DB with `improve_text` faked: toolbar visibility, replace, Undo, 503 toast, and `document_id` logged from the edit page.
+- Merge order: PR #122 -> `backend`, then PR #123 (rebase onto `backend` first) -> `backend`, PR #124 -> `frontend`, then integrate `backend` and `frontend` into `dev`.
+- Before using AI for real: run `alembic upgrade head` on Neon and add `BEDROCK_MODEL_NOVA_MICRO` / `BEDROCK_MODEL_NOVA_LITE` to `.env`. No live Bedrock call has been made yet.
+- V1.5 Phase 1 is complete across all three members.
