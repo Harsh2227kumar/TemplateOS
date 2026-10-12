@@ -1,11 +1,14 @@
-import React from "react";
-import { Controller, ControllerRenderProps, useFormContext } from "react-hook-form";
+import React, { useEffect, useRef, useState } from "react";
+import { Controller, ControllerRenderProps, useFormContext, useWatch } from "react-hook-form";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Calendar, List, FileText, Signature, Hash, Mail } from "lucide-react";
 import { ListField } from "./ListField";
+import { AiActionToolbar } from "@/components/fields/AiActionToolbar";
+import { useToast } from "@/components/ui/toast";
+import { aiApi, ApiError, MAX_AI_TEXT_CHARS, type AiTextAction } from "@/lib/api";
 
 interface FieldProps {
   field: {
@@ -18,8 +21,18 @@ interface FieldProps {
     example_value: string | null;
     validation_rule: string | null;
     section: string | null;
+    ai_enabled?: boolean;
+  };
+  /** V1.5: enables AI writing actions on ai_enabled text/textarea fields. */
+  aiContext?: {
+    templateId: number;
+    /** Saved draft id, or null before the first save. */
+    documentId?: number | null;
   };
 }
+
+// Field types the AI text actions apply to (matches the backend).
+const AI_TEXT_FIELD_TYPES = ["text", "textarea"];
 
 interface FormValues {
   [key: string]: any;
@@ -45,9 +58,75 @@ const fieldTypeLabels: Record<string, string> = {
   signature: "Signature",
 };
 
-export function DynamicField({ field }: FieldProps) {
-  const { control, formState: { errors } } = useFormContext<FormValues>();
+export function DynamicField({ field, aiContext }: FieldProps) {
+  const { control, setValue, formState: { errors } } = useFormContext<FormValues>();
   const fieldName = field.field_name;
+  const { toast } = useToast();
+  const showAiToolbar =
+    !!aiContext && field.ai_enabled === true && AI_TEXT_FIELD_TYPES.includes(field.field_type);
+  const currentValue = useWatch({ control, name: fieldName });
+  const currentText = typeof currentValue === "string" ? currentValue : "";
+  const [aiAction, setAiAction] = useState<AiTextAction | null>(null);
+  // The user's text before the last AI replacement (for Undo).
+  const [textBeforeAi, setTextBeforeAi] = useState<string | null>(null);
+  const lastAiTextRef = useRef<string | null>(null);
+
+  // Once the user edits the AI result, Undo would discard their edits: drop it.
+  useEffect(() => {
+    if (textBeforeAi !== null && currentText !== lastAiTextRef.current) {
+      setTextBeforeAi(null);
+    }
+  }, [currentText, textBeforeAi]);
+
+  const handleAiAction = async (actionType: AiTextAction) => {
+    if (!aiContext || aiAction) return;
+    const originalText = currentText;
+    if (!originalText.trim()) return;
+    if (originalText.length > MAX_AI_TEXT_CHARS) {
+      toast({
+        variant: "destructive",
+        title: "Text is too long for AI",
+        description: `AI actions work on up to ${MAX_AI_TEXT_CHARS} characters.`,
+      });
+      return;
+    }
+
+    setAiAction(actionType);
+    try {
+      const token = localStorage.getItem("templateos_access_token") || "";
+      const response = await aiApi.improveText(token, {
+        template_id: aiContext.templateId,
+        document_id: aiContext.documentId ?? null,
+        field_name: fieldName,
+        original_text: originalText,
+        action_type: actionType,
+      });
+      lastAiTextRef.current = response.improved_text;
+      setValue(fieldName, response.improved_text, { shouldDirty: true, shouldValidate: true });
+      setTextBeforeAi(originalText);
+    } catch (err) {
+      // Never clear the user's text on failure.
+      const unavailable = err instanceof ApiError && err.status === 503;
+      // The 503 detail already starts with "AI is currently unavailable: ".
+      const detail = (err instanceof Error ? err.message : "Please try again.").replace(
+        /^AI is currently unavailable:\s*/,
+        "",
+      );
+      toast({
+        variant: "destructive",
+        title: unavailable ? "AI is currently unavailable" : "Couldn't improve the text",
+        description: detail,
+      });
+    } finally {
+      setAiAction(null);
+    }
+  };
+
+  const handleUndo = () => {
+    if (textBeforeAi === null) return;
+    setValue(fieldName, textBeforeAi, { shouldDirty: true, shouldValidate: true });
+    setTextBeforeAi(null);
+  };
   const fieldError = errors[fieldName] as { message?: string } | undefined;
   const icon = fieldTypeIcons[field.field_type] || <FileText className="h-4 w-4" />;
   const typeLabel = fieldTypeLabels[field.field_type] || field.field_type;
@@ -77,6 +156,9 @@ export function DynamicField({ field }: FieldProps) {
       onBlur,
       ref,
       disabled,
+      // Locked while an AI action runs so typing is not overwritten.
+      readOnly: aiAction !== null,
+      "aria-busy": aiAction !== null,
       "aria-invalid": fieldError ? true : false,
       "aria-describedby": fieldError ? `${fieldName}-error` : undefined,
     };
@@ -163,6 +245,15 @@ export function DynamicField({ field }: FieldProps) {
           control={control}
           defaultValue={getDefaultValue()}
           render={renderInput}
+        />
+      )}
+
+      {showAiToolbar && (
+        <AiActionToolbar
+          onAction={handleAiAction}
+          loadingAction={aiAction}
+          originalText={currentText}
+          onUndo={textBeforeAi !== null ? handleUndo : undefined}
         />
       )}
 
