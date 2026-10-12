@@ -9,24 +9,21 @@ Endpoints:
 - GET /documents/{document_id}/values
 """
 
+import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import CurrentUser, DbSession
 from app.crud.document_crud import (
     create_document,
-    delete_document,
     get_document_by_id,
     get_documents_by_user,
 )
 from app.crud.document_value_crud import get_values_by_document, upsert_values
 from app.crud.template_crud import get_template_by_id
 from app.crud.template_field_crud import get_fields_by_template
-from app.models.document import Document
 from app.models.template import Template
 from app.schemas.document import (
     DocumentCreate,
@@ -38,10 +35,8 @@ from app.schemas.document import (
 from app.services.document_validator import validate_document_values
 from app.services.template_access import user_can_view_template
 
-if TYPE_CHECKING:
-    from app.models.user import User
-
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post(
@@ -120,9 +115,18 @@ def save_document_values(
     Validate and upsert field values for a document draft.
 
     - Enforces ownership (created_by == current_user.id)
-    - Validates against template fields: required, type (number, email), validation_rule
+    - Validates against template fields: required, type (number, list),
+      validation_rule (email, min:N, max:N); 422 detail is [{field_name, error}]
+    - Bumps the document's updated_at on success
     - Returns saved values on success
     """
+    logger.info(
+        "Saving %d value(s) for document %s by user %s",
+        len(payload.values),
+        document_id,
+        current_user.id,
+    )
+
     # Load document
     document = get_document_by_id(db, document_id)
     if not document:
@@ -150,10 +154,25 @@ def save_document_values(
 
     # Validate values
     values_to_save = [v.model_dump() for v in payload.values]
-    validate_document_values(fields, values_to_save)
+    try:
+        validate_document_values(fields, values_to_save)
+    except HTTPException as exc:
+        logger.info(
+            "Validation failed for document %s by user %s: %d error(s)",
+            document_id,
+            current_user.id,
+            len(exc.detail),
+        )
+        raise
 
-    # Upsert values
+    # Upsert values (also bumps documents.updated_at)
     saved_values = upsert_values(db, document_id, values_to_save)
+    logger.info(
+        "Saved %d value(s) for document %s by user %s",
+        len(saved_values),
+        document_id,
+        current_user.id,
+    )
 
     # Return saved values
     return DocumentValuesBulkRead(
@@ -276,10 +295,11 @@ def get_document_values(
     document_id: int,
 ):
     """
-    Get just the values array for a document draft (used by edit mode).
+    Get the saved values for a document draft (used by edit mode).
 
     - Enforces ownership
-    - Returns values without full document metadata
+    - Returns {document_id, values: list[DocumentValueRead]} (DocumentValuesBulkRead),
+      without the rest of the document metadata
     """
     document = get_document_by_id(db, document_id)
     if not document:
