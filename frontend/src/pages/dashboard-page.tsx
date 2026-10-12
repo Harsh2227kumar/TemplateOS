@@ -205,11 +205,6 @@ export function DashboardPage() {
             </div>
           ))}
         </div>
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          <Link to="/documents" className="text-sm font-medium text-slate-600 hover:text-slate-900">
-            View All Drafts &rarr;
-          </Link>
-        </div>
       </div>
     );
   };

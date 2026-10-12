@@ -1,14 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Loader2, Save, AlertCircle, CheckCircle, ChevronLeft, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { DynamicField } from "@/components/forms/DynamicField";
-import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError } from "@/lib/api";
+import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError, splitValidationErrors } from "@/lib/api";
 import { buildFormSchema } from "@/lib/validation";
 
 export function EditDocumentPage() {
@@ -23,33 +23,57 @@ export function EditDocumentPage() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // "not_found" covers 404/403 on the document; anything else is a retryable load error.
+  const [loadError, setLoadError] = useState<{ kind: "not_found" | "error"; message: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  // Form values as of the last load or successful save, used by "Reset Form".
+  const lastSavedValuesRef = useRef<DocumentFormValues>({});
 
   const token = localStorage.getItem("templateos_access_token") || "";
 
   useEffect(() => {
     if (!documentId) {
-      navigate("/dashboard");
+      navigate("/");
       return;
     }
     async function fetchData() {
+      setLoading(true);
+      setLoadError(null);
+      setSaveError(null);
+      setDocument(null);
+      setTemplate(null);
+      let doc: Document;
       try {
-        const doc = await documentsApi.getDocument(token, documentId);
-        setDocument(doc);
+        doc = await documentsApi.getDocument(token, documentId);
+      } catch (err: any) {
+        console.error("Failed to load document:", err);
+        if (err instanceof ApiError && (err.status === 404 || err.status === 403)) {
+          setLoadError({ kind: "not_found", message: err.message });
+        } else {
+          setLoadError({ kind: "error", message: err?.message || "Failed to load document. Please try again." });
+        }
+        setLoading(false);
+        return;
+      }
+      try {
         const [templateData, fieldsData] = await Promise.all([
           templatesApi.getTemplateDetail(token, doc.template_id),
           templatesApi.getFields(token, doc.template_id),
         ]);
-        setTemplate(templateData);
         setFields(fieldsData);
-      } catch (err) {
-        console.error("Failed to load document:", err);
-        setSaveError("Failed to load document. Please try again.");
+        setTemplate(templateData);
+        setDocument(doc);
+        setLastSavedAt(doc.updated_at);
+      } catch (err: any) {
+        console.error("Failed to load template for document:", err);
+        setLoadError({ kind: "error", message: err?.message || "Failed to load the document's template. Please try again." });
       } finally {
         setLoading(false);
       }
     }
     fetchData();
-  }, [documentId, token]);
+  }, [documentId, token, reloadKey]);
 
   const schema = React.useMemo(() => buildFormSchema(fields), [fields]);
   const form = useForm<DocumentFormValues>({
@@ -58,11 +82,23 @@ export function EditDocumentPage() {
     mode: "onBlur",
   });
 
-  // Re-run reset when schema (fields) or document values change
+  // Re-run reset when schema (fields) or document values change.
+  // Fields without a saved value fall back to the field default, as on the create page.
   useEffect(() => {
-    if (fields.length > 0 && document?.values) {
+    if (fields.length > 0 && document) {
       const defaultValues: DocumentFormValues = {};
-      for (const val of document.values) {
+      fields.forEach(f => {
+        if (f.field_type === "list" && f.default_value) {
+          try {
+            defaultValues[f.field_name] = JSON.parse(f.default_value);
+          } catch {
+            defaultValues[f.field_name] = [];
+          }
+        } else {
+          defaultValues[f.field_name] = f.default_value || "";
+        }
+      });
+      for (const val of document.values ?? []) {
         const field = fields.find(f => f.field_name === val.field_name);
         if (field && field.field_type === "list") {
           try {
@@ -74,6 +110,7 @@ export function EditDocumentPage() {
           defaultValues[val.field_name] = val.value;
         }
       }
+      lastSavedValuesRef.current = structuredClone(defaultValues);
       form.reset(defaultValues);
     }
   }, [fields, document, form]);
@@ -96,21 +133,32 @@ export function EditDocumentPage() {
       });
 
       // Save values
-      await documentsApi.saveValues(token, documentId, { values });
+      const saved = await documentsApi.saveValues(token, documentId, { values });
+
+      lastSavedValuesRef.current = structuredClone(formData);
+      const savedTimes = (saved?.values ?? []).map((v) => v.updated_at).filter(Boolean);
+      const latest = savedTimes.length > 0
+        ? savedTimes.reduce((a, b) => (new Date(a) >= new Date(b) ? a : b))
+        : null;
+      setLastSavedAt(latest ?? new Date().toISOString());
 
       setSaveSuccess(true);
       setTimeout(() => {
         setSaveSuccess(false);
       }, 2000);
     } catch (err: any) {
-      if (err instanceof ApiError && err.status === 422 && err.detail) {
-        const errors: Record<string, string> = {};
-        for (const e of err.detail as Array<{ field_name: string; error: string }>) {
-          errors[e.field_name] = e.error;
-        }
-        Object.entries(errors).forEach(([fieldName, message]) => {
+      const split = err instanceof ApiError && err.status === 422
+        ? splitValidationErrors(err.detail, fields.map((f) => f.field_name))
+        : null;
+      if (split) {
+        Object.entries(split.fieldErrors).forEach(([fieldName, message]) => {
           form.setError(fieldName, { message, type: "server" });
         });
+        if (split.otherMessages.length > 0) {
+          setSaveError(`Validation failed: ${split.otherMessages.join("; ")}`);
+        } else if (Object.keys(split.fieldErrors).length === 0) {
+          setSaveError(err.message || "Validation failed. Please check the form.");
+        }
       } else {
         setSaveError(err?.message || "Failed to update draft. Please try again.");
       }
@@ -128,6 +176,25 @@ export function EditDocumentPage() {
     );
   }
 
+  if (loadError?.kind === "error") {
+    return (
+      <div className="mx-auto max-w-3xl text-center py-12">
+        <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold text-slate-900">Couldn't load this draft</h2>
+        <p className="mt-2 text-slate-500">{loadError.message}</p>
+        <div className="mt-6 flex justify-center gap-3">
+          <Button onClick={() => setReloadKey((k) => k + 1)}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Retry
+          </Button>
+          <Button asChild variant="outline">
+            <Link to="/">Go to Dashboard</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!document || !template) {
     return (
       <div className="mx-auto max-w-3xl text-center py-12">
@@ -135,7 +202,7 @@ export function EditDocumentPage() {
         <h2 className="text-xl font-semibold text-slate-900">Document not found</h2>
         <p className="mt-2 text-slate-500">The draft you're looking for doesn't exist or you don't have access to it.</p>
         <Button asChild className="mt-6">
-          <a href="/dashboard">Go to Dashboard</a>
+          <Link to="/">Go to Dashboard</Link>
         </Button>
       </div>
     );
@@ -153,14 +220,14 @@ export function EditDocumentPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <Button variant="ghost" size="icon" onClick={() => navigate("/dashboard")} className="h-8 w-8">
+          <Button variant="ghost" size="icon" onClick={() => navigate("/")} className="h-8 w-8">
             <ChevronLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-2xl font-bold text-slate-900">
             Editing: {document.name || `Draft ${document.id}`}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Template: {template.name} · Last saved: {new Date(document.updated_at).toLocaleString()}
+            Template: {template.name} · Last saved: {new Date(lastSavedAt ?? document.updated_at).toLocaleString()}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -233,7 +300,7 @@ export function EditDocumentPage() {
           </CardContent>
           <CardFooter className="flex justify-between gap-3 border-t bg-slate-50">
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => navigate("/dashboard")} disabled={saving}>
+              <Button type="button" variant="outline" onClick={() => navigate("/")} disabled={saving}>
                 Back to Dashboard
               </Button>
             </div>
@@ -242,7 +309,7 @@ export function EditDocumentPage() {
                 type="button"
                 variant="outline"
                 onClick={() => {
-                  form.reset(form.getValues());
+                  form.reset(lastSavedValuesRef.current);
                   setSaveError(null);
                 }}
                 disabled={saving}
