@@ -267,9 +267,14 @@ def infer_required(key: str, field_type: str) -> bool:
     return True
 
 
+# Field types POST /ai/improve-text accepts (see AI_TEXT_FIELD_TYPES in
+# app/api/v1/endpoints/ai.py); AI on any other type would be a dead toggle.
+_AI_FIELD_TYPES = ("text", "textarea")
+
+
 def infer_ai_enabled(key: str, field_type: str) -> bool:
     token_set = set(_tokens(key))
-    if field_type in ("date", "number", "signature"):
+    if field_type not in _AI_FIELD_TYPES:
         return False
     return bool(token_set & _AI_TOKENS) or field_type == "textarea"
 

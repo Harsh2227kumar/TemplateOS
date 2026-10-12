@@ -319,7 +319,9 @@ def test_field_meta_label_validation_required_and_section():
     assert infer_field_meta("remarks").is_required is False
     assert infer_field_meta("prepared_by", section="Discussion").section == "Signatures"
     assert infer_field_meta("mobile_no").validation_rule == "min:10|max:20"
-    assert infer_field_meta("agenda_items").ai_enabled is True
+    # Lists are not rewritable by POST /ai/improve-text (text/textarea only).
+    assert infer_field_meta("agenda_items").ai_enabled is False
+    assert infer_field_meta("meeting_summary").ai_enabled is True
     assert infer_field_meta("meeting_date").ai_enabled is False
 
 
