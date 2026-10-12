@@ -12,8 +12,9 @@ The table is a core V1 building block reused by every future AI feature
 Design notes:
 - template_id ON DELETE SET NULL (chosen behavior): the audit trail
   SURVIVES template deletion — governance rows are append-only history.
-- document_id is RESERVED for the V1.4 documents table and deliberately
-  has NO foreign key yet (no FK to a non-existent table).
+- document_id -> documents.id ON DELETE SET NULL (V1.5 Phase 1): added
+  once the V1.4 documents table existed; like template_id, the audit row
+  survives deletion of the draft it was made for.
 - status defaults to "success" both in Python (custom __init__, so ORM
   objects have it pre-flush) and at the DB level (server_default).
 """
@@ -38,7 +39,7 @@ class AiGeneration(Base):
             self.status = "success"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    # "suggest_fields" today; future: "improve_writing", "rewrite_tone", ...
+    # "suggest_fields" (V1.3); "grammar" / "tone" / "concise" / "formal" (V1.5).
     action_type: Mapped[str] = mapped_column(String(50), nullable=False)
     # The Bedrock model id used (e.g. "anthropic.claude-3-5-sonnet-...").
     model: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -48,8 +49,12 @@ class AiGeneration(Base):
         nullable=True,
         index=True,
     )
-    # RESERVED for V1.4 documents — plain Integer, NO FK yet.
-    document_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # V1.5 Phase 1: FK to the V1.4 documents table (SET NULL keeps the audit row).
+    document_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     field_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_by: Mapped[int] = mapped_column(
         Integer,
