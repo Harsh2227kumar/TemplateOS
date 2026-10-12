@@ -54,6 +54,7 @@ export function AiSuggestionsPanel({
     existingKeys.includes(key) || acceptedKeys.includes(key);
 
   const fetchSuggestions = async () => {
+    if (status === "loading") return; // no double requests
     setStatus("loading");
     setError(null);
     const token = getAccessToken();
@@ -66,7 +67,10 @@ export function AiSuggestionsPanel({
     } catch (caught) {
       if (caught instanceof ApiError) {
         setError({
-          message: caught.message,
+          message:
+            caught.status === 403
+              ? "Only template managers can request AI field suggestions."
+              : caught.message,
           unavailable: caught.status === 503,
         });
       } else {
@@ -250,7 +254,6 @@ export function AiSuggestionsPanel({
               </div>
             )}
 
-            {suggestions.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"
@@ -260,7 +263,6 @@ export function AiSuggestionsPanel({
                 <Sparkles className="h-3.5 w-3.5" />
                 Suggest again
               </Button>
-            )}
           </>
         )}
       </CardContent>
