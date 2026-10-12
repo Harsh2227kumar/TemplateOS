@@ -507,12 +507,12 @@ def test_sync_422_foreign_id(owner_token):
     assert [f["field_name"] for f in _api_fields(owner_token, other)] == ["foreign_key"]
 
 
-def test_sync_409_name_swap_rolls_back(owner_token):
+def test_sync_rename_chain_and_swap_succeed(owner_token):
     template_id = _make_template("API Sync Swap")
     x = _make_field(template_id, "x")
     y = _make_field(template_id, "y")
 
-    # Renaming x -> y collides with y (kept, renamed to z in the same save).
+    # Rename chain x -> y, y -> z: the final keys are unique, so it saves.
     response = client.put(
         f"/api/v1/templates/{template_id}/fields",
         headers=_auth(owner_token),
@@ -523,10 +523,23 @@ def test_sync_409_name_swap_rolls_back(owner_token):
             ]
         },
     )
-    assert response.status_code == 409
-    # All-or-nothing: original state preserved.
+    assert response.status_code == 200, response.text
+    assert [f["field_name"] for f in response.json()] == ["y", "z"]
+
+    # A real swap (y <-> z) also saves, keeping each row's id.
+    response = client.put(
+        f"/api/v1/templates/{template_id}/fields",
+        headers=_auth(owner_token),
+        json={
+            "fields": [
+                {"id": x, "field_name": "z"},
+                {"id": y, "field_name": "y"},
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
     fields = _api_fields(owner_token, template_id)
-    assert [f["field_name"] for f in fields] == ["x", "y"]
+    assert [(f["id"], f["field_name"]) for f in fields] == [(x, "z"), (y, "y")]
     assert [f["display_order"] for f in fields] == [0, 1]
 
 

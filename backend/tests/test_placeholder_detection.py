@@ -352,7 +352,13 @@ def test_detect_placeholders_persists_ordered_fields(owner_token):
 
     # First-seen order and detection defaults.
     assert [f["display_order"] for f in body["detected_fields"]] == [0, 1, 2]
-    assert all(f["field_type"] == "text" for f in body["detected_fields"])
+    # Types are inferred from the keys (start_date -> date, amount -> number).
+    assert [f["field_type"] for f in body["detected_fields"]] == ["text", "date", "number"]
+    assert [f["field_label"] for f in body["detected_fields"]] == [
+        "Employee Name",
+        "Start Date",
+        "Amount",
+    ]
     assert all(f["is_required"] is True for f in body["detected_fields"])
 
     # Duplicates collapse to one field and are reported.
