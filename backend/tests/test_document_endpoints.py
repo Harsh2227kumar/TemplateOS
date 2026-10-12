@@ -431,3 +431,22 @@ def test_save_bumps_updated_at_and_list_order(owner_token, template_id):
     listed = client.get("/api/v1/documents", headers=_auth(owner_token)).json()
     ids = [d["id"] for d in listed]
     assert ids.index(older["id"]) < ids.index(newer["id"])
+
+
+def test_document_value_schema_bounds() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.document import (
+        MAX_DOCUMENT_VALUE_LENGTH,
+        MAX_VALUES_PER_REQUEST,
+        DocumentValueCreate,
+        DocumentValuesBulkUpsert,
+    )
+
+    with pytest.raises(ValidationError):
+        DocumentValueCreate(field_name="x", value="a" * (MAX_DOCUMENT_VALUE_LENGTH + 1))
+    with pytest.raises(ValidationError):
+        DocumentValuesBulkUpsert(
+            values=[{"field_name": f"f{i}", "value": "v"} for i in range(MAX_VALUES_PER_REQUEST + 1)]
+        )
