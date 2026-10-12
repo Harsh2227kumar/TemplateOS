@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Download, Eraser, FileText, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { getAccessToken } from "@/lib/auth-token";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
   uploaded: "bg-slate-100 text-slate-700",
@@ -78,7 +79,7 @@ export function TemplateDetailPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       const data = await templatesApi.getTemplateDetail(token, Number(id));
       setTemplate(data);
     } catch (err: any) {
@@ -167,7 +168,7 @@ export function TemplateDetailPage() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       await templatesApi.deleteTemplate(token, template.id);
       setDeleteOpen(false);
       navigate("/templates");

@@ -5,6 +5,12 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { ApiError } from "@/lib/api";
 
+// Only same-app paths: "//host" and "/\\host" would leave the site.
+function safeRedirectPath(path: string | undefined): string {
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) return "/";
+  return path;
+}
+
 export function LoginPage() {
   const { login } = useAuth();
   const location = useLocation();
@@ -21,7 +27,7 @@ export function LoginPage() {
     setIsSubmitting(true);
     try {
       await login(email.trim(), password);
-      navigate(routeState?.from?.pathname ?? "/", { replace: true });
+      navigate(safeRedirectPath(routeState?.from?.pathname), { replace: true });
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Unable to log in. Please try again.");
     } finally {

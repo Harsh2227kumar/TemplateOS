@@ -47,3 +47,6 @@ nul
 
 # graphify knowledge graph output (generated, regenerable via /graphify)
 graphify-out/
+# tsc -b output of vite.config.ts (shadowed the real config when present)
+frontend/vite.config.js
+frontend/vite.config.d.ts

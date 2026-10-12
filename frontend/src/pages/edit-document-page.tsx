@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { DynamicField } from "@/components/forms/DynamicField";
 import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError, splitValidationErrors } from "@/lib/api";
 import { buildFormSchema } from "@/lib/validation";
+import { getAccessToken } from "@/lib/auth-token";
 
 export function EditDocumentPage() {
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ export function EditDocumentPage() {
   // Form values as of the last load or successful save, used by "Reset Form".
   const lastSavedValuesRef = useRef<DocumentFormValues>({});
 
-  const token = localStorage.getItem("templateos_access_token") || "";
+  const token = getAccessToken();
 
   useEffect(() => {
     if (!documentId) {
