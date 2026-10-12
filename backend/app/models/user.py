@@ -46,6 +46,11 @@ class User(Base):
     templates: Mapped[list["Template"]] = relationship(
         "Template", back_populates="uploader"
     )
+    # The DB FK is ON DELETE CASCADE; passive_deletes lets the database remove
+    # documents instead of the ORM trying to NULL a NOT NULL created_by.
     documents: Mapped[list["Document"]] = relationship(
-        "Document", back_populates="creator"
+        "Document",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

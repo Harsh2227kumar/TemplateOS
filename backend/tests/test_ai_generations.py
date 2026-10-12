@@ -271,7 +271,11 @@ def test_deleting_user_cascades_ai_generations(db):
     assert db.get(AiGeneration, generation_id) is None
 
 
-# ── 3. Migration: upgrade head / downgrade -1 / upgrade again ───────
+# ── 3. Migration: upgrade / downgrade -1 / upgrade again ───────────────
+#
+# Pinned to the ai_generations revision so later migrations (e.g. the V1.4
+# documents tables) do not change what "downgrade -1" drops.
+AI_GENERATIONS_REVISION = "e5f2a8c6d4b7"
 
 
 def test_ai_generations_migration_up_down_up(tmp_path: Path) -> None:
@@ -285,7 +289,7 @@ def test_ai_generations_migration_up_down_up(tmp_path: Path) -> None:
     command = [sys.executable, "-m", "alembic", "-c", "alembic.ini.example"]
 
     subprocess.run(
-        [*command, "upgrade", "head"],
+        [*command, "upgrade", AI_GENERATIONS_REVISION],
         cwd=backend_dir,
         env=environment,
         check=True,
@@ -335,7 +339,8 @@ def test_ai_generations_migration_up_down_up(tmp_path: Path) -> None:
             ).scalar_one()
         assert "ON DELETE SET NULL" in ddl
         assert "ON DELETE CASCADE" in ddl
-        # document_id must NOT reference a documents table (V1.4 arrives later).
+        # document_id must NOT reference a documents table (document_id is a
+        # plain integer column; the V1.4 documents table has no FK from here).
         assert "documents" not in ddl
 
         # Behavior on the migration-created DB: deleting a template SET NULLs.
@@ -383,7 +388,7 @@ def test_ai_generations_migration_up_down_up(tmp_path: Path) -> None:
 
     # The chain is re-runnable.
     subprocess.run(
-        [*command, "upgrade", "head"],
+        [*command, "upgrade", AI_GENERATIONS_REVISION],
         cwd=backend_dir,
         env=environment,
         check=True,

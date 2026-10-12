@@ -31,13 +31,14 @@ def verify_template_fields():
         print(f"[INFO] Expected field types: {FIELD_TYPES}")
         print()
 
-        # Get all templates with fields
+        # Get every template that has at least one field, regardless of
+        # status: active/locked templates are the ones users fill forms from.
         templates = db.query(Template).filter(
-            Template.status.in_(["field_configured", "field_mapping"])
+            Template.id.in_(db.query(TemplateField.template_id).distinct())
         ).all()
 
         if not templates:
-            print("[WARN] No templates found with status=field_configured or field_mapping")
+            print("[WARN] No templates with fields found")
             return
 
         print(f"[INFO] Found {len(templates)} template(s) to verify")
@@ -79,6 +80,7 @@ def verify_template_fields():
             expected_orders = list(range(len(fields)))
 
             if display_orders != expected_orders:
+                total_issues += 1
                 print(f"  [WARN] Display order issues:")
                 print(f"    Expected: {expected_orders}")
                 print(f"    Actual:   {display_orders}")
@@ -87,12 +89,10 @@ def verify_template_fields():
                 duplicates = [order for order in set(display_orders) if display_orders.count(order) > 1]
                 if duplicates:
                     print(f"    Duplicates: {duplicates}")
-                    total_issues += 1
 
                 # Check for gaps
                 if max(display_orders) >= len(fields):
                     print(f"    Gaps detected (max order {max(display_orders)} for {len(fields)} fields)")
-                    total_issues += 1
             else:
                 print(f"  [OK] Display order is contiguous (0 to {len(fields)-1})")
 
