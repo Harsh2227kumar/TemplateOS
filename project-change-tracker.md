@@ -2342,3 +2342,168 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Optional handoff notes or `None`
 ```
 
+
+### Checkpoint 0045
+
+- Date: 2026-10-09
+- Member: AI Assistant
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0044 -> 2026-10-09
+
+#### Summary
+
+- Created the detailed phase-wise execution prompt plan for V1.5 (AI Content Tools).
+
+#### Completed Tasks
+
+- Analyzed `version-plan.md` and codebase for V1.5 specifications.
+- Created `Prompts/V1.5-P1.md` containing detailed prompts for Phase 1 (Basic AI Actions)
+- Created `Prompts/V1.5-P2.md` containing detailed prompts for Phase 2 (Regenerate Selected Placeholders).
+
+#### Code Changes
+
+- `Prompts/V1.5-P1.md` (new)
+- `Prompts/V1.5-P2.md` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Detailed prompt documentation for V1.5 (Phase 1 and Phase 2)
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Ready for developers to begin V1.5 implementation.
+
+### Checkpoint 0046
+
+- Date: 2026-10-09
+- Member: AI Assistant
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0045 -> 2026-10-09
+
+#### Summary
+
+- Created the detailed phase-wise execution prompt plan for V1.6 (Document Generation and PDF Conversion).
+
+#### Completed Tasks
+
+- Analyzed `version-plan.md` for V1.6 specifications.
+- Created `Prompts/V1.6-P1.md` containing detailed prompts for Phase 1 (DOCX Generation).
+- Created `Prompts/V1.6-P2.md` containing detailed prompts for Phase 2 (PDF Conversion).
+
+#### Code Changes
+
+- `Prompts/V1.6-P1.md` (new)
+- `Prompts/V1.6-P2.md` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Detailed prompt documentation for V1.6 (Phase 1 and Phase 2).
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None
+
+#### Notes For Next Push
+
+- Ready for developers to review and execute V1.6 once V1.5 is complete.
+
+### Checkpoint 0047
+
+- Date: 2026-10-09
+- Member: AI Assistant
+- Branch: `dev`
+- Push status: before push
+- Range covered: after Checkpoint 0046 -> 2026-10-09
+
+#### Summary
+
+- Completely rewrote the V1.5 and V1.6 prompt files to match the highly detailed, member-specific "Coding Prompt" format required by the team.
+
+#### Completed Tasks
+
+- Revised `Prompts/V1.5-P1.md` with deep technical contexts for M1 (React/api.ts), M2 (Nova routing in `ai_service.py`), and M3 (`ai_generations` FK migration).
+- Revised `Prompts/V1.5-P2.md` with detailed instructions for the contextual multi-field Claude Sonnet regeneration flow.
+- Revised `Prompts/V1.6-P1.md` with `docxtpl` generation tasks mapped precisely to M1, M2, and M3.
+- Revised `Prompts/V1.6-P2.md` to cover Gotenberg HTTP integration and graceful failure states.
+
+#### Code Changes
+
+- `Prompts/V1.5-P1.md` (updated)
+- `Prompts/V1.5-P2.md` (updated)
+- `Prompts/V1.6-P1.md` (updated)
+- `Prompts/V1.6-P2.md` (updated)
+
+#### Features Added / Updated / Removed
+
+- Updated: V1.5 and V1.6 documentation dramatically expanded to match V1.3/V1.4 technical depth.
+
+#### Issues Fixed
+
+- Fixed generic/missing context in prompt files. Prompts now correctly reference existing functions (`_build_client()`) and tables (`ai_generations`).
+
+#### Notes For Next Push
+
+- The team now has granular, copy-paste ready instructions for all 3 members across all phases of V1.5 and V1.6.
+
+### Checkpoint 0048
+
+- Date: 2026-10-12
+- Member: AI Assistant (V1.4 audit and fixes, covering Member 1, Member 2 and Member 3 work)
+- Branch: four short-lived branches, one per scope, each PR'd into its own permanent branch:
+  - `fix/backend-v14-p1-seed-and-verify` (from `backend` -> PR into `backend`)
+  - `fix/backend-v14-p2-document-cascade` (from `backend` -> PR into `backend`)
+  - `fix/backend-v14-p2-document-validation` (from `backend` -> PR into `backend`)
+  - `fix/frontend-v14-p2-draft-save-bugs` (from `frontend` -> PR into `frontend`)
+  - This tracker entry: `docs/project-change-tracker-v14-audit` (from `dev` -> PR into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0047 -> 2026-10-12
+
+#### Summary
+
+- Audited V1.4 P1 M2, P1 M3, P2 M1, P2 M2 and P2 M3 against their prompts and Definition of Done (all were already merged to `dev` via PRs #98-#112). Every task was implemented; the audit found real bugs and gaps, which are fixed here. Backend and frontend fixes are on separate branches.
+
+#### Completed Tasks
+
+- P1 M3: fixed `verify_template_fields.py` status filter (used invalid `field_mapping` and skipped `active`/`locked` templates); demo seed now has min/max rules and a number field.
+- P1 M2: `validation-rules.md` now matches the seed and the real validator (regex marked planned, real `{field_name, error}` 422 shape, correct frontend paths).
+- P2 M3: fixed template/user delete failing with IntegrityError when documents exist; added DB-level cascade tests; fixed migration test broken by the documents migration.
+- P2 M2: hardened value validation, added logging, added the missing endpoint test suite.
+- P2 M1: fixed duplicate drafts on retry, silent 422s, edit page load/reset/last-saved issues, dead link, duplicated list errors.
+
+#### Code Changes
+
+- Backend: `app/models/template.py`, `app/models/user.py` (`passive_deletes=True` + cascade on `documents`), `app/services/document_validator.py`, `app/crud/document_value_crud.py`, `app/api/v1/endpoints/documents.py`, `app/schemas/document.py`, `scripts/seed_demo_template.py`, `scripts/verify_template_fields.py`, `docs/validation-rules.md`
+- Backend tests: `tests/test_document_endpoints.py` (new), `tests/test_documents.py` (SQLite FKs on, cascade tests), `tests/test_ai_generations.py` (migration test pinned to its revision)
+- Frontend: `src/lib/api.ts` (`splitValidationErrors`), `src/pages/create-document-page.tsx`, `src/pages/edit-document-page.tsx`, `src/pages/dashboard-page.tsx`, `src/components/forms/ListField.tsx`
+
+#### Features Added / Updated / Removed
+
+- Added: endpoint tests for all 5 document endpoints; save/validation logging; Retry on edit-page load failure; error banner for 422s that do not map to a form field.
+- Updated: saving values now bumps `documents.updated_at`; list min/max counts items on the server (matches frontend); "Reset Form" restores last saved values; dashboard links use the `/` route.
+- Removed: dead "View All Drafts" link to the non-existent `/documents` route.
+
+#### Issues Fixed
+
+- `DELETE /templates/{id}` (and user deletion) raised IntegrityError once any document existed.
+- Retrying a failed first save created duplicate empty drafts.
+- Dashboard "last modified" and draft ordering never changed after a save.
+- Duplicate `field_name` in one PUT returned 500; required list `[]` was accepted; list max:N compared JSON string length; `nan`/`inf` accepted as numbers.
+- Pydantic-shaped 422s (e.g. a template with zero fields) failed silently in the UI.
+- `test_ai_generations_migration_up_down_up` failed after the V1.4 documents migration.
+
+#### Notes For Next Push
+
+- Verification: all three backend branches merged together give 252 passed, 0 failed (`python -m pytest tests -q`); frontend `tsc --noEmit` and `npm run build` pass. Not browser-tested.
+- Merge the three backend PRs into `backend` and the frontend PR into `frontend`, then integrate `backend` and `frontend` into `dev` as usual.
+- Not changed: `regex:` validation rules are still not enforced server-side; GET `/documents/{id}/values` keeps the `{document_id, values}` shape (frontend does not use it); no unsaved-changes warning on form pages.
+- `test_template_cleaning` writes to real local storage and can flake when two test runs execute at the same time.
