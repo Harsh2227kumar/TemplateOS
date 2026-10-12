@@ -22,6 +22,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { AlertTriangle, ArrowLeft, ArrowRight, Braces, Eraser, RefreshCw, ScanSearch } from "lucide-react";
+import { getAccessToken } from "@/lib/auth-token";
 
 function MonoKey({ name }: { name: string }) {
   return (
@@ -158,7 +159,7 @@ export function PlaceholderReviewPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const token = localStorage.getItem("templateos_access_token") || "";
+        const token = getAccessToken();
         const [templateData, fieldData] = await Promise.all([
           templatesApi.getTemplateDetail(token, templateId),
           templatesApi.getFields(token, templateId),
@@ -185,7 +186,7 @@ export function PlaceholderReviewPage() {
     setActionError(null);
     setActionMessage(null);
     try {
-      const token = localStorage.getItem("templateos_access_token") || "";
+      const token = getAccessToken();
       const result = await templatesApi.detectPlaceholders(token, templateId, force);
       setDetection(result);
       setFields(result.detected_fields);

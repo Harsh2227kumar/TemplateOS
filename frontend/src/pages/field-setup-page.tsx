@@ -60,8 +60,8 @@ import {
   type TemplateField,
   type TemplateResponse,
 } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth-token";
 
-const TOKEN_KEY = "templateos_access_token";
 
 const FIELD_TYPE_OPTIONS = [
   { label: "Text", value: "text" },
@@ -227,7 +227,7 @@ export function FieldSetupPage() {
   useEffect(() => {
     let active = true;
     const load = async () => {
-      const token = localStorage.getItem(TOKEN_KEY) ?? "";
+      const token = getAccessToken();
       try {
         const [templateData, fieldData] = await Promise.all([
           templatesApi.getTemplateDetail(token, templateId),
@@ -264,7 +264,7 @@ export function FieldSetupPage() {
     if (!template) return;
     setSaveError(null);
     setSaveSuccess(false);
-    const token = localStorage.getItem(TOKEN_KEY) ?? "";
+    const token = getAccessToken();
     try {
       const saved = await templatesApi.saveFields(token, templateId, {
         fields: values.fields.map((field) => ({

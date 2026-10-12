@@ -28,8 +28,8 @@ import { Badge } from "@/components/ui/badge";
 
 import { ApiError, templatesApi, type TemplateResponse } from "@/lib/api";
 import { UploadZone } from "./UploadZone";
+import { getAccessToken } from "@/lib/auth-token";
 
-const TOKEN_KEY = "templateos_access_token";
 
 const CATEGORY_OPTIONS = [
   { label: "Notice", value: "notice" },
@@ -114,7 +114,7 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
   const onSubmit = async (values: UploadTemplateValues) => {
     setError("");
 
-    const token = localStorage.getItem(TOKEN_KEY) ?? "";
+    const token = getAccessToken();
     try {
       onUploadStart?.();
       const result = await templatesApi.upload(token, {

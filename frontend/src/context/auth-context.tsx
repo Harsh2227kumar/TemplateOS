@@ -1,8 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { authApi, type User } from "@/lib/api";
-
-const TOKEN_KEY = "templateos_access_token";
+import { ApiError, authApi, type User } from "@/lib/api";
+import {
+  SESSION_EXPIRED_EVENT,
+  clearAccessToken,
+  getAccessToken,
+  setAccessToken,
+} from "@/lib/auth-token";
 
 interface AuthContextValue {
   user: User | null;
@@ -15,7 +19,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
+  const [token, setToken] = useState<string | null>(() => getAccessToken() || null);
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -35,12 +39,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((currentUser) => {
         if (active) setUser(currentUser);
       })
-      .catch(() => {
-        localStorage.removeItem(TOKEN_KEY);
-        if (active) {
-          setToken(null);
-          setUser(null);
+      .catch((error: unknown) => {
+        // Only a 401 means the token is bad. A network error, a 5xx or a
+        // request aborted by a page reload must not sign the user out.
+        if (error instanceof ApiError && error.status === 401) {
+          clearAccessToken();
+          if (active) setToken(null);
         }
+        if (active) setUser(null);
       })
       .finally(() => {
         if (active) setIsLoading(false);
@@ -51,6 +57,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token]);
 
+  // Any API call rejected with 401 means the token expired or was revoked:
+  // sign out so ProtectedRoute sends the user back to the login page.
+  useEffect(() => {
+    const handleExpired = () => {
+      clearAccessToken();
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -58,7 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login: async (email, password) => {
         const result = await authApi.login({ email, password });
         const currentUser = await authApi.me(result.access_token);
-        localStorage.setItem(TOKEN_KEY, result.access_token);
+        setAccessToken(result.access_token);
         setToken(result.access_token);
         setUser(currentUser);
       },
@@ -66,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await authApi.signup({ full_name: fullName, email, password });
       },
       logout: () => {
-        localStorage.removeItem(TOKEN_KEY);
+        clearAccessToken();
         setToken(null);
         setUser(null);
       },

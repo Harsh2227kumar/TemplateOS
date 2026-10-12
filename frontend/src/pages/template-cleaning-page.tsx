@@ -57,8 +57,8 @@ import {
   type TemplateResponse,
 } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
+import { getAccessToken } from "@/lib/auth-token";
 
-const TOKEN_KEY = "templateos_access_token";
 
 const FIELD_TYPE_OPTIONS = [
   { label: "Text", value: "text" },
@@ -139,7 +139,7 @@ export function TemplateCleaningPage() {
       setIsLoading(true);
       setError(null);
       try {
-        const token = localStorage.getItem(TOKEN_KEY) || "";
+        const token = getAccessToken();
         const [templateData, contentData] = await Promise.all([
           templatesApi.getTemplateDetail(token, templateId),
           templatesApi.getContent(token, templateId),
@@ -252,7 +252,7 @@ export function TemplateCleaningPage() {
     setIsApplying(true);
     setActionError(null);
     try {
-      const token = localStorage.getItem(TOKEN_KEY) || "";
+      const token = getAccessToken();
       const response = await templatesApi.cleanTemplate(token, templateId, {
         replacements: staged.map(({ id: _id, ...replacement }) => replacement),
         confirm: true,

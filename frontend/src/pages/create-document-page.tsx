@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { DynamicField } from "@/components/forms/DynamicField";
 import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError, splitValidationErrors } from "@/lib/api";
 import { buildFormSchema } from "@/lib/validation";
+import { getAccessToken } from "@/lib/auth-token";
 
 export function CreateDocumentPage() {
   const navigate = useNavigate();
@@ -26,7 +27,7 @@ export function CreateDocumentPage() {
   // Retries reuse it instead of creating a duplicate document.
   const createdDocIdRef = useRef<number | null>(null);
 
-  const token = localStorage.getItem("templateos_access_token") || "";
+  const token = getAccessToken();
 
   useEffect(() => {
     if (!templateId) {
