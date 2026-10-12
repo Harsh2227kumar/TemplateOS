@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import zipfile
+from io import BytesIO
 from typing import Annotated
 
 from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
@@ -95,6 +97,23 @@ ALLOWED_STATUSES = {
     "locked",
 }
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+# A DOCX is a zip; cap the total uncompressed size so a small "zip bomb"
+# upload cannot exhaust memory when python-docx/docxtpl unpack it later.
+MAX_UNCOMPRESSED_DOCX_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+def _docx_content_error(content: bytes) -> str | None:
+    """Return why `content` is not an acceptable DOCX, or None if it is."""
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as archive:
+            entries = archive.infolist()
+    except (zipfile.BadZipFile, ValueError):
+        return "File is not a valid DOCX document"
+    if not any(entry.filename == "word/document.xml" for entry in entries):
+        return "File is not a valid DOCX document"
+    if sum(entry.file_size for entry in entries) > MAX_UNCOMPRESSED_DOCX_BYTES:
+        return "DOCX content is too large"
+    return None
 
 
 def validate_filter_param(
@@ -268,14 +287,19 @@ async def upload_template(
     if not filename.lower().endswith(".docx"):
         raise HTTPException(status_code=400, detail="Only DOCX files are accepted")
 
-    # 2. Read + empty check
-    content = await file.read()
+    # 2. Read (bounded: never load more than the limit + 1 byte) + empty check
+    content = await file.read(MAX_FILE_SIZE_BYTES + 1)
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     # 3. File size check
     if len(content) > MAX_FILE_SIZE_BYTES:
         raise HTTPException(status_code=400, detail="File size exceeds the 10 MB limit")
+
+    # 3b. Content check: the extension alone is client-controlled
+    content_error = _docx_content_error(content)
+    if content_error:
+        raise HTTPException(status_code=400, detail=content_error)
 
     # 4. Validate name
     clean_name = name.strip()
@@ -290,7 +314,7 @@ async def upload_template(
     if category not in ALLOWED_CATEGORIES:
         raise HTTPException(
             status_code=400,
-            detail="Invalid category. Allowed: notice, mom, report, application, letter, certificate, proposal, invoice, custom",
+            detail=f"Invalid category. Allowed: {', '.join(sorted(ALLOWED_CATEGORIES))}",
         )
 
     # 6. Validate visibility
@@ -557,13 +581,30 @@ async def clean_template(
         ) from None
 
     # Save the processed copy (separate file; original untouched).
-    stored = await asyncio.to_thread(
-        storage_service.save_bytes,
-        "templates_processed",
-        template.original_filename or "template.docx",
-        processed_bytes,
-    )
+    try:
+        stored = await asyncio.to_thread(
+            storage_service.save_bytes,
+            "templates_processed",
+            template.original_filename or "template.docx",
+            processed_bytes,
+        )
+    except StorageError as e:
+        logger.error(f"Storage error while saving cleaned template {template_id}: {e}")
+        raise HTTPException(
+            status_code=500, detail="Could not save the cleaned template"
+        ) from None
+    previous_processed_path = template.processed_file_path
     template = set_processed_path(db, template, stored.path)
+
+    # Re-cleaning replaces the processed copy; drop the superseded file.
+    if previous_processed_path and previous_processed_path != stored.path:
+        try:
+            await asyncio.to_thread(storage_service.delete_file, previous_processed_path)
+        except StorageError:
+            logger.warning(
+                f"Could not remove superseded processed file for template "
+                f"{template_id}: {previous_processed_path}"
+            )
 
     # Upsert a field per MATCHED replacement (append_field skips duplicates).
     created_fields = []

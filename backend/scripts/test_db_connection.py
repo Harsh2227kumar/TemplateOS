@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 import sys
 
@@ -9,6 +10,8 @@ from app.db.session import check_database_connection
 
 
 def main() -> None:
+    # Show the driver's error (logged by check_database_connection) on stderr.
+    logging.basicConfig(level=logging.ERROR)
     is_connected, detail = check_database_connection()
     if is_connected:
         print("OK:", detail)

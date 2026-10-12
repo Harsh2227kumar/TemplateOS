@@ -40,7 +40,8 @@ def signup(payload: SignupRequest, db: DbSession) -> User:
 def login(payload: LoginRequest, db: DbSession) -> Token:
     email = payload.email.lower()
     user = db.scalar(select(User).where(func.lower(User.email) == email))
-    if user is None or not verify_password(payload.password, user.hashed_password):
+    hashed_password = user.hashed_password if user is not None else None
+    if not verify_password(payload.password, hashed_password) or user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",

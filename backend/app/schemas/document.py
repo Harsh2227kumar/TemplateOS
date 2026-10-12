@@ -14,6 +14,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Request-size bounds for PUT /documents/{id}/values (no prior limit existed).
+MAX_DOCUMENT_VALUE_LENGTH = 50_000
+MAX_VALUES_PER_REQUEST = 500
+
 
 # --- Document Schemas ---
 
@@ -90,6 +94,7 @@ class DocumentValueCreate(BaseModel):
     )
     value: str = Field(
         ...,
+        max_length=MAX_DOCUMENT_VALUE_LENGTH,
         description=(
             "Value as string. For list fields, use JSON array string "
             "(e.g., '[\"item1\", \"item2\"]'). For date, use ISO format "
@@ -143,6 +148,7 @@ class DocumentValuesBulkUpsert(BaseModel):
         ...,
         description="List of field values to upsert",
         min_length=1,
+        max_length=MAX_VALUES_PER_REQUEST,
     )
 
 
