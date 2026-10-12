@@ -2,7 +2,8 @@
 """
 V1.4 Phase 1 - Demo Template Seeder
 
-Seeds a demo template with 3 sections, 8 fields, and varied types
+Seeds a demo template with 3 sections, 9 fields, and varied types
+(text, textarea, date, number, list) plus email/min/max validation rules
 for Member 1 to test the dynamic form rendering UI.
 
 Run from backend/:
@@ -68,6 +69,7 @@ def seed_demo_template():
                 "display_order": 0,
                 "description": "Enter the official meeting title",
                 "example_value": "Annual Fest Planning Meeting",
+                "validation_rule": "min:5|max:100",
                 "ai_enabled": False
             },
             {
@@ -92,6 +94,18 @@ def seed_demo_template():
                 "example_value": "Computer Science",
                 "ai_enabled": False
             },
+            {
+                "field_name": "attendee_count",
+                "field_label": "Number of Attendees",
+                "field_type": "number",
+                "is_required": False,
+                "section": "Meeting Details",
+                "display_order": 3,
+                "description": "How many people attended the meeting",
+                "example_value": "25",
+                "validation_rule": "min:1|max:500",
+                "ai_enabled": False
+            },
 
             # Section: Agenda
             {
@@ -100,7 +114,7 @@ def seed_demo_template():
                 "field_type": "list",
                 "is_required": True,
                 "section": "Agenda",
-                "display_order": 3,
+                "display_order": 4,
                 "description": "List the main topics to discuss",
                 "example_value": '["Budget approval", "Venue selection"]',
                 "ai_enabled": False
@@ -111,7 +125,7 @@ def seed_demo_template():
                 "field_type": "textarea",
                 "is_required": False,
                 "section": "Agenda",
-                "display_order": 4,
+                "display_order": 5,
                 "description": "Detailed discussion notes",
                 "example_value": "Key points discussed during the meeting",
                 "ai_enabled": True
@@ -124,7 +138,7 @@ def seed_demo_template():
                 "field_type": "textarea",
                 "is_required": True,
                 "section": "Outcome",
-                "display_order": 5,
+                "display_order": 6,
                 "description": "Summarize the meeting outcomes and decisions",
                 "example_value": "Decisions made and next steps agreed upon",
                 "ai_enabled": True
@@ -135,7 +149,7 @@ def seed_demo_template():
                 "field_type": "list",
                 "is_required": False,
                 "section": "Outcome",
-                "display_order": 6,
+                "display_order": 7,
                 "description": "Action items assigned during the meeting",
                 "example_value": '["Follow up with vendors", "Book venue by Friday"]',
                 "ai_enabled": False
@@ -146,7 +160,7 @@ def seed_demo_template():
                 "field_type": "text",
                 "is_required": True,
                 "section": "Outcome",
-                "display_order": 7,
+                "display_order": 8,
                 "description": "Email of the person preparing these minutes",
                 "example_value": "john@example.com",
                 "validation_rule": "email",
@@ -164,7 +178,7 @@ def seed_demo_template():
         print(f"[OK] Template ID: {template.id}")
         print(f"[OK] Template name: {template.name}")
         print(f"[OK] Owner: {owner.full_name} ({owner.email})")
-        print(f"[OK] Fields added: 8 fields across 3 sections")
+        print(f"[OK] Fields added: {len(fields)} fields across 3 sections")
         print(f"")
         print(f"[INFO] This template is ready for V1.4 Phase 1 form rendering tests")
 
