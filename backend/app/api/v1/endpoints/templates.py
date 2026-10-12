@@ -5,6 +5,7 @@ from io import BytesIO
 from typing import Annotated
 
 from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -21,7 +22,19 @@ from app.services.storage_service import (
     StoredFileNotFoundError,
     storage_service,
 )
-from app.services.template_access import user_can_view_template
+from app.services.template_access import (
+    ASSIGNABLE_ROLES,
+    DEPARTMENT_PUBLISHERS,
+    ORG_PUBLISHERS,
+    ROLE_LABELS,
+    PublishRuleError,
+    can_manage,
+    clean_scope,
+    normalize_scope,
+    parse_roles_csv,
+    resolve_publish_access,
+    user_can_view_template,
+)
 from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.template_crud import (
     advance_status,
@@ -45,6 +58,8 @@ from app.crud.template_field_crud import (
     update_field,
 )
 from app.schemas.template import (
+    TemplateAccessOptions,
+    TemplateAccessUpdate,
     TemplateCreate,
     TemplateResponse,
     TemplateListItem,
@@ -116,6 +131,32 @@ def _docx_content_error(content: bytes) -> str | None:
     return None
 
 
+def _template_response(template: Template, user: User) -> TemplateResponse:
+    """TemplateResponse with `can_manage` computed for the requesting user."""
+    response = TemplateResponse.model_validate(template)
+    response.can_manage = can_manage(user, template)
+    return response
+
+
+def _list_item(template: Template, user: User) -> TemplateListItem:
+    item = TemplateListItem.model_validate(template)
+    item.can_manage = can_manage(user, template)
+    return item
+
+
+def _require_manage(template: Template, user: User, action: str) -> None:
+    """403 unless the user may manage (modify) this template."""
+    if not can_manage(user, template):
+        raise HTTPException(
+            status_code=403,
+            detail=f"You do not have permission to {action} this template",
+        )
+
+
+def _publish_error(exc: PublishRuleError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
+
+
 def validate_filter_param(
     value: str | None, allowed: set[str], param_name: str
 ) -> None:
@@ -166,7 +207,7 @@ def list_library_templates(
     )
 
     return {
-        "templates": templates,
+        "templates": [_list_item(template, current_user) for template in templates],
         "total": total,
         "page": page,
         "limit": limit,
@@ -177,9 +218,68 @@ def list_library_templates(
 def list_my_templates(
     current_user: CurrentUser,
     db: DbSession,
-) -> list[Template]:
+) -> list[TemplateListItem]:
     """Return all templates uploaded by the current user, newest first."""
-    return get_templates_by_user(db, current_user.id)
+    return [
+        _list_item(template, current_user)
+        for template in get_templates_by_user(db, current_user.id)
+    ]
+
+
+# Declared BEFORE /{template_id} so "access-options" is not parsed as an id.
+@router.get("/access-options", response_model=TemplateAccessOptions)
+def get_access_options(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TemplateAccessOptions:
+    """
+    Choices for the upload / manage-access audience pickers.
+
+    - roles: every role a template can be restricted to (no super_admin).
+    - organizations / departments: distinct non-empty values from user
+      profiles. super_admin gets all of them; everyone else only sees their
+      own organization (they can never publish anywhere else).
+    - can_publish: which scoped visibilities the current user may use.
+    - defaults: the current user's own organization / department.
+    """
+    rows = db.execute(select(User.organization, User.department).distinct()).all()
+    own_org = normalize_scope(current_user.organization)
+    see_all = current_user.role == "super_admin"
+
+    organizations: dict[str, str] = {}
+    departments: dict[tuple[str, str], dict] = {}
+    for organization, department in rows:
+        org = clean_scope(organization)
+        dept = clean_scope(department)
+        if not see_all and normalize_scope(org) != own_org:
+            continue
+        if org is not None:
+            organizations.setdefault(normalize_scope(org), org)
+        if dept is not None:
+            departments.setdefault(
+                (normalize_scope(org), normalize_scope(dept)),
+                {"organization": org, "department": dept},
+            )
+
+    return TemplateAccessOptions(
+        roles=[
+            {"value": role, "label": ROLE_LABELS.get(role, role)}
+            for role in ASSIGNABLE_ROLES
+        ],
+        organizations=sorted(organizations.values(), key=str.lower),
+        departments=sorted(
+            departments.values(),
+            key=lambda d: ((d["organization"] or "").lower(), d["department"].lower()),
+        ),
+        can_publish={
+            "organization": current_user.role in ORG_PUBLISHERS,
+            "department": current_user.role in DEPARTMENT_PUBLISHERS,
+        },
+        defaults={
+            "organization": clean_scope(current_user.organization),
+            "department": clean_scope(current_user.department),
+        },
+    )
 
 
 @router.get("/{template_id}", response_model=TemplateResponse)
@@ -187,8 +287,8 @@ def get_template(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
-) -> Template:
-    """Return a single template by ID. Accessible if user owns it OR it is public."""
+) -> TemplateResponse:
+    """Return a single template by ID if the user may view it (template_access)."""
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -196,7 +296,49 @@ def get_template(
         raise HTTPException(
             status_code=403, detail="You do not have access to this template"
         )
-    return template
+    return _template_response(template, current_user)
+
+
+@router.patch("/{template_id}/access", response_model=TemplateResponse)
+def update_template_access(
+    template_id: int,
+    request: TemplateAccessUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TemplateResponse:
+    """
+    Change who can see / use a template: visibility, scope and role
+    restriction. Requires can_manage; the publish rules are applied for the
+    ACTING user (e.g. an org_admin can only scope to their own organization).
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    _require_manage(template, current_user, "change access to")
+
+    try:
+        resolved = resolve_publish_access(
+            current_user,
+            request.visibility,
+            request.scope_organization,
+            request.scope_department,
+            request.allowed_roles,
+        )
+    except PublishRuleError as exc:
+        raise _publish_error(exc) from None
+
+    template.visibility = resolved.visibility
+    template.scope_organization = resolved.scope_organization
+    template.scope_department = resolved.scope_department
+    template.allowed_roles = resolved.allowed_roles
+    db.commit()
+    db.refresh(template)
+    logger.info(
+        f"Access for template {template_id} set to {resolved.visibility} "
+        f"(org={resolved.scope_organization!r}, dept={resolved.scope_department!r}, "
+        f"roles={resolved.allowed_roles}) by user {current_user.id}"
+    )
+    return _template_response(template, current_user)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -208,7 +350,9 @@ async def delete_template(
     """
     Permanently delete a template: the DB record (fields cascade) and every
     stored file (original + processed). Super-admin only — a destructive,
-    irreversible action, so even the template owner cannot perform it.
+    irreversible action that also removes every user's documents, so it is
+    deliberately NOT part of can_manage: owners and org/department admins
+    cannot delete (they can make a template private instead).
     """
     if current_user.role != "super_admin":
         raise HTTPException(
@@ -280,7 +424,12 @@ async def upload_template(
     description: str | None = Form(default=None),
     category: str = Form(...),
     visibility: str = Form(...),
-) -> Template:
+    scope_organization: str | None = Form(default=None),
+    scope_department: str | None = Form(default=None),
+    allowed_roles: str | None = Form(
+        default=None, description="Comma-separated roles; empty = everyone in scope"
+    ),
+) -> TemplateResponse:
     # Audited V1.2 Phase 2 — all validation, storage, and DB logic verified
     # 1. Validate file type
     filename = file.filename or "template.docx"
@@ -321,6 +470,18 @@ async def upload_template(
     if visibility not in ALLOWED_VISIBILITY:
         raise HTTPException(status_code=400, detail="Invalid visibility value")
 
+    # 6b. Audience / publish rules (checked before anything is written to disk)
+    try:
+        access = resolve_publish_access(
+            current_user,
+            visibility,
+            scope_organization,
+            scope_department,
+            parse_roles_csv(allowed_roles),
+        )
+    except PublishRuleError as exc:
+        raise _publish_error(exc) from None
+
     # 7. Save file via storage_service (in thread pool)
     try:
         logger.info(f"Saving template {filename} for user {current_user.id}")
@@ -345,6 +506,9 @@ async def upload_template(
         file_size_bytes=stored.size_bytes,
         file_extension=".docx",
         uploaded_by=current_user.id,
+        scope_organization=access.scope_organization,
+        scope_department=access.scope_department,
+        allowed_roles=access.allowed_roles,
     )
 
     try:
@@ -359,7 +523,7 @@ async def upload_template(
             status_code=500, detail="Could not save template record"
         ) from None
 
-    return template
+    return _template_response(template, current_user)
 
 
 @router.post(
@@ -383,10 +547,7 @@ async def detect_placeholders(
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can detect placeholders"
-        )
+    _require_manage(template, current_user, "detect placeholders in")
 
     if not template.original_file_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
@@ -537,10 +698,7 @@ async def clean_template(
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
 
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can clean this template"
-        )
+    _require_manage(template, current_user, "clean")
 
     if not request.confirm:
         raise HTTPException(status_code=400, detail="Cleaning must be confirmed")
@@ -687,11 +845,7 @@ async def suggest_template_fields(
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Only the template owner can request AI field suggestions",
-        )
+    _require_manage(template, current_user, "request AI field suggestions for")
     if not template.original_file_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
@@ -781,10 +935,7 @@ def _require_owner_editable(
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can edit fields"
-        )
+    _require_manage(template, current_user, "edit fields of")
     if template.status == "locked":
         raise HTTPException(
             status_code=403, detail="Template is locked and cannot be edited"

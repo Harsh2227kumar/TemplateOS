@@ -1,9 +1,10 @@
-from sqlalchemy import select, or_, and_, func
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from app.models.template import Template, TEMPLATE_STATUSES
 from app.models.user import User
 from app.schemas.template import TemplateCreate
+from app.services.template_access import library_visibility_filter
 
 # Forward-only status ladder (V1.3 Phase 2). "archived"/"locked" are terminal
 # admin states — never moved by automated transitions.
@@ -99,11 +100,9 @@ def get_library_templates(
     """
     Return templates visible to the given user.
 
-    Visibility rules for V1.2:
-    - Always include user's own templates (any visibility)
-    - Always include public templates from other users
-    - Do NOT include other users' private/org/department/group templates
-      (organization and group-based visibility is deferred to V1.9)
+    Visibility uses `library_visibility_filter`, the SQL twin of
+    `user_can_view_template` (app/services/template_access.py), so the
+    library lists exactly the templates the detail endpoint would allow.
 
     Supports:
     - Search: case-insensitive partial match on template name
@@ -118,43 +117,10 @@ def get_library_templates(
     if not user:
         return [], 0
 
-    if user.role != "super_admin":
-        conditions = [
-            Template.uploaded_by == user_id,
-            Template.visibility == "public",
-        ]
-
-        if user.department:
-            conditions.append(
-                and_(
-                    Template.visibility == "department",
-                    Template.uploader.has(User.department == user.department),
-                )
-            )
-
-        if user.organization:
-            conditions.append(
-                and_(
-                    Template.visibility == "organization",
-                    Template.uploader.has(User.organization == user.organization),
-                )
-            )
-
-        # Optional: handling "group" visibility if user has a role/group
-        if user.role:
-            conditions.append(
-                and_(
-                    Template.visibility == "group",
-                    Template.uploader.has(User.role == user.role),
-                )
-            )
-
-        visibility_filter = or_(*conditions)
-
-    if user.role == "super_admin":
-        query = select(Template)
-    else:
-        query = select(Template).where(visibility_filter)
+    query = select(Template)
+    visibility_filter = library_visibility_filter(user)
+    if visibility_filter is not None:
+        query = query.where(visibility_filter)
 
     if search:
         safe_search = _escape_like(search)
