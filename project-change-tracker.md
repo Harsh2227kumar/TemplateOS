@@ -2507,3 +2507,130 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge the three backend PRs into `backend` and the frontend PR into `frontend`, then integrate `backend` and `frontend` into `dev` as usual.
 - Not changed: `regex:` validation rules are still not enforced server-side; GET `/documents/{id}/values` keeps the `{document_id, values}` shape (frontend does not use it); no unsaved-changes warning on form pages.
 - `test_template_cleaning` writes to real local storage and can flake when two test runs execute at the same time.
+
+### Checkpoint 0049
+
+- Date: 2026-10-12
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v15-p1-ai-improve-data-layer` (created from `backend`, PR #122 into `backend`)
+- Push status: before push
+- Range covered: after Checkpoint 0048 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 (Basic AI Actions) data layer: request/response schemas for `POST /ai/improve-text` and a real foreign key from `ai_generations.document_id` to the V1.4 `documents` table.
+
+#### Completed Tasks
+
+- `ImproveTextRequest` (`template_id`, optional `document_id`, `field_name`, `original_text`, `action_type`) and `ImproveTextResponse` (`improved_text`) in `app/schemas/ai.py`.
+- `ai_generations.document_id` -> `documents.id` ON DELETE SET NULL (model + Alembic migration `c4d8e2f6a1b3`, down_revision `9a8b7c6d5e4f`).
+- `log_ai_generation` accepts `document_id` (needed so the endpoint can log it; not in the original prompt).
+- Tests in `tests/test_ai_endpoints.py`.
+
+#### Code Changes
+
+- `backend/app/schemas/ai.py`, `backend/app/models/ai_generation.py`, `backend/app/crud/ai_generation_crud.py`
+- `backend/alembic/versions/c4d8e2f6a1b3_add_ai_generations_document_fk.py` (new)
+- `backend/tests/test_ai_endpoints.py` (new, 24 tests)
+
+#### Features Added / Updated / Removed
+
+- Added: improve-text schemas; `action_type` is strictly `grammar | tone | concise | formal`; `original_text` must be non-blank and at most 5000 characters (cost control).
+- Updated: `ai_generations.document_id` is now a foreign key; `AiGenerationRead` exposes `document_id`.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Migration nulls any orphaned `ai_generations.document_id` before adding the FK. Run `alembic upgrade head` on Neon after merge.
+- Full backend suite: 276 passed. Migration up/down/up verified on SQLite; PostgreSQL SQL checked offline.
+- Endpoint integration tests (mocked `improve_text`, logged `document_id`) move to Member 2, since the endpoint is built there.
+- Member 2 builds `POST /api/v1/ai/improve-text` on a branch stacked on this one.
+
+### Checkpoint 0050
+
+- Date: 2026-10-12
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v15-p1-ai-improve-text-endpoint` (stacked on `feature/backend-v15-p1-ai-improve-data-layer`; PR #123, retarget to `backend` after PR #122 merges)
+- Push status: before push
+- Range covered: after Checkpoint 0049 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 backend: `POST /api/v1/ai/improve-text` rewrites one form field with Amazon Nova on Bedrock and logs every call to `ai_generations`.
+
+#### Completed Tasks
+
+- `ai_service.improve_text()` with model routing: `grammar` -> Nova Micro; `tone` / `concise` / `formal` -> Nova Lite (Bedrock Converse API via `boto3` + `instructor.from_bedrock`, validated `TextImprovement` output).
+- `_build_bedrock_client()`; region/auth check split into `_auth_problem()` so text actions do not need `BEDROCK_MODEL_SUGGESTIONS`.
+- New router `app/api/v1/endpoints/ai.py`, registered under `/ai`.
+- Endpoint integration tests handed over from Member 3, plus service tests.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/ai.py` (new), `backend/app/api/v1/api.py`
+- `backend/app/services/ai_service.py`, `backend/app/core/config.py`, `.env.example`
+- `backend/tests/test_ai_endpoints.py` (+27 tests)
+
+#### Features Added / Updated / Removed
+
+- Added: improve-text endpoint; `BEDROCK_MODEL_NOVA_MICRO` / `BEDROCK_MODEL_NOVA_LITE` settings.
+- Updated: botocore `ClientError` is classified by HTTP status; error hints name the right model env var.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviation from prompt: Nova model ids are not hardcoded (the prompt suggested `amazon.nova-*-v1:0` defaults). The existing `config.py` rule says no model id in code, and ap-south-1 needs the `apac.` inference-profile ids. Add both to `.env` before using the feature.
+- Added beyond the prompt: template view access, document ownership, document/template match, and field must be an `ai_enabled` text/textarea field (otherwise 403/404/422, no AI call, no audit row).
+- Full backend suite: 303 passed (Bedrock mocked). No live Bedrock call has been made yet.
+- Member 1 can build the toolbar against: `POST /api/v1/ai/improve-text` `{template_id, document_id?, field_name, original_text, action_type}` -> `{improved_text}`; 503 `{detail}` when AI is unavailable.
+
+### Checkpoint 0051
+
+- Date: 2026-10-12
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v15-p1-ai-action-toolbar` (created from `frontend`, PR #124 into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0050 -> 2026-10-12
+
+#### Summary
+
+- V1.5 Phase 1 frontend: AI writing actions below AI-enabled text/textarea fields on the create and edit draft pages.
+
+#### Completed Tasks
+
+- `aiApi.improveText` and `ImproveTextRequest` / `ImproveTextResponse` types in `src/lib/api.ts`.
+- `AiActionToolbar` (`src/components/fields/`): Fix grammar, Professional (`tone`), Concise, Formal.
+- `DynamicField`: toolbar only for `ai_enabled` text/textarea fields; replaces the value via `setValue(..., { shouldDirty: true })`; spinner and read-only input while running; failure toast keeps the user's text.
+- Create page passes `templateId` (and the draft id once created); edit page passes the document's `template_id` and `id`.
+
+#### Code Changes
+
+- `frontend/src/lib/api.ts`, `frontend/src/components/forms/DynamicField.tsx`, `frontend/src/main.tsx`
+- `frontend/src/pages/create-document-page.tsx`, `frontend/src/pages/edit-document-page.tsx`
+- `frontend/src/components/fields/AiActionToolbar.tsx` (new), `frontend/src/components/ui/toast.tsx` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: AI action toolbar; Undo after an AI replacement (dropped once the user edits); 5000-character guard matching the backend; dependency-free toast (`toast()` / `useToast()` / `<Toaster />`).
+- Updated: `DynamicField` accepts an optional `aiContext`.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviations from prompt: 4 buttons instead of 3 so every backend action (`grammar`, `tone`, `concise`, `formal`) is reachable; shadcn `useToast` was not installed, so a minimal in-house toast was added instead of a new Radix dependency.
+- Verification: `tsc --noEmit` and `npm run build` pass. Browser-tested against the Member 2 backend on a throwaway SQLite DB with `improve_text` faked: toolbar visibility, replace, Undo, 503 toast, and `document_id` logged from the edit page.
+- Merge order: PR #122 -> `backend`, then PR #123 (rebase onto `backend` first) -> `backend`, PR #124 -> `frontend`, then integrate `backend` and `frontend` into `dev`.
+- Before using AI for real: run `alembic upgrade head` on Neon and add `BEDROCK_MODEL_NOVA_MICRO` / `BEDROCK_MODEL_NOVA_LITE` to `.env`. No live Bedrock call has been made yet.
+- V1.5 Phase 1 is complete across all three members.
