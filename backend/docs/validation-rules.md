@@ -13,7 +13,7 @@ The `validation_rule` field supports these patterns:
 | `email` | `"email"` | Validates email format (RFC 5322) | ✅ Zod email() | ✅ Regex validation |
 | `min:N` | `"min:5"` | Minimum length (string) or value (number) | ✅ Zod min() | ✅ Pydantic validation |
 | `max:N` | `"max:100"` | Maximum length (string) or value (number) | ✅ Zod max() | ✅ Pydantic validation |
-| `regex:<pattern>` | `"regex:^[A-Z]+$"` | Custom regex pattern | ❌ Ignored | ✅ re.match() validation |
+| `regex:<pattern>` | `"regex:^[A-Z]+$"` | Custom regex pattern | ❌ Ignored | ⏳ Planned — not enforced yet |
 | Multi-rule | `"min:5\|max:100"` | Multiple rules separated by `\|` | ✅ Chained Zod | ✅ All rules enforced |
 | Empty/null | `null` or `""` | No extra validation | ✅ Type + required only | ✅ Type + required only |
 
@@ -76,7 +76,7 @@ All rules are enforced server-side in the `PUT /documents/{id}/values` endpoint:
 - `email` → Python regex validation (RFC 5322 simplified)
 - `min:N` → `len(value) >= N` (string) or `float(value) >= N` (number)
 - `max:N` → `len(value) <= N` (string) or `float(value) <= N` (number)
-- `regex:<pattern>` → `re.match(pattern, value)`
+- `regex:<pattern>` → planned; the V1.4 Phase 2 validator (`app/services/document_validator.py`) does not enforce it yet
 
 ### Validation Flow
 ```python
@@ -181,14 +181,6 @@ The `seed_demo_template.py` script includes these validation examples:
     "validation_rule": "min:1|max:500",
     "example_value": "25"
 }
-
-# Custom regex (server-only)
-{
-    "field_name": "department_code",
-    "field_type": "text",
-    "validation_rule": "regex:^[A-Z]{2,4}$",
-    "example_value": "CS"
-}
 ```
 
 ## Testing Checklist
@@ -205,7 +197,7 @@ The `seed_demo_template.py` script includes these validation examples:
 - [ ] Enforce `email` rule server-side (reject invalid emails)
 - [ ] Enforce `min:N` for text (string length) and number (numeric value)
 - [ ] Enforce `max:N` for text (string length) and number (numeric value)
-- [ ] Enforce `regex:<pattern>` rules (server-only)
+- [ ] Enforce `regex:<pattern>` rules (server-only) — planned, not in V1.4 Phase 2
 - [ ] Enforce multi-rule `"min:5|max:100"` (all rules must pass)
 - [ ] Return HTTP 422 with structured error details on validation failure
 
@@ -222,7 +214,7 @@ These are not implemented in V1.4 Phase 1 or 2.
 
 ## References
 
-- **Phase 1 Frontend Implementation:** See `frontend/src/components/DynamicForm/` (Member 1)
+- **Phase 1 Frontend Implementation:** See `frontend/src/components/forms/DynamicField.tsx` and `frontend/src/lib/validation.ts` (Member 1)
 - **Phase 2 Backend Implementation:** See `backend/app/api/v1/endpoints/documents.py` (Member 2, Phase 2)
 - **Template Field Model:** `backend/app/models/template_field.py` (V1.3)
 - **Demo Data:** `backend/scripts/seed_demo_template.py` (Member 3, Phase 1)
@@ -233,7 +225,7 @@ These are not implemented in V1.4 Phase 1 or 2.
 |---|---|---|
 | **Responsibility** | Member 1 (Frontend) | Member 2 (Backend) |
 | **Technology** | Zod validation | Pydantic + custom validators |
-| **Rules Supported** | email, min, max | email, min, max, regex |
+| **Rules Supported** | email, min, max | email, min, max (regex planned) |
 | **Scope** | Form submission validation | API request validation |
 | **Error Handling** | Inline form errors | HTTP 422 response |
 
