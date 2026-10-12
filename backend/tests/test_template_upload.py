@@ -16,6 +16,19 @@ from app.main import app
 from app.models.user import User
 from app.models.template import Template
 
+
+def _build_docx() -> bytes:
+    from docx import Document
+
+    buffer = io.BytesIO()
+    document = Document()
+    document.add_paragraph("Dear {{recipient_name}},")
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+VALID_DOCX = _build_docx()
+
 test_engine = create_engine(
     "sqlite://",
     connect_args={"check_same_thread": False},
@@ -72,7 +85,7 @@ def clear_templates():
 
 # Tests
 def test_upload_valid_docx(auth_token):
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": "notice", "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 201
@@ -83,7 +96,7 @@ def test_upload_valid_docx(auth_token):
     assert res_json["original_file_path"].endswith(".docx")
 
 def test_upload_invalid_extension(auth_token):
-    files = {"file": ("document.pdf", io.BytesIO(b"fake content"), "application/pdf")}
+    files = {"file": ("document.pdf", io.BytesIO(VALID_DOCX), "application/pdf")}
     data = {"name": "Test Template", "category": "notice", "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 400
@@ -97,6 +110,34 @@ def test_upload_file_too_large(auth_token):
     assert response.status_code == 400
     assert "10 mb" in response.json()["detail"].lower() or "size" in response.json()["detail"].lower()
 
+def test_upload_rejects_non_docx_content(auth_token):
+    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    data = {"name": "Test Template", "category": "notice", "visibility": "private"}
+    response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
+    assert response.status_code == 400
+    assert "valid docx" in response.json()["detail"].lower()
+
+def test_upload_rejects_zip_without_document_part(auth_token):
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("hello.txt", "not a word document")
+    files = {"file": ("template.docx", io.BytesIO(buffer.getvalue()), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    data = {"name": "Test Template", "category": "notice", "visibility": "private"}
+    response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
+    assert response.status_code == 400
+
+def test_upload_rejects_oversized_uncompressed_docx(auth_token, monkeypatch):
+    from app.api.v1.endpoints import templates as templates_endpoint
+
+    monkeypatch.setattr(templates_endpoint, "MAX_UNCOMPRESSED_DOCX_BYTES", 10)
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    data = {"name": "Test Template", "category": "notice", "visibility": "private"}
+    response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
+    assert response.status_code == 400
+    assert "too large" in response.json()["detail"].lower()
+
 def test_upload_empty_file(auth_token):
     files = {"file": ("empty.docx", io.BytesIO(b""), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": "notice", "visibility": "private"}
@@ -105,32 +146,32 @@ def test_upload_empty_file(auth_token):
 
 @pytest.mark.parametrize("category", ["invalid_xyz"])
 def test_upload_invalid_category(auth_token, category):
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": category, "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 400
 
 @pytest.mark.parametrize("visibility", ["invalid_xyz"])
 def test_upload_invalid_visibility(auth_token, visibility):
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": "notice", "visibility": visibility}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 400
 
 def test_upload_missing_name(auth_token):
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "", "category": "notice", "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 400
 
 def test_upload_unauthenticated():
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": "notice", "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data)
     assert response.status_code in (401, 403)
 
 def test_upload_path_is_string_not_binary(auth_token):
-    files = {"file": ("template.docx", io.BytesIO(b"fake content"), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    files = {"file": ("template.docx", io.BytesIO(VALID_DOCX), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
     data = {"name": "Test Template", "category": "notice", "visibility": "private"}
     response = client.post("/api/v1/templates/upload", files=files, data=data, headers={"Authorization": f"Bearer {auth_token}"})
     assert response.status_code == 201
