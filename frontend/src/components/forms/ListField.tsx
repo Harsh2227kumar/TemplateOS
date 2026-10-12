@@ -119,11 +119,6 @@ export function ListField({ field }: ListFieldProps) {
               <Plus className="h-4 w-4 mr-2" />
               Add Item
             </Button>
-            {fieldError && (
-              <p className="text-sm text-red-600" role="alert">
-                {typeof fieldError === "string" ? fieldError : fieldError.message}
-              </p>
-            )}
           </div>
         );
       }}

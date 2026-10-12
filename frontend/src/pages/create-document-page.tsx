@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useForm, FormProvider } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { DynamicField } from "@/components/forms/DynamicField";
-import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError } from "@/lib/api";
+import { templatesApi, documentsApi, TemplateField, Document, DocumentFormValues, ApiError, splitValidationErrors } from "@/lib/api";
 import { buildFormSchema } from "@/lib/validation";
 
 export function CreateDocumentPage() {
@@ -22,6 +22,9 @@ export function CreateDocumentPage() {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Id of a document created by an earlier submit whose value save failed.
+  // Retries reuse it instead of creating a duplicate document.
+  const createdDocIdRef = useRef<number | null>(null);
 
   const token = localStorage.getItem("templateos_access_token") || "";
 
@@ -80,8 +83,13 @@ export function CreateDocumentPage() {
     setSaveError(null);
 
     try {
-      // Step 1: Create document
-      const doc = await documentsApi.createDocument(token, { template_id: templateId });
+      // Step 1: Create document (skipped on retry if it was already created)
+      let docId = createdDocIdRef.current;
+      if (docId === null) {
+        const doc = await documentsApi.createDocument(token, { template_id: templateId });
+        docId = doc.id;
+        createdDocIdRef.current = docId;
+      }
 
       // Step 2: Prepare values (stringify lists)
       const values = fields.map((field) => {
@@ -94,23 +102,26 @@ export function CreateDocumentPage() {
       });
 
       // Step 3: Save values
-      await documentsApi.saveValues(token, doc.id, { values });
+      await documentsApi.saveValues(token, docId, { values });
 
       setSaveSuccess(true);
       setTimeout(() => {
-        navigate(`/documents/${doc.id}/edit`);
+        navigate(`/documents/${docId}/edit`);
       }, 1500);
     } catch (err: any) {
-      if (err instanceof ApiError && err.status === 422 && err.detail) {
-        // Field-specific validation errors from backend
-        const errors: Record<string, string> = {};
-        for (const e of err.detail as Array<{ field_name: string; error: string }>) {
-          errors[e.field_name] = e.error;
-        }
-        // Set form errors for inline display
-        Object.entries(errors).forEach(([fieldName, message]) => {
+      const split = err instanceof ApiError && err.status === 422
+        ? splitValidationErrors(err.detail, fields.map((f) => f.field_name))
+        : null;
+      if (split) {
+        // Field-specific validation errors from backend, shown inline
+        Object.entries(split.fieldErrors).forEach(([fieldName, message]) => {
           form.setError(fieldName, { message, type: "server" });
         });
+        if (split.otherMessages.length > 0) {
+          setSaveError(`Validation failed: ${split.otherMessages.join("; ")}`);
+        } else if (Object.keys(split.fieldErrors).length === 0) {
+          setSaveError(err.message || "Validation failed. Please check the form.");
+        }
       } else {
         setSaveError(err?.message || "Failed to save draft. Please try again.");
       }
