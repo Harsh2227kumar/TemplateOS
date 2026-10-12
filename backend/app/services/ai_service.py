@@ -1,5 +1,10 @@
 """
-AI suggestion service (V1.3 Phase 4 — Member 2).
+AI service: field suggestions (V1.3 Phase 4) and text actions (V1.5 Phase 1).
+
+V1.5 Phase 1 adds improve_text(): grammar / tone / concise / formal
+rewrites of a single form field using Amazon Nova (Micro for grammar,
+Lite for the rest) via the Bedrock Converse API — boto3 wrapped with
+instructor.from_bedrock so the reply is a validated TextImprovement.
 
 The FIRST TemplateOS AI feature: propose missing template fields from a
 document's text using AWS Bedrock (Claude Sonnet) via the Anthropic SDK,
@@ -18,12 +23,15 @@ Diagnostics: every failure is logged with a WHY (classified cause + fix
 hint) and a WHERE (the failing stage), so the uvicorn console shows exactly
 what broke — the same information `scripts/verify_bedrock.py` reports.
 
-Import safety: anthropic/instructor are imported INSIDE _build_client, so
+Import safety: anthropic/instructor/boto3 are imported INSIDE the client
+builders (_build_client, _build_bedrock_client), so
 importing this module (and booting the app, and running non-AI tests) works
 even when the AI dependencies are not installed.
 """
 
 import logging
+
+from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.schemas.ai import FieldSuggestion, FieldSuggestionList
@@ -49,23 +57,15 @@ class AiUnavailableError(Exception):
     """AI (Bedrock) is not configured or the provider call failed."""
 
 
-def _config_problem() -> str | None:
+def _auth_problem() -> str | None:
     """
-    Return a human-readable description of the FIRST configuration problem,
-    or None when AI could actually be called. Says exactly WHICH piece is
-    missing (region, env credentials, profile credentials) so the 503
-    response and scripts/verify_bedrock.py can tell the user what to fix.
+    Return a description of the AWS region/auth problem, or None when a
+    Bedrock call could be authenticated. Shared by every AI feature.
     """
     if not settings.aws_region:
         return (
             "AWS_REGION is not set — leave it unset to keep AI off, or set "
             "it to your Bedrock region (e.g. ap-south-1)"
-        )
-    if not settings.bedrock_model_suggestions:
-        return (
-            "BEDROCK_MODEL_SUGGESTIONS is not set — set it in .env to the "
-            "model / inference-profile id from the Bedrock console (Model "
-            "access); there is no default model id in code"
         )
     import os
 
@@ -88,6 +88,38 @@ def _config_problem() -> str | None:
         return f"AWS_REGION is set but the credential chain check failed ({exc})"
 
 
+def _config_problem() -> str | None:
+    """
+    Return a human-readable description of the FIRST configuration problem
+    for field suggestions, or None when AI could actually be called. Says
+    exactly WHICH piece is missing (region, model id, env credentials,
+    profile credentials) so the 503 response and scripts/verify_bedrock.py
+    can tell the user what to fix.
+    """
+    if settings.aws_region and not settings.bedrock_model_suggestions:
+        return (
+            "BEDROCK_MODEL_SUGGESTIONS is not set — set it in .env to the "
+            "model / inference-profile id from the Bedrock console (Model "
+            "access); there is no default model id in code"
+        )
+    return _auth_problem()
+
+
+def _http_status(exc: BaseException) -> int | None:
+    """
+    HTTP status of a provider error: Anthropic SDK errors carry
+    status_code; botocore ClientError (Bedrock Converse / Nova) carries it in
+    response["ResponseMetadata"]["HTTPStatusCode"].
+    """
+    status = getattr(exc, "status_code", None)
+    if status is not None:
+        return status
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        return response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+    return None
+
+
 def _status_error(exc: BaseException, _depth: int = 0):
     """
     Find the deepest exception in the chain carrying an HTTP status_code.
@@ -98,7 +130,7 @@ def _status_error(exc: BaseException, _depth: int = 0):
     """
     if _depth > 4:
         return None
-    if getattr(exc, "status_code", None) is not None:
+    if _http_status(exc) is not None:
         return exc
     for attr in ("last_exception", "__cause__"):
         nested = getattr(exc, attr, None)
@@ -109,7 +141,7 @@ def _status_error(exc: BaseException, _depth: int = 0):
     return None
 
 
-def _classify_ai_error(exc: Exception) -> str:
+def _classify_ai_error(exc: Exception, model_setting: str = "BEDROCK_MODEL_SUGGESTIONS") -> str:
     """
     Map a provider/SDK exception to a human-readable WHY (what to fix).
     Classifies by exception name / HTTP status_code so no SDK imports are
@@ -122,9 +154,10 @@ def _classify_ai_error(exc: Exception) -> str:
     # Unwrap instructor/SDK wrappers to the underlying provider error.
     underlying = _status_error(exc)
     if underlying is not None and underlying is not exc:
-        return _classify_ai_error(underlying)
+        return _classify_ai_error(underlying, model_setting)
 
-    status = getattr(exc, "status_code", None)
+    status = _http_status(exc)
+    model_id = getattr(settings, model_setting.lower(), "")
 
     if name == "InstructorRetryException":
         return (
@@ -137,8 +170,8 @@ def _classify_ai_error(exc: Exception) -> str:
             aws_detail = aws_detail[:220] + "…"
         return (
             "AWS rejected the request (HTTP 400) — usually a malformed or "
-            "unavailable model id: check BEDROCK_MODEL_SUGGESTIONS="
-            f"'{settings.bedrock_model_suggestions}' in .env against the "
+            f"unavailable model id: check {model_setting}="
+            f"'{model_id}' in .env against the "
             "exact id shown in the Bedrock console (Model access)"
             + (f" [{aws_detail}]" if aws_detail else "")
         )
@@ -160,9 +193,8 @@ def _classify_ai_error(exc: Exception) -> str:
     if status == 404:
         return (
             "Bedrock model not found / access not enabled (HTTP 404) — "
-            f"check BEDROCK_MODEL_SUGGESTIONS="
-            f"'{settings.bedrock_model_suggestions}' and enable model "
-            "access in the AWS Bedrock console (Model access -> Claude)"
+            f"check {model_setting}='{model_id}' and enable model "
+            "access in the AWS Bedrock console (Model access)"
         )
     if status == 429:
         return "Bedrock throttled the request (HTTP 429) — wait a moment and retry"
@@ -287,3 +319,136 @@ def suggest_fields(
         taken.add(suggestion.field_name)
         cleaned.append(suggestion)
     return cleaned
+
+
+# ── V1.5 Phase 1: basic AI text actions (Amazon Nova) ──────────────────
+
+_IMPROVE_SYSTEM_PROMPT = (
+    "You are an expert editor. Improve the following text based on the "
+    "user's instruction. Output ONLY the improved text, nothing else. Do not "
+    "add conversational filler."
+)
+
+# Per-action instruction and the settings attribute holding its model id.
+_TEXT_ACTIONS: dict[str, tuple[str, str]] = {
+    "grammar": (
+        "Correct grammar, spelling and punctuation. Keep the wording, "
+        "meaning and tone otherwise unchanged.",
+        "bedrock_model_nova_micro",
+    ),
+    "tone": (
+        "Rewrite in a clear, polite and professional tone. Keep the meaning "
+        "and all facts unchanged.",
+        "bedrock_model_nova_lite",
+    ),
+    "concise": (
+        "Make the text more concise: remove repetition and filler while "
+        "keeping every fact, name, date and number.",
+        "bedrock_model_nova_lite",
+    ),
+    "formal": (
+        "Rewrite in a formal style suitable for an official document. Keep "
+        "the meaning and all facts unchanged.",
+        "bedrock_model_nova_lite",
+    ),
+}
+
+
+class TextImprovement(BaseModel):
+    """instructor response_model for improve_text: the rewritten text only."""
+
+    improved_text: str = Field(..., description="The improved text only")
+
+
+def model_for_action(action_type: str) -> str:
+    """Return the configured Bedrock model id for a text action ("" if unset)."""
+    _, setting = _TEXT_ACTIONS[action_type]
+    return getattr(settings, setting)
+
+
+def _build_bedrock_client():
+    """
+    Return an instructor-wrapped boto3 bedrock-runtime client (Converse API,
+    used for Amazon Nova), or raise AiUnavailableError. boto3 resolves auth
+    itself: AWS_BEARER_TOKEN_BEDROCK (API key) or the standard credential
+    chain.
+    """
+    problem = _auth_problem()
+    if problem is not None:
+        logger.error(f"[ai] Bedrock NOT configured — WHY: {problem}")
+        raise AiUnavailableError(f"AI is not configured: {problem}")
+    try:
+        import boto3
+        import instructor
+    except ImportError as exc:
+        logger.error(
+            f"[ai] dependencies missing — WHY: {exc} (install with "
+            "'pip install -r requirements.txt': boto3 + instructor)"
+        )
+        raise AiUnavailableError(
+            "AI dependencies are not installed (boto3/instructor)"
+        ) from exc
+    try:
+        bedrock = boto3.client("bedrock-runtime", region_name=settings.aws_region)
+        return instructor.from_bedrock(bedrock)
+    except Exception as exc:
+        reason = _classify_ai_error(exc)
+        logger.error(
+            f"[ai] Bedrock client init failed — WHERE: "
+            f"ai_service._build_bedrock_client — WHY: {reason}"
+        )
+        logger.debug("[ai] traceback:", exc_info=True)
+        raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
+
+
+def improve_text(action_type: str, original_text: str) -> str:
+    """
+    Rewrite one field's text with the action's Nova model and return ONLY
+    the improved text. Raises ValueError for an unknown action and
+    AiUnavailableError (endpoint -> 503) when AI is not configured, the
+    provider fails, or the model returns nothing.
+    """
+    if action_type not in _TEXT_ACTIONS:
+        raise ValueError(f"Unsupported AI text action: {action_type}")
+    instruction, setting = _TEXT_ACTIONS[action_type]
+    model = getattr(settings, setting)
+    env_name = setting.upper()
+    if settings.aws_region and not model:
+        logger.error(f"[ai] Bedrock NOT configured — WHY: {env_name} is not set")
+        raise AiUnavailableError(
+            f"AI is not configured: {env_name} is not set — set it in .env to "
+            "the Nova model / inference-profile id from the Bedrock console"
+        )
+
+    client = _build_bedrock_client()
+    try:
+        result = client.chat.completions.create(
+            model=model,
+            max_tokens=settings.ai_max_output_tokens,
+            messages=[
+                {"role": "system", "content": _IMPROVE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"Instruction: {instruction}\n\nText:\n{original_text}",
+                },
+            ],
+            response_model=TextImprovement,
+        )
+    except Exception as exc:
+        reason = _classify_ai_error(exc, env_name)
+        logger.error(
+            f"[ai] improve-text call failed — WHERE: ai_service.improve_text "
+            f"-> Bedrock (action={action_type}, model={model}) — WHY: {reason}"
+        )
+        logger.debug("[ai] traceback:", exc_info=True)
+        raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
+
+    improved = result.improved_text.strip()
+    if not improved:
+        logger.error(
+            f"[ai] improve-text returned empty text (action={action_type}, model={model})"
+        )
+        raise AiUnavailableError(
+            "AI is currently unavailable: the model returned an empty result — retry"
+        )
+    return improved
