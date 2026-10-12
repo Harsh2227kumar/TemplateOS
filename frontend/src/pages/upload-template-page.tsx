@@ -56,6 +56,7 @@ export function UploadTemplatePage() {
       <UploadTemplateForm 
         onUploadStart={() => setUploadPhase("uploading")}
         onUploadSuccess={() => setUploadPhase("done")}
+        onUploadReset={() => setUploadPhase("idle")}
       />
     </div>
   );

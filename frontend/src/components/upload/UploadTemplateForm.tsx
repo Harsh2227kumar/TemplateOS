@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,9 +26,25 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 
-import { ApiError, templatesApi, type TemplateResponse } from "@/lib/api";
+import {
+  ApiError,
+  templatesApi,
+  type TemplateAccessOptions,
+  type TemplateResponse,
+} from "@/lib/api";
 import { UploadZone } from "./UploadZone";
 import { getAccessToken } from "@/lib/auth-token";
+import { useAuth } from "@/context/auth-context";
+import {
+  AudienceFields,
+  EMPTY_AUDIENCE,
+  describeRoles,
+  toAccessPayload,
+  useAccessOptions,
+  validateAudience,
+  type AudienceErrors,
+  type AudienceValue,
+} from "@/components/templates/AudienceFields";
 
 
 const CATEGORY_OPTIONS = [
@@ -43,27 +59,52 @@ const CATEGORY_OPTIONS = [
   { label: "Custom", value: "custom" },
 ] as const;
 
-const VISIBILITY_OPTIONS = [
-  { label: "Private", value: "private" },
-  { label: "Public", value: "public" },
-  { label: "Organization", value: "organization" },
-  { label: "Department", value: "department" },
-  { label: "Group", value: "group" },
-] as const;
-
-const uploadTemplateSchema = z.object({
-  name: z.string().min(1, "Template name is required").max(100, "Template name must be 100 characters or fewer"),
-  description: z.string().max(500, "Description must be 500 characters or fewer").optional(),
-  category: z.enum([
-    "notice", "mom", "report", "application", "letter", "certificate", "proposal", "invoice", "custom"
-  ], { required_error: "Please select a category" }),
-  visibility: z.enum([
-    "private", "public", "organization", "department", "group"
-  ], { required_error: "Please select a visibility" }),
-  file: z.instanceof(File, { message: "Please select a .docx file to upload" }),
+const audienceSchema = z.object({
+  visibility: z.union([
+    z.enum(["private", "public", "organization", "department", "group"]),
+    z.literal(""),
+  ]),
+  scope_organization: z.string(),
+  scope_department: z.string(),
+  role_mode: z.enum(["all", "selected"]),
+  allowed_roles: z.array(z.string()),
 });
 
-type UploadTemplateValues = z.infer<typeof uploadTemplateSchema>;
+interface AudienceContext {
+  options: TemplateAccessOptions | null;
+  role: string | undefined;
+}
+
+/**
+ * The audience rules depend on data loaded at runtime (access options, the
+ * user's role), so the schema reads them from a ref at validation time.
+ */
+function buildUploadSchema(context: { current: AudienceContext }) {
+  return z.object({
+    name: z.string().trim().min(1, "Template name is required").max(100, "Template name must be 100 characters or fewer"),
+    description: z.string().max(500, "Description must be 500 characters or fewer").optional(),
+    category: z.enum([
+      "notice", "mom", "report", "application", "letter", "certificate", "proposal", "invoice", "custom"
+    ], { required_error: "Please select a category", invalid_type_error: "Please select a category" }),
+    audience: audienceSchema.superRefine((audience, ctx) => {
+      const errors = validateAudience(audience, context.current.options, context.current.role);
+      for (const [key, message] of Object.entries(errors)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message });
+      }
+    }),
+    file: z.instanceof(File, { message: "Please select a .docx file to upload" }),
+  });
+}
+
+type UploadTemplateValues = z.infer<ReturnType<typeof buildUploadSchema>>;
+
+const DEFAULT_VALUES: Partial<UploadTemplateValues> = {
+  name: "",
+  description: "",
+  category: undefined,
+  audience: EMPTY_AUDIENCE,
+  file: undefined,
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -86,29 +127,35 @@ function mapApiError(err: ApiError): string {
 interface UploadTemplateFormProps {
   onUploadStart?: () => void;
   onUploadSuccess?: () => void;
+  /** Called when an upload attempt fails, or the form is reset for another upload. */
+  onUploadReset?: () => void;
 }
 
-export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTemplateFormProps) {
+export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadReset }: UploadTemplateFormProps) {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { options: accessOptions, error: accessOptionsError } = useAccessOptions();
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState<TemplateResponse | null>(null);
 
+  const audienceContext = useRef<AudienceContext>({ options: null, role: undefined });
+  audienceContext.current = { options: accessOptions, role: user?.role };
+  const schema = useMemo(() => buildUploadSchema(audienceContext), []);
+
   const form = useForm<UploadTemplateValues>({
-    resolver: zodResolver(uploadTemplateSchema),
+    resolver: zodResolver(schema),
     mode: "onBlur",
-    defaultValues: {
-      name: "",
-      description: "",
-    },
+    defaultValues: DEFAULT_VALUES,
   });
 
   const { isSubmitting } = form.formState;
 
   const resetForm = () => {
-    form.reset();
+    form.reset(DEFAULT_VALUES);
     setError("");
     setSuccess(null);
+    onUploadReset?.();
   };
 
   const onSubmit = async (values: UploadTemplateValues) => {
@@ -117,16 +164,21 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
     const token = getAccessToken();
     try {
       onUploadStart?.();
+      const access = toAccessPayload(values.audience);
       const result = await templatesApi.upload(token, {
         file: values.file,
         name: values.name.trim(),
         description: values.description?.trim() || undefined,
         category: values.category,
-        visibility: values.visibility,
+        visibility: access.visibility,
+        scope_organization: access.scope_organization ?? undefined,
+        scope_department: access.scope_department ?? undefined,
+        allowed_roles: access.allowed_roles ?? undefined,
       });
       setSuccess(result);
       onUploadSuccess?.();
     } catch (caught) {
+      onUploadReset?.();
       setError(
         caught instanceof ApiError ? mapApiError(caught) : "Upload failed. Please try again.",
       );
@@ -140,8 +192,18 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
         <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
           ✓ &ldquo;{success.name}&rdquo; uploaded successfully.
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="secondary" className="capitalize">{success.category}</Badge>
+          <Badge variant="outline" className="capitalize">{success.visibility}</Badge>
+          {success.scope_organization && (
+            <Badge variant="outline">{success.scope_organization}</Badge>
+          )}
+          {success.scope_department && (
+            <Badge variant="outline">{success.scope_department}</Badge>
+          )}
+          {success.allowed_roles?.length ? (
+            <Badge variant="outline">Only: {describeRoles(success.allowed_roles, accessOptions)}</Badge>
+          ) : null}
           <span className="text-sm text-slate-500">{formatBytes(success.file_size_bytes ?? 0)}</span>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -213,9 +275,20 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
               <FormLabel>
                 Category <span className="text-red-500">*</span>
               </FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
+              {/* Controlled (value, not defaultValue) so "Upload Another" resets the
+                  trigger; closing the menu counts as blur for onBlur validation. */}
+              <Select
+                value={field.value ?? ""}
+                onValueChange={(next) => {
+                  field.onChange(next);
+                  void form.trigger("category");
+                }}
+                onOpenChange={(open) => {
+                  if (!open) field.onBlur();
+                }}
+              >
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger ref={field.ref}>
                     <SelectValue placeholder="Select a category" />
                   </SelectTrigger>
                 </FormControl>
@@ -232,32 +305,42 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess }: UploadTem
           )}
         />
 
-        {/* Visibility */}
+        {/* Audience: visibility, scope and roles */}
         <FormField
           control={form.control}
-          name="visibility"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>
-                Visibility <span className="text-red-500">*</span>
-              </FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select visibility" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {VISIBILITY_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )}
+          name="audience"
+          render={({ field }) => {
+            const audienceErrors = form.formState.errors.audience;
+            const errors: AudienceErrors = {
+              visibility: audienceErrors?.visibility?.message,
+              scope_organization: audienceErrors?.scope_organization?.message,
+              scope_department: audienceErrors?.scope_department?.message,
+              allowed_roles: audienceErrors?.allowed_roles?.message,
+            };
+            return (
+              <FormItem className="rounded-xl border border-slate-200 bg-white p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-slate-900">Audience</p>
+                  <p className="text-xs text-slate-500">
+                    Who can find and use this template.
+                    {accessOptionsError &&
+                      " Audience options could not be loaded, so only basic visibilities are available."}
+                  </p>
+                </div>
+                <AudienceFields
+                  value={field.value}
+                  onChange={(next) => {
+                    field.onChange(next);
+                    if (form.formState.isSubmitted) void form.trigger("audience");
+                  }}
+                  options={accessOptions}
+                  role={user?.role}
+                  errors={errors}
+                  disabled={isSubmitting}
+                />
+              </FormItem>
+            );
+          }}
         />
 
         {/* File Upload */}

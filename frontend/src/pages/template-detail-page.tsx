@@ -15,9 +15,24 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Download, Eraser, FileText, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Building,
+  Download,
+  Eraser,
+  Eye,
+  FileText,
+  ListChecks,
+  ScanSearch,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { getAccessToken } from "@/lib/auth-token";
+import { ManageAccessDialog } from "@/components/templates/ManageAccessDialog";
+import { describeRoles } from "@/components/templates/AudienceFields";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
   uploaded: "bg-slate-100 text-slate-700",
@@ -69,6 +84,7 @@ export function TemplateDetailPage() {
   const [confirmText, setConfirmText] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
 
   useEffect(() => {
     fetchTemplate();
@@ -153,9 +169,12 @@ export function TemplateDetailPage() {
 
   if (!template) return null;
 
-  const isOwner = template.uploaded_by === user?.id;
+  // The server computes can_manage (owner, super admin, or an admin of the
+  // template's organization/department); modifying actions follow it.
+  const canManage = template.can_manage;
   const isSuperAdmin = user?.role === "super_admin";
-  const configAction = isOwner ? getConfigAction(template.id, template.status) : null;
+  const configAction = canManage ? getConfigAction(template.id, template.status) : null;
+  const isRestricted = Boolean(template.allowed_roles?.length);
   const canSubmitDelete = confirmText.trim().toLowerCase() === "confirm" && !isDeleting;
 
   const openDeleteDialog = () => {
@@ -196,6 +215,12 @@ export function TemplateDetailPage() {
           <Badge variant="outline" className="bg-slate-50">
             Visibility: <span className="ml-1 capitalize">{template.visibility}</span>
           </Badge>
+          {!canManage && (
+            <Badge variant="outline" className="gap-1 border-transparent bg-slate-200 text-slate-700">
+              <Eye className="h-3 w-3" />
+              View only
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -236,6 +261,62 @@ export function TemplateDetailPage() {
         </div>
       </div>
 
+      <div className="rounded-xl border p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Audience</h2>
+            <p className="text-sm text-slate-500">Who can find and use this template.</p>
+          </div>
+          {canManage && (
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setAccessOpen(true)}>
+              <ShieldCheck className="h-4 w-4" />
+              Manage access
+            </Button>
+          )}
+        </div>
+        <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Published to</dt>
+            <dd className="mt-1 capitalize text-slate-900">{template.visibility}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Scope</dt>
+            <dd className="mt-1 break-words text-slate-900">
+              {template.scope_department || template.scope_organization ? (
+                <span className="flex flex-col gap-1">
+                  {template.scope_organization && (
+                    <span className="flex items-center gap-1.5">
+                      <Building className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                      {template.scope_organization}
+                    </span>
+                  )}
+                  {template.scope_department && (
+                    <span className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                      {template.scope_department}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-slate-500">—</span>
+              )}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Who can use it</dt>
+            <dd className={cn("mt-1 text-slate-900", isRestricted && "font-medium text-amber-800")}>
+              {template.visibility === "private"
+                ? "Only the owner"
+                : template.visibility === "group"
+                  ? "Users with the uploader's role"
+                  : isRestricted
+                    ? `Only: ${describeRoles(template.allowed_roles)}`
+                    : "Everyone in scope"}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       <div className="flex flex-wrap gap-4 pt-4 border-t">
         {(template.status === "field_configured" || template.status === "active") && (
           <Button
@@ -246,7 +327,7 @@ export function TemplateDetailPage() {
             Use This Template
           </Button>
         )}
-        {isOwner && configAction && (
+        {canManage && configAction && (
           <Button
             variant="outline"
             className="gap-2"
@@ -256,7 +337,7 @@ export function TemplateDetailPage() {
             {configAction.label}
           </Button>
         )}
-        {isOwner && (
+        {canManage && (
           <Button
             variant="outline"
             className="gap-2"
@@ -282,6 +363,16 @@ export function TemplateDetailPage() {
           </Button>
         )}
       </div>
+
+      {canManage && (
+        <ManageAccessDialog
+          template={template}
+          role={user?.role}
+          open={accessOpen}
+          onOpenChange={setAccessOpen}
+          onSaved={setTemplate}
+        />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
         <DialogContent>
