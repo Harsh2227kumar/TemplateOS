@@ -103,8 +103,13 @@ class Template(Base):
     fields: Mapped[list["TemplateField"]] = relationship(
         "TemplateField", back_populates="template", cascade="all, delete-orphan"
     )
+    # The DB FK is ON DELETE CASCADE; passive_deletes lets the database remove
+    # documents instead of the ORM trying to NULL a NOT NULL template_id.
     documents: Mapped[list["Document"]] = relationship(
-        "Document", back_populates="template"
+        "Document",
+        back_populates="template",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     @validates("category")
