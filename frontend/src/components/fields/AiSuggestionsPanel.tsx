@@ -13,8 +13,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { ApiError, templatesApi, type FieldSuggestion } from "@/lib/api";
+import { getAccessToken } from "@/lib/auth-token";
 
-const TOKEN_KEY = "templateos_access_token";
 
 type PanelStatus = "idle" | "loading" | "success" | "error";
 
@@ -56,7 +56,7 @@ export function AiSuggestionsPanel({
   const fetchSuggestions = async () => {
     setStatus("loading");
     setError(null);
-    const token = localStorage.getItem(TOKEN_KEY) ?? "";
+    const token = getAccessToken();
     try {
       const response = await templatesApi.suggestFields(token, templateId);
       setSuggestions(response.suggestions);
