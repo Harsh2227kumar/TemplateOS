@@ -6,7 +6,7 @@ V1.4 Phase 2 — Member 3
 import os
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -42,6 +42,15 @@ test_engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
+
+# SQLite ignores FK constraints (including ON DELETE CASCADE) unless enabled
+# per connection; turn them on so DB-level cascades match PostgreSQL.
+@event.listens_for(test_engine, "connect")
+def _enable_sqlite_fk(dbapi_connection, _record):
+    dbapi_connection.execute("PRAGMA foreign_keys=ON")
+
+
 TestSession = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
 
 
@@ -243,6 +252,39 @@ def test_delete_document_cascades_values(db):
 
     assert get_document_by_id(db, doc.id) is None
     assert get_values_by_document(db, doc.id) == []
+
+
+def test_delete_template_cascades_documents_and_values(db):
+    user = _make_user(db)
+    template = _make_template(db, user.id)
+    doc = create_document(db, template.id, user.id)
+    upsert_values(db, doc.id, [{"field_name": "field1", "value": "val1"}])
+    doc_id = doc.id
+
+    db.delete(template)
+    db.commit()
+    db.expire_all()
+
+    assert db.get(Document, doc_id) is None
+    assert db.query(DocumentValue).filter_by(document_id=doc_id).count() == 0
+
+
+def test_delete_user_cascades_documents_and_values(db):
+    owner = _make_user(db, "owner@example.com")
+    author = _make_user(db, "author@example.com")
+    template = _make_template(db, owner.id)
+    doc = create_document(db, template.id, author.id)
+    upsert_values(db, doc.id, [{"field_name": "field1", "value": "val1"}])
+    doc_id = doc.id
+
+    db.delete(author)
+    db.commit()
+    db.expire_all()
+
+    assert db.get(Document, doc_id) is None
+    assert db.query(DocumentValue).filter_by(document_id=doc_id).count() == 0
+    # The template owned by another user is untouched.
+    assert db.get(Template, template.id) is not None
 
 
 def test_delete_document_not_found(db):
