@@ -158,7 +158,7 @@ def get_library_templates(
 
     if search:
         safe_search = _escape_like(search)
-        query = query.where(Template.name.ilike(f"%{safe_search}%"))
+        query = query.where(Template.name.ilike(f"%{safe_search}%", escape="\\"))
     if category:
         query = query.where(Template.category == category)
     if visibility:
@@ -203,7 +203,7 @@ def search_templates(
         base = base.where(Template.visibility == "public")
 
     safe_search = _escape_like(query_text)
-    base = base.where(Template.name.ilike(f"%{safe_search}%"))
+    base = base.where(Template.name.ilike(f"%{safe_search}%", escape="\\"))
 
     base = base.order_by(Template.created_at.desc()).limit(limit)
     result = db.execute(base)

@@ -139,3 +139,36 @@ def test_profile_rejects_token_for_missing_user() -> None:
     )
 
     assert response.status_code == 401
+
+
+def test_login_unknown_email_still_verifies_a_hash(monkeypatch) -> None:
+    from app.core import security
+
+    calls: list[str] = []
+    original_verify = security.password_hash.verify
+
+    def counting_verify(password: str, hashed: str) -> bool:
+        calls.append(hashed)
+        return original_verify(password, hashed)
+
+    monkeypatch.setattr(security.password_hash, "verify", counting_verify)
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody@example.com", "password": "whatever-password"},
+    )
+    assert response.status_code == 401
+    assert len(calls) == 1
+
+
+def test_db_check_does_not_leak_driver_errors(monkeypatch) -> None:
+    from app.db import session as db_session
+
+    class BrokenEngine:
+        def connect(self):
+            raise RuntimeError("could not connect to secret-host.example as admin")
+
+    monkeypatch.setattr(db_session, "engine", BrokenEngine())
+    response = client.get("/api/v1/system/db-check")
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert "secret-host" not in response.text

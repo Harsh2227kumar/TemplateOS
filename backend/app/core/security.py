@@ -6,6 +6,9 @@ from pwdlib import PasswordHash
 from app.core.config import settings
 
 password_hash = PasswordHash.recommended()
+# Verified against when the user does not exist, so a failed login costs the
+# same hashing time either way and response timing does not reveal accounts.
+_DUMMY_PASSWORD_HASH = password_hash.hash("templateos-dummy-password")
 
 
 def hash_password(password: str) -> str:
@@ -14,6 +17,7 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, hashed_password: str | None) -> bool:
     if not hashed_password:
+        password_hash.verify(password, _DUMMY_PASSWORD_HASH)
         return False
     return password_hash.verify(password, hashed_password)
 

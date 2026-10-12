@@ -20,6 +20,19 @@ from app.main import app
 from app.models.user import User
 from app.models.template import Template
 
+
+def _build_docx() -> bytes:
+    from docx import Document
+
+    buffer = io.BytesIO()
+    document = Document()
+    document.add_paragraph("Dear {{recipient_name}},")
+    document.save(buffer)
+    return buffer.getvalue()
+
+
+VALID_DOCX = _build_docx()
+
 test_engine = create_engine(
     "sqlite://",
     connect_args={"check_same_thread": False},
@@ -72,7 +85,7 @@ def _upload_template(token: str, name: str, category: str, visibility: str) -> d
     files = {
         "file": (
             "template.docx",
-            io.BytesIO(b"fake content"),
+            io.BytesIO(VALID_DOCX),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
     }

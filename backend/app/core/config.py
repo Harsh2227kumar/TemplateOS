@@ -1,11 +1,18 @@
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+
+logger = logging.getLogger(__name__)
+
+# The placeholder shipped in .env.example; never acceptable outside development.
+_EXAMPLE_JWT_SECRET = "generate-a-long-random-secret-here"
+_MIN_JWT_SECRET_LENGTH = 32
 
 
 def _load_ai_env_from_file() -> None:
@@ -55,7 +62,8 @@ _load_ai_env_from_file()
 class Settings(BaseSettings):
     app_name: str = Field(default="TemplateOS API", alias="APP_NAME")
     app_env: str = Field(default="development", alias="APP_ENV")
-    app_debug: bool = Field(default=True, alias="APP_DEBUG")
+    # Off unless explicitly enabled: debug mode returns tracebacks to clients.
+    app_debug: bool = Field(default=False, alias="APP_DEBUG")
     api_v1_prefix: str = Field(default="/api/v1", alias="API_V1_PREFIX")
     backend_cors_origins: str = Field(
         default="http://localhost:5173", alias="BACKEND_CORS_ORIGINS"
@@ -66,6 +74,8 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = Field(
         default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
     )
+    # A relative path is resolved against the repository root (see
+    # storage_root), so the location does not depend on the working directory.
     storage_base_path: str = Field(default="backend/storage", alias="STORAGE_BASE_PATH")
     # --- AI (V1.3 Phase 4): AWS Bedrock via AnthropicBedrock ---
     # None/"" -> AI features stay off (503 "not configured") until the team
@@ -99,8 +109,6 @@ class Settings(BaseSettings):
         """
         if not self.aws_region or not self.bedrock_model_suggestions:
             return False
-        import os
-
         if os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
             return True
         if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get(
@@ -113,6 +121,17 @@ class Settings(BaseSettings):
             return Session(region_name=self.aws_region).get_credentials() is not None
         except Exception:
             return False
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() in {"production", "prod"}
+
+    @property
+    def storage_root(self) -> Path:
+        path = Path(self.storage_base_path)
+        if not path.is_absolute():
+            path = ROOT_DIR / path
+        return path.resolve()
 
     @property
     def cors_origins(self) -> list[str]:
@@ -128,6 +147,30 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
+
+    @model_validator(mode="after")
+    def check_production_safety(self) -> "Settings":
+        weak_secret = (
+            self.jwt_secret_key == _EXAMPLE_JWT_SECRET
+            or len(self.jwt_secret_key) < _MIN_JWT_SECRET_LENGTH
+        )
+        if self.is_production:
+            if weak_secret:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be a random value of at least "
+                    f"{_MIN_JWT_SECRET_LENGTH} characters in production"
+                )
+            if self.app_debug:
+                raise ValueError("APP_DEBUG must be false in production")
+            if "*" in self.cors_origins:
+                raise ValueError("BACKEND_CORS_ORIGINS must not contain '*' in production")
+        elif weak_secret:
+            logger.warning(
+                "JWT_SECRET_KEY is the example value or shorter than %d characters; "
+                "set a long random secret before deploying",
+                _MIN_JWT_SECRET_LENGTH,
+            )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",
