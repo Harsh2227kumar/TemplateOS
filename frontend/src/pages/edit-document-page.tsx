@@ -291,7 +291,10 @@ export function EditDocumentPage() {
                         {field.field_label || field.field_name}
                         {field.is_required && <span className="text-red-500 ml-1">*</span>}
                       </Label>
-                      <DynamicField field={field} />
+                      <DynamicField
+                        field={field}
+                        aiContext={{ templateId: document.template_id, documentId: document.id }}
+                      />
                     </div>
                   ))}
                 </div>

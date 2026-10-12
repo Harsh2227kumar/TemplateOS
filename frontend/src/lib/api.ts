@@ -499,3 +499,32 @@ export function splitValidationErrors(
 
   return { fieldErrors, otherMessages };
 }
+
+// --- V1.5 Phase 1: basic AI writing actions on a single field ---
+
+export type AiTextAction = "grammar" | "tone" | "concise" | "formal";
+
+// Matches the backend cap on original_text (MAX_IMPROVE_TEXT_CHARS).
+export const MAX_AI_TEXT_CHARS = 5000;
+
+export interface ImproveTextRequest {
+  template_id: number;
+  document_id?: number | null;
+  field_name: string;
+  original_text: string;
+  action_type: AiTextAction;
+}
+
+export interface ImproveTextResponse {
+  improved_text: string;
+}
+
+export const aiApi = {
+  improveText: async (token: string, payload: ImproveTextRequest): Promise<ImproveTextResponse> => {
+    return request<ImproveTextResponse>(
+      "/ai/improve-text",
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    );
+  },
+};
