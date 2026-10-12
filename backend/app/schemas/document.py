@@ -2,15 +2,12 @@
 V1.4 Phase 2 - Document Schemas
 
 Pydantic schemas for document persistence (draft save functionality).
-These schemas will be used by Member 2 in Phase 2 when building:
+Used by the document endpoints (app/api/v1/endpoints/documents.py):
 - POST /documents/create
 - PUT /documents/{id}/values
 - GET /documents
 - GET /documents/{id}
 - GET /documents/{id}/values
-
-Phase 1: These are DRAFT schemas (not yet wired to endpoints).
-Phase 2: Member 2 will use these for endpoints, Member 3 will create the tables.
 """
 
 from datetime import datetime
@@ -57,9 +54,9 @@ class DocumentUpdate(BaseModel):
 
 class DocumentRead(BaseModel):
     """
-    Response for GET /documents or GET /documents/{id}.
+    Response for POST /documents/create and GET /documents/{id}.
 
-    Includes document metadata and optionally joined values.
+    Includes document metadata and the joined values (empty on create).
     """
 
     id: int
@@ -151,10 +148,10 @@ class DocumentValuesBulkUpsert(BaseModel):
 
 class DocumentValuesBulkRead(BaseModel):
     """
-    Response for GET /documents/{id}/values (Phase 2).
+    Response for PUT /documents/{id}/values and GET /documents/{id}/values.
 
-    Returns all values for a document, optionally ordered by display_order
-    (requires join with template_fields).
+    Shape: {document_id, values: list[DocumentValueRead]}. PUT returns the
+    rows it upserted; GET returns all saved values (no specific order).
     """
 
     document_id: int
@@ -166,22 +163,23 @@ class DocumentValuesBulkRead(BaseModel):
 
 class FieldValidationError(BaseModel):
     """
-    One field validation error in the bulk validation response.
+    One field validation error in the PUT /documents/{id}/values 422 response.
 
-    Returned when a field value fails validation_rule checks.
+    Matches the dicts raised by app.services.document_validator, e.g.
+    {"field_name": "email", "error": "Must be a valid email address"}.
     """
 
-    field_name: str
-    field_label: str
-    message: str
-    rule: str  # e.g., "email", "min:5", "max:100", "regex:^[A-Z]+$"
+    field_name: str | None
+    error: str
 
 
 class DocumentValidationErrorResponse(BaseModel):
     """
-    HTTP 422 response when document_values validation fails (Phase 2).
+    HTTP 422 response when document_values validation fails.
 
-    Contains structured list of field-level errors.
+    {"detail": [{field_name, error}, ...]}. Note: request-body errors caught
+    by Pydantic itself (e.g. an empty values list) use FastAPI's default
+    {loc, msg, type} shape instead.
     """
 
     detail: list[FieldValidationError]
@@ -208,10 +206,9 @@ class DocumentListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# --- Phase 2 Integration Notes ---
+# --- Endpoint Mapping ---
 
 """
-Phase 2 Endpoint Mapping:
 
 POST /documents/create
   Request: DocumentCreate
@@ -226,27 +223,12 @@ GET /documents
   Response: list[DocumentListItem] (user's drafts, ordered by updated_at desc)
 
 GET /documents/{id}
-  Response: DocumentRead (with values if include_values=true)
+  Response: DocumentRead (with values)
 
 GET /documents/{id}/values
   Response: DocumentValuesBulkRead
 
-PATCH /documents/{id}
-  Request: DocumentUpdate
-  Response: DocumentRead
-
-DELETE /documents/{id}
-  Response: {"ok": true} (cascade deletes values via FK)
-
----
-
-Member 3 (Phase 2) will create:
-- documents table with columns matching DocumentRead
-- document_values table with columns matching DocumentValueRead
-- Relationships: documents -> template, documents -> user, document_values -> documents (CASCADE)
-
-Member 2 (Phase 2) will:
-- Implement endpoints using these schemas
-- Enforce validation_rule checks server-side (see backend/docs/validation-rules.md)
-- Return structured errors (FieldValidationError list) on validation failure
+Not yet implemented (schemas reserved for later phases):
+PATCH /documents/{id}         Request: DocumentUpdate, Response: DocumentRead
+DELETE /documents/{id}        (cascade deletes values via FK)
 """

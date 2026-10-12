@@ -26,11 +26,15 @@ def upsert_values(
     For each {field_name, value} in values:
     - If row exists (document_id, field_name), update value + updated_at.
     - If not, insert new row.
+    Also bump the parent document's updated_at so "last modified" and the
+    updated_at-desc dashboard ordering reflect the save.
     Commit once at the end.
     Return all upserted rows.
     """
+    from app.models.document import Document
     from app.models.document_value import DocumentValue
 
+    now = datetime.utcnow()
     result = []
     for val in values:
         field_name = val["field_name"]
@@ -45,7 +49,7 @@ def upsert_values(
 
         if existing:
             existing.value = value_text
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = now
             result.append(existing)
         else:
             new_val = DocumentValue(
@@ -53,6 +57,10 @@ def upsert_values(
             )
             db.add(new_val)
             result.append(new_val)
+
+    document = db.get(Document, document_id)
+    if document:
+        document.updated_at = now
 
     db.commit()
     for r in result:
