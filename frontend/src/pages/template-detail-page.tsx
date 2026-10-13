@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDeleteTemplate, useTemplate } from "@/hooks/queries";
+import { parseRouteId } from "@/lib/route-params";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,10 +77,10 @@ export function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const templateId = Number(id);
+  const routeId = parseRouteId(id);
   // A non-numeric id never reaches the API; treat it like a missing template.
-  const invalidId = !Number.isInteger(templateId) || templateId <= 0;
-  const templateQuery = useTemplate(templateId);
+  const invalidId = routeId === null;
+  const templateQuery = useTemplate(routeId ?? 0);
   const template = templateQuery.data ?? null;
   const deleteMutation = useDeleteTemplate();
   const [deleteOpen, setDeleteOpen] = useState(false);
