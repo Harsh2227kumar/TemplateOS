@@ -84,6 +84,13 @@ class Template(Base):
     organization_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     department_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Audience (see app/services/template_access.py). Free-text scope names
+    # matched trimmed + case-insensitively against User.organization/department.
+    scope_organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    scope_department: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # JSON array of role strings; NULL / empty array = every role.
+    allowed_roles: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Flags
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     is_locked: Mapped[bool] = mapped_column(
