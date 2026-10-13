@@ -269,12 +269,27 @@ def test_refresh_rotates_tokens(client):
     assert client.get(f"{PREFIX}/auth/me").status_code == 200
 
 
+def _age_revocations(seconds: int) -> None:
+    """Pretend every revocation happened `seconds` ago."""
+    with TestSession() as db:
+        db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.revoked_at.is_not(None))
+            .values(
+                revoked_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                - timedelta(seconds=seconds)
+            )
+        )
+        db.commit()
+
+
 def test_reusing_rotated_refresh_token_revokes_family(client):
     _signup(client)
     _login(client)
     stolen = _refresh_cookie(client)
     assert client.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 200
     current = _refresh_cookie(client)
+    _age_revocations(settings.refresh_reuse_grace_seconds + 5)
 
     attacker = TestClient(app)
     _put_cookie(attacker, REFRESH_COOKIE_NAME, stolen)
@@ -294,6 +309,8 @@ def test_reuse_only_revokes_that_family(client):
     stolen = _refresh_cookie(client)
     client.post(f"{PREFIX}/auth/refresh", headers=CSRF)
 
+    _age_revocations(settings.refresh_reuse_grace_seconds + 5)
+
     other_device = TestClient(app)
     _login(other_device)
 
@@ -302,6 +319,103 @@ def test_reuse_only_revokes_that_family(client):
     assert attacker.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 401
 
     assert other_device.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 200
+
+
+def test_reuse_within_grace_window_is_409_and_keeps_family(client):
+    assert settings.refresh_reuse_grace_seconds == 30
+    _signup(client)
+    _login(client)
+    first = _refresh_cookie(client)
+    assert client.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 200
+    replacement = _refresh_cookie(client)
+
+    # A second tab that still sent the old cookie a moment later.
+    other_tab = TestClient(app)
+    _put_cookie(other_tab, REFRESH_COOKIE_NAME, first)
+    response = other_tab.post(f"{PREFIX}/auth/refresh", headers=CSRF)
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Refresh token already rotated"}
+    assert response.headers.get_list("set-cookie") == []  # cookies untouched
+
+    old, new = _rows()
+    assert new.revoked_at is None  # family alive
+    assert client.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 200
+    assert _refresh_cookie(client) != replacement
+
+
+def test_reuse_after_grace_window_is_401_and_revokes_family(client):
+    _signup(client)
+    _login(client)
+    first = _refresh_cookie(client)
+    client.post(f"{PREFIX}/auth/refresh", headers=CSRF)
+    replacement = _refresh_cookie(client)
+    _age_revocations(settings.refresh_reuse_grace_seconds + 1)
+
+    other = TestClient(app)
+    _put_cookie(other, REFRESH_COOKIE_NAME, first)
+    response = other.post(f"{PREFIX}/auth/refresh", headers=CSRF)
+    assert response.status_code == 401
+    _assert_cleared(response)
+    assert all(row.revoked_at is not None for row in _rows())
+
+    _put_cookie(client, REFRESH_COOKIE_NAME, replacement)
+    assert client.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 401
+
+
+def test_token_revoked_by_logout_is_401_even_within_grace(client):
+    _signup(client)
+    _login(client)
+    token = _refresh_cookie(client)
+    assert client.post(f"{PREFIX}/auth/logout", headers=CSRF).status_code == 204
+
+    _put_cookie(client, REFRESH_COOKIE_NAME, token)
+    response = client.post(f"{PREFIX}/auth/refresh", headers=CSRF)
+    assert response.status_code == 401
+    _assert_cleared(response)
+
+
+def test_rotated_token_after_logout_is_401_even_within_grace(client):
+    # Rotated (replaced_by_id set) seconds ago, but the session was then
+    # logged out: no live token in the family, so no grace.
+    _signup(client)
+    _login(client)
+    first = _refresh_cookie(client)
+    client.post(f"{PREFIX}/auth/refresh", headers=CSRF)
+    client.post(f"{PREFIX}/auth/logout", headers=CSRF)
+
+    _put_cookie(client, REFRESH_COOKIE_NAME, first)
+    assert client.post(f"{PREFIX}/auth/refresh", headers=CSRF).status_code == 401
+
+
+def test_concurrent_rotation_loser_gets_already_rotated(monkeypatch):
+    # Simulate the race: the loser read the row before the winner committed,
+    # so its conditional UPDATE matches zero rows.
+    from app.crud import refresh_token_crud
+    from app.models.user import User
+
+    with TestSession() as db:
+        db.add(User(email="race@example.com", full_name="Race"))
+        db.commit()
+        issued = refresh_token_crud.issue_refresh_token(db, 1)
+        db.commit()
+        token = issued.token
+
+    with TestSession() as winner_db, TestSession() as loser_db:
+        stale = refresh_token_crud.get_by_token(loser_db, token)
+        assert stale.revoked_at is None
+        assert (
+            refresh_token_crud.rotate_refresh_token(winner_db, token).status
+            is refresh_token_crud.RotationStatus.ROTATED
+        )
+        # The loser's session still holds the stale (unrevoked) row.
+        monkeypatch.setattr(
+            refresh_token_crud, "get_by_token", lambda db, _token: stale
+        )
+        result = refresh_token_crud.rotate_refresh_token(loser_db, token)
+        assert result.status is refresh_token_crud.RotationStatus.ALREADY_ROTATED
+
+    rows = _rows()
+    assert sum(row.revoked_at is None for row in rows) == 1
 
 
 def test_refresh_missing_or_invalid_token_is_401_and_clears_cookies(client):

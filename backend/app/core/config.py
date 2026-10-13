@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = Field(
         default=7, ge=1, alias="REFRESH_TOKEN_EXPIRE_DAYS"
     )
+    # A token rotated less than this many seconds ago gets 409 (not reuse
+    # detection) so concurrent refreshes from several tabs don't log out.
+    refresh_reuse_grace_seconds: int = Field(
+        default=30, ge=0, alias="REFRESH_REUSE_GRACE_SECONDS"
+    )
     # None -> Secure follows APP_ENV (on in production, off otherwise so the
     # cookies work over plain http://localhost during development).
     cookie_secure_override: bool | None = Field(default=None, alias="COOKIE_SECURE")

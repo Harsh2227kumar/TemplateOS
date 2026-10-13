@@ -40,6 +40,9 @@ class RotationStatus(str, Enum):
     ROTATED = "rotated"
     INVALID = "invalid"  # unknown, malformed or expired
     REUSED = "reused"  # a revoked token was presented; family revoked
+    # Rotated moments ago (another tab / concurrent request won the race);
+    # the caller already holds the replacement. Nothing revoked.
+    ALREADY_ROTATED = "already_rotated"
 
 
 @dataclass(frozen=True)
@@ -90,17 +93,20 @@ def rotate_refresh_token(db: Session, token: str | None) -> RotationResult:
     Validate `token` and swap it for a new one in the same family.
 
     The old row is revoked with a conditional UPDATE (`revoked_at IS NULL`),
-    so two concurrent rotations of the same token cannot both succeed: the
-    loser sees zero affected rows and is treated as reuse. Commits.
+    so two concurrent rotations of the same token cannot both succeed.
+
+    Presenting an already-revoked token is reuse (family revoked) unless it
+    was rotated within REFRESH_REUSE_GRACE_SECONDS and the family is still
+    live: then ALREADY_ROTATED is returned and nothing changes, because
+    browser tabs share cookies and the loser already holds the replacement.
+    The concurrent-race loser gets the same treatment. Commits.
     """
     record = get_by_token(db, token)
     if record is None:
         return RotationResult(RotationStatus.INVALID)
 
     if record.revoked_at is not None:
-        revoke_family(db, record.family_id)
-        db.commit()
-        return RotationResult(RotationStatus.REUSED)
+        return _handle_revoked(db, record)
 
     now = _utcnow()
     if record.expires_at <= now:
@@ -112,9 +118,11 @@ def rotate_refresh_token(db: Session, token: str | None) -> RotationResult:
         .values(revoked_at=now)
     )
     if not claimed.rowcount:
-        revoke_family(db, record.family_id)
-        db.commit()
-        return RotationResult(RotationStatus.REUSED)
+        # Lost a race with a concurrent rotation; re-read what the winner
+        # committed and apply the same grace rule.
+        db.rollback()
+        db.refresh(record)
+        return _handle_revoked(db, record)
 
     issued = issue_refresh_token(db, record.user_id, family_id=record.family_id)
     db.execute(
@@ -124,6 +132,36 @@ def rotate_refresh_token(db: Session, token: str | None) -> RotationResult:
     )
     db.commit()
     return RotationResult(RotationStatus.ROTATED, issued)
+
+
+def _within_rotation_grace(db: Session, record: RefreshToken) -> bool:
+    """
+    True when `record` was revoked by rotation (not logout / family
+    revocation) less than REFRESH_REUSE_GRACE_SECONDS ago and its family
+    still has a live token, i.e. the session itself is intact.
+    """
+    if record.revoked_at is None or record.replaced_by_id is None:
+        return False
+    now = _utcnow()
+    grace = timedelta(seconds=settings.refresh_reuse_grace_seconds)
+    if now - record.revoked_at > grace:
+        return False
+    live = db.scalar(
+        select(RefreshToken.id).where(
+            RefreshToken.family_id == record.family_id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.expires_at > now,
+        )
+    )
+    return live is not None
+
+
+def _handle_revoked(db: Session, record: RefreshToken) -> RotationResult:
+    if _within_rotation_grace(db, record):
+        return RotationResult(RotationStatus.ALREADY_ROTATED)
+    revoke_family(db, record.family_id)
+    db.commit()
+    return RotationResult(RotationStatus.REUSED)
 
 
 def revoke_refresh_token(db: Session, token: str | None) -> bool:

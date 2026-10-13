@@ -110,15 +110,27 @@ def _unauthorized_clearing_cookies(detail: str) -> JSONResponse:
 @router.post(
     "/refresh",
     response_model=Token,
-    responses={401: {"description": "Missing, invalid, expired or reused refresh token"}},
+    responses={
+        401: {"description": "Missing, invalid, expired or reused refresh token"},
+        409: {"description": "Token was rotated within the reuse grace window"},
+    },
 )
 def refresh_session(request: Request, response: Response, db: DbSession):
     """
     Rotate the refresh cookie: the presented token is revoked and a new
-    access + refresh pair is set. Presenting an already-revoked token
-    revokes its whole session family (theft signal) and returns 401.
+    access + refresh pair is set. A token rotated within
+    REFRESH_REUSE_GRACE_SECONDS (concurrent tabs) gets 409 and nothing
+    changes; any other revoked token revokes its whole session family
+    (theft signal), clears the cookies and returns 401.
     """
     result = rotate_refresh_token(db, request.cookies.get(REFRESH_COOKIE_NAME))
+    if result.status is RotationStatus.ALREADY_ROTATED:
+        # Another tab rotated it moments ago and the browser already holds
+        # the replacement cookies: leave the session and cookies alone.
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "Refresh token already rotated"},
+        )
     if result.status is RotationStatus.REUSED:
         return _unauthorized_clearing_cookies("Refresh token reuse detected")
     if result.status is not RotationStatus.ROTATED or result.issued is None:
