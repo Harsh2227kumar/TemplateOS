@@ -14,7 +14,6 @@ Rules:
   rest of the app keeps working.
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, status
@@ -37,7 +36,7 @@ AI_TEXT_FIELD_TYPES = ("text", "textarea")
 
 
 @router.post("/improve-text", response_model=ImproveTextResponse)
-async def improve_text(
+def improve_text(
     payload: ImproveTextRequest,
     current_user: CurrentUser,
     db: DbSession,
@@ -105,9 +104,7 @@ async def improve_text(
         f"chars={len(payload.original_text)}"
     )
     try:
-        improved = await asyncio.to_thread(
-            ai_service.improve_text, payload.action_type, payload.original_text
-        )
+        improved = ai_service.improve_text(payload.action_type, payload.original_text)
     except AiUnavailableError as e:
         log_ai_generation(
             db,

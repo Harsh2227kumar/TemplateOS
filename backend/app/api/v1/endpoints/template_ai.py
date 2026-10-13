@@ -3,7 +3,6 @@ AI route for templates: propose additional fields (Claude on Bedrock).
 Proposals only; nothing is written to template_fields.
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -29,7 +28,7 @@ logger = logging.getLogger(__name__)
     "/{template_id}/suggest-fields",
     response_model=SuggestFieldsResponse,
 )
-async def suggest_template_fields(
+def suggest_template_fields(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -51,12 +50,10 @@ async def suggest_template_fields(
     if not template.original_file_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
-    docx_bytes = await read_stored(template.original_file_path)
+    docx_bytes = read_stored(template.original_file_path)
 
     try:
-        segments = await asyncio.to_thread(
-            docx_parser.extract_text_segments, docx_bytes
-        )
+        segments = docx_parser.extract_text_segments(docx_bytes)
     except Exception as e:
         logger.error(f"Content extraction failed for template {template_id}: {e}")
         raise HTTPException(
@@ -73,9 +70,7 @@ async def suggest_template_fields(
         f"by user {current_user.id} (existing_fields={len(existing_keys)})"
     )
     try:
-        suggestions = await asyncio.to_thread(
-            ai_service.suggest_fields, document_text, existing_keys
-        )
+        suggestions = ai_service.suggest_fields(document_text, existing_keys)
     except AiUnavailableError as e:
         log_ai_generation(
             db,

@@ -13,7 +13,6 @@ app/api/v1/api.py, which preserves the original route order):
 Shared helpers live in _template_common.
 """
 
-import asyncio
 import logging
 import zipfile
 from io import BytesIO
@@ -301,7 +300,7 @@ def update_template_access(
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_template(
+def delete_template(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -334,7 +333,7 @@ async def delete_template(
         if not relative_path:
             continue
         try:
-            await asyncio.to_thread(storage_service.delete_file, relative_path)
+            storage_service.delete_file(relative_path)
         except StorageError:
             logger.warning(
                 f"Template {template_id} deleted from DB but file could not be "
@@ -375,7 +374,7 @@ def get_template_fields(
     response_model=TemplateResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_template(
+def upload_template(
     current_user: CurrentUser,
     db: DbSession,
     file: UploadFile = File(...),
@@ -396,7 +395,7 @@ async def upload_template(
         raise HTTPException(status_code=400, detail="Only DOCX files are accepted")
 
     # 2. Read (bounded: never load more than the limit + 1 byte) + empty check
-    content = await file.read(MAX_FILE_SIZE_BYTES + 1)
+    content = file.file.read(MAX_FILE_SIZE_BYTES + 1)
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
@@ -444,9 +443,7 @@ async def upload_template(
     # 7. Save file via storage_service (in thread pool)
     try:
         logger.info(f"Saving template {filename} for user {current_user.id}")
-        stored = await asyncio.to_thread(
-            storage_service.save_bytes, "templates_original", filename, content
-        )
+        stored = storage_service.save_bytes("templates_original", filename, content)
     except StorageError as e:
         logger.error(f"Storage error while saving {filename}: {e}")
         raise HTTPException(
@@ -477,7 +474,7 @@ async def upload_template(
         logger.error(
             f"DB error while creating template record: {e}. Rolling back file."
         )
-        await asyncio.to_thread(storage_service.delete_file, stored.path)
+        storage_service.delete_file(stored.path)
         raise HTTPException(
             status_code=500, detail="Could not save template record"
         ) from None

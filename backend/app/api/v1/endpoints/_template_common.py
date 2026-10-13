@@ -3,7 +3,6 @@ Helpers shared by the template router modules (templates, template_placeholders,
 template_cleaning, template_ai, template_fields). Internal: no routes here.
 """
 
-import asyncio
 import logging
 
 from fastapi import HTTPException
@@ -31,21 +30,20 @@ def require_manage(template: Template, user: User, action: str) -> None:
         )
 
 
-async def read_stored(path: str) -> bytes:
+def read_stored(path: str) -> bytes:
     """Read a stored file; a file missing on disk is a 409."""
     try:
-        return await asyncio.to_thread(storage_service.read_bytes, path)
+        return storage_service.read_bytes(path)
     except StoredFileNotFoundError:
         raise HTTPException(
             status_code=409, detail="Source file missing on disk"
         ) from None
 
 
-async def save_processed(db: Session, template: Template, processed_bytes: bytes) -> str:
+def save_processed(db: Session, template: Template, processed_bytes: bytes) -> str:
     """Store a new processed copy and drop the superseded one."""
     try:
-        stored = await asyncio.to_thread(
-            storage_service.save_bytes,
+        stored = storage_service.save_bytes(
             "templates_processed",
             template.original_filename or "template.docx",
             processed_bytes,
@@ -59,7 +57,7 @@ async def save_processed(db: Session, template: Template, processed_bytes: bytes
     set_processed_path(db, template, stored.path)
     if previous_processed_path and previous_processed_path != stored.path:
         try:
-            await asyncio.to_thread(storage_service.delete_file, previous_processed_path)
+            storage_service.delete_file(previous_processed_path)
         except StorageError:
             logger.warning(
                 f"Could not remove superseded processed file for template "

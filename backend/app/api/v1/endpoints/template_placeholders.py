@@ -3,7 +3,6 @@ Placeholder routes: detect {{placeholders}} in a template's fill-ready file
 and one-click fix of malformed placeholder tokens.
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -172,7 +171,7 @@ def _field_create_from_detected_safe(
     "/{template_id}/detect-placeholders",
     response_model=PlaceholderDetectionResponse,
 )
-async def detect_placeholders(
+def detect_placeholders(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -203,10 +202,10 @@ async def detect_placeholders(
         f"Placeholder detection started for template {template_id} "
         f"(force={force}, source={source_file})"
     )
-    docx_bytes = await read_stored(source_path)
+    docx_bytes = read_stored(source_path)
 
     try:
-        result = await asyncio.to_thread(docx_parser.detect_placeholders, docx_bytes)
+        result = docx_parser.detect_placeholders(docx_bytes)
     except Exception as e:
         logger.error(f"Placeholder detection failed for template {template_id}: {e}")
         raise HTTPException(
@@ -227,7 +226,7 @@ async def detect_placeholders(
     "/{template_id}/fix-placeholders",
     response_model=PlaceholderDetectionResponse,
 )
-async def fix_placeholders(
+def fix_placeholders(
     template_id: int,
     request: FixPlaceholdersRequest,
     current_user: CurrentUser,
@@ -247,10 +246,9 @@ async def fix_placeholders(
     if not source_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
-    docx_bytes = await read_stored(source_path)
+    docx_bytes = read_stored(source_path)
     try:
-        fixed_bytes, counts = await asyncio.to_thread(
-            fix_placeholder_tokens,
+        fixed_bytes, counts = fix_placeholder_tokens(
             docx_bytes,
             [(fix.raw, fix.key) for fix in request.fixes],
         )
@@ -264,8 +262,8 @@ async def fix_placeholders(
             status_code=422, detail="None of the placeholders to fix were found in the document"
         )
 
-    await save_processed(db, template, fixed_bytes)
-    result = await asyncio.to_thread(docx_parser.detect_placeholders, fixed_bytes)
+    save_processed(db, template, fixed_bytes)
+    result = docx_parser.detect_placeholders(fixed_bytes)
     response = _persist_detection(db, template, result, False, "processed")
     logger.info(
         f"Placeholder fix on template {template_id} by user {current_user.id}: "

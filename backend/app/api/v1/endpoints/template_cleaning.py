@@ -3,7 +3,6 @@ Cleaning routes: read a template's text content, suggest spots to turn
 into placeholders, and preview / apply the replacements into a processed copy.
 """
 
-import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -43,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/{template_id}/content")
-async def get_template_content(
+def get_template_content(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -72,12 +71,10 @@ async def get_template_content(
     if not path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
-    docx_bytes = await read_stored(path)
+    docx_bytes = read_stored(path)
 
     try:
-        segments = await asyncio.to_thread(
-            docx_parser.extract_text_segments, docx_bytes
-        )
+        segments = docx_parser.extract_text_segments(docx_bytes)
     except Exception as e:
         logger.error(f"Content extraction failed for template {template_id}: {e}")
         raise HTTPException(
@@ -96,7 +93,7 @@ async def get_template_content(
     "/{template_id}/clean-suggestions",
     response_model=CleanSuggestionsResponse,
 )
-async def get_clean_suggestions(
+def get_clean_suggestions(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -116,9 +113,9 @@ async def get_clean_suggestions(
     if not template.original_file_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
-    docx_bytes = await read_stored(template.original_file_path)
+    docx_bytes = read_stored(template.original_file_path)
     try:
-        report = await asyncio.to_thread(suggest_cleaning, docx_bytes)
+        report = suggest_cleaning(docx_bytes)
     except Exception as e:
         logger.error(f"Cleaning suggestions failed for template {template_id}: {e}")
         raise HTTPException(
@@ -211,7 +208,7 @@ def _clean_outcome(
 
 
 @router.post("/{template_id}/clean-preview", response_model=CleanPreviewResponse)
-async def preview_clean_template(
+def preview_clean_template(
     template_id: int,
     request: CleanTemplateRequest,
     current_user: CurrentUser,
@@ -229,17 +226,15 @@ async def preview_clean_template(
     if not template.original_file_path:
         raise HTTPException(status_code=409, detail="Template has no source file")
 
-    original_bytes = await read_stored(template.original_file_path)
+    original_bytes = read_stored(template.original_file_path)
     try:
-        processed_bytes, results = await asyncio.to_thread(
-            apply_replacements_with_results, original_bytes, request.replacements
+        processed_bytes, results = apply_replacements_with_results(
+            original_bytes, request.replacements
         )
-        segments = await asyncio.to_thread(
-            docx_parser.extract_text_segments, processed_bytes
-        )
+        segments = docx_parser.extract_text_segments(processed_bytes)
         existing_names = {f.field_name for f in get_fields_by_template(db, template_id)}
-        warnings, detected_keys, result_models = await asyncio.to_thread(
-            _clean_outcome, processed_bytes, results, existing_names
+        warnings, detected_keys, result_models = _clean_outcome(
+            processed_bytes, results, existing_names
         )
     except Exception as e:
         logger.error(f"Clean preview failed for template {template_id}: {e}")
@@ -257,7 +252,7 @@ async def preview_clean_template(
 
 
 @router.post("/{template_id}/clean", response_model=CleanTemplateResponse)
-async def clean_template(
+def clean_template(
     template_id: int,
     request: CleanTemplateRequest,
     current_user: CurrentUser,
@@ -298,11 +293,10 @@ async def clean_template(
     )
 
     # ALWAYS start from the original bytes (re-clean regenerates, never stacks).
-    original_bytes = await read_stored(template.original_file_path)
+    original_bytes = read_stored(template.original_file_path)
 
     try:
-        processed_bytes, results = await asyncio.to_thread(
-            apply_replacements_with_results,
+        processed_bytes, results = apply_replacements_with_results(
             original_bytes,
             request.replacements,
         )
@@ -312,7 +306,7 @@ async def clean_template(
             status_code=500, detail="Could not apply the requested replacements"
         ) from None
 
-    processed_path = await save_processed(db, template, processed_bytes)
+    processed_path = save_processed(db, template, processed_bytes)
     template = get_template_by_id(db, template_id) or template
 
     # Upsert a field per MATCHED key (append_field skips existing keys).
@@ -331,8 +325,8 @@ async def clean_template(
     template = advance_status(db, template, target)
 
     existing_names = {f.field_name for f in get_fields_by_template(db, template_id)}
-    warnings, detected_keys, result_models = await asyncio.to_thread(
-        _clean_outcome, processed_bytes, results, existing_names
+    warnings, detected_keys, result_models = _clean_outcome(
+        processed_bytes, results, existing_names
     )
     logger.info(
         f"Cleaning finished for template {template_id}: "
