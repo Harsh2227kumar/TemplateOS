@@ -89,9 +89,12 @@ export function EditDocumentPage() {
     if (fields.length > 0 && document) {
       const defaultValues: DocumentFormValues = {};
       fields.forEach(f => {
-        if (f.field_type === "list" && f.default_value) {
+        if (f.field_type === "list") {
+          // Lists must start as an array (never ""), or the list schema
+          // rejects an untouched optional list with "Expected array".
           try {
-            defaultValues[f.field_name] = JSON.parse(f.default_value);
+            const parsed = f.default_value ? JSON.parse(f.default_value) : [];
+            defaultValues[f.field_name] = Array.isArray(parsed) ? parsed : [];
           } catch {
             defaultValues[f.field_name] = [];
           }
