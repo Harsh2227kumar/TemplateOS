@@ -1,294 +1,488 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Controller, ControllerRenderProps, useFormContext, useWatch } from "react-hook-form";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Calendar, List, FileText, Signature, Hash, Mail } from "lucide-react";
-import { ListField } from "./ListField";
-import { AiActionToolbar } from "@/components/fields/AiActionToolbar";
-import { useToast } from "@/components/ui/toast";
-import { aiApi, ApiError, MAX_AI_TEXT_CHARS, type AiTextAction } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
+import {
+  forwardRef,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  type ComponentProps,
+  type ForwardedRef,
+  type KeyboardEvent,
+} from "react";
+import { Controller, useFormContext, type FieldError, type FieldErrors } from "react-hook-form";
+import { format, parseISO } from "date-fns";
+import { AlertCircle } from "lucide-react";
 
-interface FieldProps {
-  field: {
-    field_name: string;
-    field_label: string | null;
-    field_type: string;
-    default_value: string | null;
-    is_required: boolean;
-    description: string | null;
-    example_value: string | null;
-    validation_rule: string | null;
-    section: string | null;
-    ai_enabled?: boolean;
-  };
-  /** V1.5: enables AI writing actions on ai_enabled text/textarea fields. */
-  aiContext?: {
-    templateId: number;
-    /** Saved draft id, or null before the first save. */
-    documentId?: number | null;
-  };
+import { AiActionToolbar } from "@/components/fields/AiActionToolbar";
+import { useAiStyleSwitcher } from "@/components/fields/use-ai-style-switcher";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import {
+  describeValidationRule,
+  isValidIsoDate,
+  parseNumber,
+  parseValidationRule,
+  type ValidationRule,
+} from "@/lib/validation";
+import { ListField } from "./ListField";
+
+export interface DynamicFieldDefinition {
+  field_name: string;
+  field_label: string | null;
+  field_type: string;
+  default_value: string | null;
+  is_required: boolean;
+  description: string | null;
+  example_value: string | null;
+  validation_rule: string | null;
+  section: string | null;
+  ai_enabled?: boolean;
+}
+
+export interface AiFieldContext {
+  templateId: number;
+  /** Saved draft id, or null before the first save. */
+  documentId?: number | null;
+}
+
+interface DynamicFieldProps {
+  field: DynamicFieldDefinition;
+  /** Enables the AI style switcher on ai_enabled text/textarea fields. */
+  aiContext?: AiFieldContext;
+  /** Disables input, e.g. while the form is saving. */
+  disabled?: boolean;
 }
 
 // Field types the AI text actions apply to (matches the backend).
-const AI_TEXT_FIELD_TYPES = ["text", "textarea"];
+const AI_TEXT_FIELD_TYPES = new Set(["text", "textarea"]);
+const TEXTAREA_MAX_AUTO_HEIGHT = 480;
 
-interface FormValues {
-  [key: string]: any;
+/** First error message for a field, whatever shape RHF stored it in. */
+export function getFieldErrorMessage(errors: FieldErrors, name: string): string | null {
+  const error = errors[name] as (FieldError & { root?: FieldError }) | FieldError[] | undefined;
+  if (!error) return null;
+  if (Array.isArray(error)) {
+    const first = error.find((e) => e?.message);
+    return first?.message ? String(first.message) : null;
+  }
+  if (error.message) return String(error.message);
+  if (error.root?.message) return String(error.root.message);
+  return null;
 }
 
-const fieldTypeIcons: Record<string, React.ReactNode> = {
-  text: <FileText className="h-4 w-4" />,
-  textarea: <FileText className="h-4 w-4" />,
-  number: <Hash className="h-4 w-4" />,
-  date: <Calendar className="h-4 w-4" />,
-  email: <Mail className="h-4 w-4" />,
-  list: <List className="h-4 w-4" />,
-  signature: <Signature className="h-4 w-4" />,
-};
+/**
+ * Renders one template field: label with required marker, description,
+ * a type-appropriate input, hints (example, rules, character counter), the
+ * AI style switcher where enabled, and a single error message.
+ */
+/**
+ * Cleaning may have stored the blank it replaced ("-------", "______") as the
+ * example value. Such a hint tells the user nothing, so drop examples that
+ * contain no letters or digits.
+ */
+function usableExample(value: string | null): string | null {
+  return value && /[\p{L}\p{N}]/u.test(value) ? value : null;
+}
 
-const fieldTypeLabels: Record<string, string> = {
-  text: "Text",
-  textarea: "Long Text",
-  number: "Number",
-  date: "Date",
-  email: "Email",
-  list: "List",
-  signature: "Signature",
-};
+export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFieldProps) {
+  const field = useMemo(
+    () => ({ ...rawField, example_value: usableExample(rawField.example_value) }),
+    [rawField],
+  );
+  const { formState: { errors } } = useFormContext();
+  const name = field.field_name;
+  const inputId = `field-${name}`;
+  const hintId = `${inputId}-hint`;
+  const metaId = `${inputId}-meta`;
+  const errorId = `${inputId}-error`;
+  const label = field.field_label?.trim() || name;
 
-export function DynamicField({ field, aiContext }: FieldProps) {
-  const { control, setValue, formState: { errors } } = useFormContext<FormValues>();
-  const fieldName = field.field_name;
-  const { toast } = useToast();
-  const showAiToolbar =
-    !!aiContext && field.ai_enabled === true && AI_TEXT_FIELD_TYPES.includes(field.field_type);
-  const currentValue = useWatch({ control, name: fieldName });
-  const currentText = typeof currentValue === "string" ? currentValue : "";
-  const [aiAction, setAiAction] = useState<AiTextAction | null>(null);
-  // The user's text before the last AI replacement (for Undo).
-  const [textBeforeAi, setTextBeforeAi] = useState<string | null>(null);
-  const lastAiTextRef = useRef<string | null>(null);
+  const rule = useMemo(() => parseValidationRule(field.validation_rule), [field.validation_rule]);
+  const errorMessage = getFieldErrorMessage(errors, name);
+  const invalid = errorMessage !== null;
+  const showAi = !!aiContext && field.ai_enabled === true && AI_TEXT_FIELD_TYPES.has(field.field_type);
 
-  // Once the user edits the AI result, Undo would discard their edits: drop it.
-  useEffect(() => {
-    if (textBeforeAi !== null && currentText !== lastAiTextRef.current) {
-      setTextBeforeAi(null);
-    }
-  }, [currentText, textBeforeAi]);
+  const describedBy = [field.description ? hintId : null, metaId, invalid ? errorId : null]
+    .filter(Boolean)
+    .join(" ");
 
-  const handleAiAction = async (actionType: AiTextAction) => {
-    if (!aiContext || aiAction) return;
-    const originalText = currentText;
-    if (!originalText.trim()) return;
-    if (originalText.length > MAX_AI_TEXT_CHARS) {
-      toast({
-        variant: "destructive",
-        title: "Text is too long for AI",
-        description: `AI actions work on up to ${MAX_AI_TEXT_CHARS} characters.`,
-      });
-      return;
-    }
-
-    setAiAction(actionType);
-    try {
-      const token = getAccessToken();
-      const response = await aiApi.improveText(token, {
-        template_id: aiContext.templateId,
-        document_id: aiContext.documentId ?? null,
-        field_name: fieldName,
-        original_text: originalText,
-        action_type: actionType,
-      });
-      lastAiTextRef.current = response.improved_text;
-      setValue(fieldName, response.improved_text, { shouldDirty: true, shouldValidate: true });
-      setTextBeforeAi(originalText);
-    } catch (err) {
-      // Never clear the user's text on failure.
-      const unavailable = err instanceof ApiError && err.status === 503;
-      // The 503 detail already starts with "AI is currently unavailable: ".
-      const detail = (err instanceof Error ? err.message : "Please try again.").replace(
-        /^AI is currently unavailable:\s*/,
-        "",
-      );
-      toast({
-        variant: "destructive",
-        title: unavailable ? "AI is currently unavailable" : "Couldn't improve the text",
-        description: detail,
-      });
-    } finally {
-      setAiAction(null);
-    }
-  };
-
-  const handleUndo = () => {
-    if (textBeforeAi === null) return;
-    setValue(fieldName, textBeforeAi, { shouldDirty: true, shouldValidate: true });
-    setTextBeforeAi(null);
-  };
-  const fieldError = errors[fieldName] as { message?: string } | undefined;
-  const icon = fieldTypeIcons[field.field_type] || <FileText className="h-4 w-4" />;
-  const typeLabel = fieldTypeLabels[field.field_type] || field.field_type;
-
-  // Parse default value for list fields
-  const getDefaultValue = () => {
-    if (field.field_type === "list" && field.default_value) {
-      try {
-        return JSON.parse(field.default_value);
-      } catch {
-        return [];
-      }
-    }
-    return field.default_value || "";
-  };
-
-  const renderInput = ({ field: controllerField }: { field: ControllerRenderProps<FormValues, string> }) => {
-    const { onChange, onBlur, value, ref, disabled } = controllerField;
-
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-      onChange(e.target.value);
-    };
-
-    const commonProps = {
-      id: fieldName,
-      onChange: handleChange,
-      onBlur,
-      ref,
-      disabled,
-      // Locked while an AI action runs so typing is not overwritten.
-      readOnly: aiAction !== null,
-      "aria-busy": aiAction !== null,
-      "aria-invalid": fieldError ? true : false,
-      "aria-describedby": fieldError ? `${fieldName}-error` : undefined,
-    };
-
-    switch (field.field_type) {
-      case "textarea":
-        return (
-          <Textarea
-            {...commonProps}
-            value={value || ""}
-            placeholder={field.example_value || ""}
-            rows={4}
-            className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-          />
-        );
-
-      case "number":
-        return (
-          <Input
-            {...commonProps}
-            type="number"
-            step="any"
-            value={value || ""}
-            placeholder={field.example_value || ""}
-            className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-          />
-        );
-
-      case "date":
-        return (
-          <Input
-            {...commonProps}
-            type="date"
-            value={value || ""}
-            className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-          />
-        );
-
-      case "email":
-        return (
-          <Input
-            {...commonProps}
-            type="email"
-            value={value || ""}
-            placeholder={field.example_value || "example@domain.com"}
-            className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-          />
-        );
-
-      case "signature":
-        return (
-          <div className="space-y-2">
-            <Input
-              {...commonProps}
-              type="text"
-              value={value || ""}
-              placeholder="Enter signature text or draw..."
-              className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-            />
-            <p className="text-xs text-slate-500">Signature drawing coming in V1.6</p>
-          </div>
-        );
-
-      default:
-        return (
-          <Input
-            {...commonProps}
-            type="text"
-            value={value || ""}
-            placeholder={field.example_value || ""}
-            className={fieldError ? "border-red-500 focus:border-red-500 focus:ring-red-500" : ""}
-          />
-        );
-    }
+  const controlProps: FieldControlProps = {
+    field,
+    rule,
+    inputId,
+    metaId,
+    describedBy,
+    invalid,
+    disabled,
+    locked: false,
   };
 
   return (
-    <div className="space-y-2">
+    <div data-field-name={name} className="min-w-0 space-y-1.5">
+      <Label htmlFor={inputId} className="block text-sm font-medium leading-snug text-slate-800">
+        {label}
+        {field.is_required && (
+          <>
+            <span className="ml-0.5 text-red-500" aria-hidden="true">*</span>
+            <span className="sr-only"> (required)</span>
+          </>
+        )}
+      </Label>
+      {field.description && (
+        <p id={hintId} className="text-xs leading-snug text-slate-500">
+          {field.description}
+        </p>
+      )}
+
       {field.field_type === "list" ? (
-        <ListField field={field} />
+        <>
+          <ListField
+            fieldName={name}
+            inputId={inputId}
+            label={label}
+            placeholder={field.example_value}
+            maxItems={rule.max}
+            invalid={invalid}
+            describedBy={describedBy}
+            disabled={disabled}
+          />
+          <span id={metaId} className="sr-only">
+            {describeValidationRule(field) ?? ""}
+          </span>
+        </>
+      ) : showAi && aiContext ? (
+        <AiFieldControl {...controlProps} aiContext={aiContext} label={label} />
       ) : (
-        <Controller
-          name={fieldName}
-          control={control}
-          defaultValue={getDefaultValue()}
-          render={renderInput}
-        />
+        <FieldControl {...controlProps} />
       )}
 
-      {showAiToolbar && (
-        <AiActionToolbar
-          onAction={handleAiAction}
-          loadingAction={aiAction}
-          originalText={currentText}
-          onUndo={textBeforeAi !== null ? handleUndo : undefined}
-        />
-      )}
-
-      {(field.description || field.example_value || field.validation_rule) && (
-        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-          <Badge variant="outline" className="gap-1 bg-slate-50 border-slate-200">
-            {icon}
-            <span>{typeLabel}</span>
-          </Badge>
-          {field.is_required && (
-            <Badge variant="default" className="bg-red-50 text-red-700 border-red-200">
-              Required
-            </Badge>
-          )}
-          {field.validation_rule && (
-            <Badge variant="outline" className="bg-amber-50 border-amber-200 text-amber-700">
-              Validation: {field.validation_rule}
-            </Badge>
-          )}
-          {field.section && (
-            <Badge variant="outline" className="bg-blue-50 border-blue-200 text-blue-700">
-              Section: {field.section}
-            </Badge>
-          )}
-          {field.description && (
-            <span className="ml-auto">{field.description}</span>
-          )}
-        </div>
-      )}
-      {fieldError && (
-        <p id={`${fieldName}-error`} className="text-sm text-red-600" role="alert">
-          {typeof fieldError === "string" ? fieldError : fieldError.message}
+      {errorMessage && (
+        <p id={errorId} className="flex items-start gap-1 text-sm text-red-600" role="alert">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          {errorMessage}
         </p>
       )}
     </div>
   );
 }
+
+interface FieldControlProps {
+  field: DynamicFieldDefinition;
+  rule: ValidationRule;
+  inputId: string;
+  metaId: string;
+  describedBy: string;
+  invalid: boolean;
+  disabled?: boolean;
+  /** Read-only while an AI request runs, so typing cannot be overwritten. */
+  locked: boolean;
+}
+
+function AiFieldControl({
+  aiContext,
+  label,
+  ...props
+}: FieldControlProps & { aiContext: AiFieldContext; label: string }) {
+  const switcher = useAiStyleSwitcher({
+    fieldName: props.field.field_name,
+    fieldLabel: label,
+    multiline: props.field.field_type === "textarea",
+    templateId: aiContext.templateId,
+    documentId: aiContext.documentId,
+  });
+  return (
+    <>
+      <FieldControl {...props} locked={switcher.isPending} />
+      <AiActionToolbar switcher={switcher} controlsId={props.inputId} disabled={props.disabled} />
+    </>
+  );
+}
+
+function FieldControl({ field, rule, inputId, metaId, describedBy, invalid, disabled, locked }: FieldControlProps) {
+  const { control } = useFormContext();
+  const type = field.field_type;
+
+  return (
+    <Controller
+      name={field.field_name}
+      control={control}
+      render={({ field: controller }) => {
+        const text = typeof controller.value === "string" ? controller.value : controller.value == null ? "" : String(controller.value);
+        const common = {
+          id: inputId,
+          name: controller.name,
+          onBlur: controller.onBlur,
+          disabled,
+          readOnly: locked,
+          "aria-busy": locked || undefined,
+          "aria-invalid": invalid || undefined,
+          "aria-describedby": describedBy || undefined,
+          "aria-required": field.is_required || undefined,
+        };
+        const stateClass = cn(
+          invalid && "border-red-500 focus-visible:ring-red-500",
+          locked && "cursor-progress bg-violet-50/50 text-slate-500",
+        );
+        const placeholder = field.example_value || undefined;
+
+        let input: JSX.Element;
+        switch (type) {
+          case "textarea":
+            input = (
+              <AutoGrowTextarea
+                {...common}
+                ref={controller.ref}
+                value={text}
+                onChange={(e) => controller.onChange(e.target.value)}
+                placeholder={placeholder}
+                className={stateClass}
+              />
+            );
+            break;
+
+          case "number":
+            input = (
+              <NumberInput
+                {...common}
+                ref={controller.ref}
+                value={text}
+                rule={rule}
+                onValueChange={controller.onChange}
+                placeholder={placeholder}
+                className={cn("tabular-nums", stateClass)}
+              />
+            );
+            break;
+
+          case "date": {
+            const isoValue = isValidIsoDate(text) ? text : "";
+            input = (
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    {...common}
+                    ref={controller.ref}
+                    type="date"
+                    value={isoValue}
+                    onChange={(e) => controller.onChange(e.target.value)}
+                    className={cn("w-full sm:w-52", stateClass)}
+                  />
+                  {!disabled && (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      onClick={() => controller.onChange(format(new Date(), "yyyy-MM-dd"))}
+                    >
+                      Today
+                    </button>
+                  )}
+                </div>
+                {isoValue ? (
+                  <p className="text-xs text-slate-500">{format(parseISO(isoValue), "EEEE, d MMMM yyyy")}</p>
+                ) : text.trim() ? (
+                  <p className="text-xs text-amber-700">
+                    The saved value “{text}” isn't a calendar date. Pick a date to replace it.
+                  </p>
+                ) : null}
+              </div>
+            );
+            break;
+          }
+
+          case "email":
+            input = (
+              <Input
+                {...common}
+                ref={controller.ref}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={text}
+                onChange={(e) => controller.onChange(e.target.value)}
+                placeholder={placeholder ?? "name@example.com"}
+                className={stateClass}
+              />
+            );
+            break;
+
+          case "signature":
+            input = (
+              <div className="rounded-md border border-dashed border-slate-300 bg-slate-50/60 p-3">
+                <Input
+                  {...common}
+                  ref={controller.ref}
+                  type="text"
+                  autoComplete="name"
+                  value={text}
+                  onChange={(e) => controller.onChange(e.target.value)}
+                  placeholder={placeholder ?? "Type your full name"}
+                  className={cn("h-12 bg-white font-serif text-xl italic", stateClass)}
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Typed signature. A drawing pad is planned for a later version.
+                </p>
+              </div>
+            );
+            break;
+
+          default:
+            input = (
+              <Input
+                {...common}
+                ref={controller.ref}
+                type="text"
+                value={text}
+                onChange={(e) => controller.onChange(e.target.value)}
+                placeholder={placeholder}
+                className={stateClass}
+              />
+            );
+        }
+
+        return (
+          <>
+            {input}
+            <FieldMeta field={field} rule={rule} text={text} metaId={metaId} />
+          </>
+        );
+      }}
+    />
+  );
+}
+
+/** Example value, rule hint and (for length-limited text) a character counter. */
+function FieldMeta({
+  field,
+  rule,
+  text,
+  metaId,
+}: {
+  field: DynamicFieldDefinition;
+  rule: ValidationRule;
+  text: string;
+  metaId: string;
+}) {
+  const ruleHint = describeValidationRule(field);
+  const showExample =
+    !!field.example_value &&
+    field.field_type !== "date" &&
+    field.field_type !== "signature" &&
+    field.example_value !== field.description;
+  const hasCounter =
+    rule.max !== undefined && ["text", "textarea", "signature"].includes(field.field_type);
+  const length = text.length;
+
+  if (!showExample && !ruleHint && !hasCounter) {
+    return <span id={metaId} className="sr-only" />;
+  }
+
+  return (
+    <div id={metaId} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-0.5 text-xs text-slate-500">
+      <span className="min-w-0 break-words">
+        {showExample && (
+          <>
+            <span className="font-medium text-slate-600">e.g.</span> {field.example_value}
+          </>
+        )}
+        {showExample && ruleHint && !hasCounter && " · "}
+        {ruleHint && !hasCounter && ruleHint}
+      </span>
+      {hasCounter && (
+        <span
+          className={cn(
+            "ml-auto shrink-0 tabular-nums",
+            length > rule.max! ? "font-medium text-red-600" : length > rule.max! * 0.9 ? "text-amber-700" : "",
+          )}
+        >
+          <span className="sr-only">Characters used: </span>
+          {length.toLocaleString()} / {rule.max!.toLocaleString()}
+          {rule.min !== undefined && length < rule.min && length > 0 && ` (min ${rule.min})`}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function assignRef<T>(ref: ForwardedRef<T>, el: T | null) {
+  if (typeof ref === "function") ref(el);
+  else if (ref) ref.current = el;
+}
+
+/** Textarea that grows with its content up to a max height, then scrolls. */
+const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, ComponentProps<typeof Textarea>>(
+  ({ className, value, ...props }, ref) => {
+    const innerRef = useRef<HTMLTextAreaElement | null>(null);
+
+    useLayoutEffect(() => {
+      const el = innerRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      // +2 for the 1px top/bottom border (border-box sizing).
+      const target = el.scrollHeight + 2;
+      el.style.height = `${Math.min(target, TEXTAREA_MAX_AUTO_HEIGHT)}px`;
+      el.style.overflowY = target > TEXTAREA_MAX_AUTO_HEIGHT ? "auto" : "hidden";
+    }, [value]);
+
+    return (
+      <Textarea
+        {...props}
+        ref={(el) => {
+          innerRef.current = el;
+          assignRef(ref, el);
+        }}
+        value={value}
+        rows={3}
+        className={cn("min-h-[88px] resize-y leading-relaxed", className)}
+      />
+    );
+  },
+);
+AutoGrowTextarea.displayName = "AutoGrowTextarea";
+
+type NumberInputProps = Omit<ComponentProps<typeof Input>, "onChange" | "value" | "type"> & {
+  value: string;
+  rule: ValidationRule;
+  onValueChange: (value: string) => void;
+};
+
+/**
+ * Numeric input kept as the exact text the user typed (no type="number":
+ * browsers report partial input like "1e" as "" there, silently losing it).
+ * ArrowUp/ArrowDown step by 1 within the min/max rule.
+ */
+const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
+  ({ value, rule, onValueChange, onKeyDown, ...props }, ref) => {
+    const step = (event: KeyboardEvent<HTMLInputElement>) => {
+      if (props.readOnly || props.disabled) return;
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      event.preventDefault();
+      const current = parseNumber(value);
+      let next = current === null ? (rule.min ?? 0) : current + (event.key === "ArrowUp" ? 1 : -1);
+      if (rule.min !== undefined) next = Math.max(rule.min, next);
+      if (rule.max !== undefined) next = Math.min(rule.max, next);
+      // Avoid float noise like 0.30000000000000004.
+      onValueChange(String(Math.round(next * 1e9) / 1e9));
+    };
+
+    return (
+      <Input
+        {...props}
+        ref={ref}
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
+        onKeyDown={(e) => {
+          step(e);
+          onKeyDown?.(e);
+        }}
+        role="spinbutton"
+        aria-valuemin={rule.min}
+        aria-valuemax={rule.max}
+        aria-valuenow={parseNumber(value) ?? undefined}
+      />
+    );
+  },
+);
+NumberInput.displayName = "NumberInput";

@@ -1,58 +1,30 @@
-import { useEffect, useState } from "react";
-import { FileText, FolderOpen, FileEdit } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
+import { FileText, FolderOpen, FileEdit, AlertCircle, ChevronRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { templatesApi, documentsApi, TemplateListItem, Document } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
+import { useMyDocuments, useMyTemplates } from "@/hooks/queries";
+import { parseServerDate } from "@/lib/dates";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const firstName = user?.full_name?.split(" ")[0] || "User";
 
-  const [myTemplates, setMyTemplates] = useState<TemplateListItem[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [myDrafts, setMyDrafts] = useState<Document[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchTemplates() {
-      const token = getAccessToken();
-      if (!token) {
-        setTemplatesLoading(false);
-        return;
-      }
-      try {
-        const data = await templatesApi.getMyTemplates(token);
-        setMyTemplates(data);
-      } catch (err) {
-        // silent fail
-      } finally {
-        setTemplatesLoading(false);
-      }
-    }
-    async function fetchDrafts() {
-      const token = getAccessToken();
-      if (!token) {
-        setDraftsLoading(false);
-        return;
-      }
-      try {
-        const data = await documentsApi.getMyDocuments(token);
-        setMyDrafts(data);
-      } catch (err) {
-        // silent fail
-      } finally {
-        setDraftsLoading(false);
-      }
-    }
-    fetchTemplates();
-    fetchDrafts();
-  }, []);
+  const { data: myTemplatesData, isPending: templatesLoading } = useMyTemplates();
+  // A failed templates request shows the empty state, as before.
+  const myTemplates = myTemplatesData ?? [];
+  const drafts = useMyDocuments();
+  const myDrafts = drafts.data ?? [];
+  // A retry after an error shows the skeleton again.
+  const draftsLoading = drafts.isPending || (drafts.isError && drafts.isFetching);
+  // A failed background refetch keeps showing the cached list.
+  const draftsError = drafts.isError && !drafts.data
+    ? drafts.error.message || "Couldn't load your drafts."
+    : null;
 
   const getCategoryColor = (category: string) => {
     switch (category.toLowerCase()) {
@@ -135,7 +107,7 @@ export function DashboardPage() {
                     {t.name}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(t.created_at))}
+                    {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(parseServerDate(t.created_at) ?? new Date())}
                   </p>
                 </div>
               </div>
@@ -165,6 +137,18 @@ export function DashboardPage() {
       );
     }
 
+    if (draftsError) {
+      return (
+        <div className="flex flex-col items-center gap-3 py-6 text-center" role="alert">
+          <AlertCircle className="h-8 w-8 text-red-400" />
+          <p className="text-sm text-slate-600">{draftsError}</p>
+          <Button variant="outline" size="sm" onClick={() => void drafts.refetch()}>
+            Retry
+          </Button>
+        </div>
+      );
+    }
+
     if (myDrafts.length === 0) {
       return (
         <EmptyState
@@ -179,33 +163,52 @@ export function DashboardPage() {
 
     const displayDrafts = myDrafts.slice(0, 5);
 
+    const describeUpdated = (value: string) => {
+      const date = parseServerDate(value);
+      if (!date) return { relative: "unknown", absolute: undefined };
+      return { relative: formatDistanceToNow(date, { addSuffix: true }), absolute: date.toLocaleString() };
+    };
+
     return (
-      <div className="flex flex-col h-full">
-        <div className="space-y-2 flex-1">
-          {displayDrafts.map(d => (
-            <div key={d.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors">
-              <div className="flex items-center gap-3 overflow-hidden">
-                <div className="h-2 w-2 rounded-full shrink-0 bg-yellow-400" title="Draft" />
-                <div className="min-w-0">
-                  <p className="font-medium text-sm text-slate-900 truncate" title={d.name || `Draft ${d.id}`}>
-                    {d.name || `Draft ${d.id}`}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Template: {d.template_name || "Unknown"} · {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(d.updated_at))}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className={getDraftStatusColor(d.status)}>
-                  {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
-                </Badge>
-                <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/documents/${d.id}/edit`); }}>
-                  Continue
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="flex h-full flex-col">
+        <ul className="flex-1 space-y-2">
+          {displayDrafts.map((d) => {
+            const title = d.name || `Draft ${d.id}`;
+            const updated = describeUpdated(d.updated_at);
+            return (
+              <li key={d.id}>
+                <Link
+                  to={`/documents/${d.id}/edit`}
+                  className="group flex items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  aria-label={`Continue editing ${title}`}
+                >
+                  <div className="h-2 w-2 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900" title={title}>
+                      {title}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-slate-400">
+                      {d.template_name || "Unknown template"} ·{" "}
+                      <span title={updated.absolute}>edited {updated.relative}</span>
+                    </p>
+                  </div>
+                  <Badge variant="secondary" className={`hidden shrink-0 sm:inline-flex ${getDraftStatusColor(d.status)}`}>
+                    {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
+                  </Badge>
+                  <span className="flex shrink-0 items-center text-sm font-medium text-slate-600 group-hover:text-slate-900">
+                    <span className="hidden sm:inline">Continue</span>
+                    <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+        {myDrafts.length > displayDrafts.length && (
+          <p className="mt-3 text-xs text-slate-500">
+            Showing the {displayDrafts.length} most recent of {myDrafts.length} drafts.
+          </p>
+        )}
       </div>
     );
   };

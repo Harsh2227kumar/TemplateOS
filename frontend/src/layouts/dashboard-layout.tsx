@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 
 export function DashboardLayout() {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -20,9 +19,9 @@ export function DashboardLayout() {
     setIsSidebarOpen(false);
   }, [location.pathname]);
 
+  // logout() clears the session and navigates to /login itself.
   const handleLogout = () => {
-    logout();
-    navigate("/login", { replace: true });
+    void logout();
   };
 
   const getPageTitle = () => {

@@ -11,6 +11,19 @@ function safeRedirectPath(path: string | undefined): string {
   return path;
 }
 
+/** 429 from POST /auth/login carries Retry-After (seconds). */
+function loginErrorMessage(caught: unknown): string {
+  if (!(caught instanceof ApiError)) return "Unable to log in. Please try again.";
+  if (caught.status === 429) {
+    const seconds = caught.retryAfterSeconds;
+    if (seconds === undefined) return "Too many attempts. Please try again later.";
+    if (seconds < 60) return `Too many attempts, try again in ${Math.max(1, Math.ceil(seconds))} seconds.`;
+    const minutes = Math.ceil(seconds / 60);
+    return `Too many attempts, try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  }
+  return caught.message;
+}
+
 export function LoginPage() {
   const { login } = useAuth();
   const location = useLocation();
@@ -29,7 +42,7 @@ export function LoginPage() {
       await login(email.trim(), password);
       navigate(safeRedirectPath(routeState?.from?.pathname), { replace: true });
     } catch (caught) {
-      setError(caught instanceof ApiError ? caught.message : "Unable to log in. Please try again.");
+      setError(loginErrorMessage(caught));
     } finally {
       setIsSubmitting(false);
     }

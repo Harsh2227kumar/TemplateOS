@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { templatesApi, TemplateResponse } from "@/lib/api";
+import { useDeleteTemplate, useTemplate } from "@/hooks/queries";
+import { parseRouteId } from "@/lib/route-params";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,9 +16,23 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Download, Eraser, FileText, ListChecks, ScanSearch, Settings2, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Building,
+  Download,
+  Eraser,
+  Eye,
+  FileText,
+  ListChecks,
+  ScanSearch,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+  Users,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { getAccessToken } from "@/lib/auth-token";
+import { ManageAccessDialog } from "@/components/templates/ManageAccessDialog";
+import { describeRoles } from "@/components/templates/AudienceFields";
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
   uploaded: "bg-slate-100 text-slate-700",
@@ -62,35 +77,30 @@ export function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [template, setTemplate] = useState<TemplateResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<{ message: string; status?: number } | null>(null);
+  const routeId = parseRouteId(id);
+  // A non-numeric id never reaches the API; treat it like a missing template.
+  const invalidId = routeId === null;
+  const templateQuery = useTemplate(routeId ?? 0);
+  const template = templateQuery.data ?? null;
+  const deleteMutation = useDeleteTemplate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
+  const isDeleting = deleteMutation.isPending;
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [accessOpen, setAccessOpen] = useState(false);
 
-  useEffect(() => {
-    fetchTemplate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const fetchTemplate = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const token = getAccessToken();
-      const data = await templatesApi.getTemplateDetail(token, Number(id));
-      setTemplate(data);
-    } catch (err: any) {
-      setError({
-        message: err.message || "Failed to load template",
-        status: err.status,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Loading covers the first fetch and a retry after an error.
+  const isLoading =
+    !invalidId && (templateQuery.isPending || (templateQuery.isError && templateQuery.isFetching));
+  const error = invalidId
+    ? { message: "Template not found", status: 404 as number | undefined }
+    : templateQuery.isError && !template
+      ? {
+          message: templateQuery.error.message || "Failed to load template",
+          status: templateQuery.error.status as number | undefined,
+        }
+      : null;
+  const fetchTemplate = () => void templateQuery.refetch();
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -153,9 +163,12 @@ export function TemplateDetailPage() {
 
   if (!template) return null;
 
-  const isOwner = template.uploaded_by === user?.id;
+  // The server computes can_manage (owner, super admin, or an admin of the
+  // template's organization/department); modifying actions follow it.
+  const canManage = template.can_manage;
   const isSuperAdmin = user?.role === "super_admin";
-  const configAction = isOwner ? getConfigAction(template.id, template.status) : null;
+  const configAction = canManage ? getConfigAction(template.id, template.status) : null;
+  const isRestricted = Boolean(template.allowed_roles?.length);
   const canSubmitDelete = confirmText.trim().toLowerCase() === "confirm" && !isDeleting;
 
   const openDeleteDialog = () => {
@@ -165,17 +178,14 @@ export function TemplateDetailPage() {
   };
 
   const handleDelete = async () => {
-    setIsDeleting(true);
+    if (isDeleting) return;
     setDeleteError(null);
     try {
-      const token = getAccessToken();
-      await templatesApi.deleteTemplate(token, template.id);
+      await deleteMutation.mutateAsync(template.id);
       setDeleteOpen(false);
       navigate("/templates");
     } catch (err: any) {
       setDeleteError(err.message || "Failed to delete the template. Please try again.");
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -196,6 +206,12 @@ export function TemplateDetailPage() {
           <Badge variant="outline" className="bg-slate-50">
             Visibility: <span className="ml-1 capitalize">{template.visibility}</span>
           </Badge>
+          {!canManage && (
+            <Badge variant="outline" className="gap-1 border-transparent bg-slate-200 text-slate-700">
+              <Eye className="h-3 w-3" />
+              View only
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -236,6 +252,62 @@ export function TemplateDetailPage() {
         </div>
       </div>
 
+      <div className="rounded-xl border p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">Audience</h2>
+            <p className="text-sm text-slate-500">Who can find and use this template.</p>
+          </div>
+          {canManage && (
+            <Button variant="outline" size="sm" className="gap-2" onClick={() => setAccessOpen(true)}>
+              <ShieldCheck className="h-4 w-4" />
+              Manage access
+            </Button>
+          )}
+        </div>
+        <dl className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Published to</dt>
+            <dd className="mt-1 capitalize text-slate-900">{template.visibility}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Scope</dt>
+            <dd className="mt-1 break-words text-slate-900">
+              {template.scope_department || template.scope_organization ? (
+                <span className="flex flex-col gap-1">
+                  {template.scope_organization && (
+                    <span className="flex items-center gap-1.5">
+                      <Building className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                      {template.scope_organization}
+                    </span>
+                  )}
+                  {template.scope_department && (
+                    <span className="flex items-center gap-1.5">
+                      <Users className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                      {template.scope_department}
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-slate-500">—</span>
+              )}
+            </dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-sm font-medium text-slate-500">Who can use it</dt>
+            <dd className={cn("mt-1 text-slate-900", isRestricted && "font-medium text-amber-800")}>
+              {template.visibility === "private"
+                ? "Only the owner"
+                : template.visibility === "group"
+                  ? "Users with the uploader's role"
+                  : isRestricted
+                    ? `Only: ${describeRoles(template.allowed_roles)}`
+                    : "Everyone in scope"}
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       <div className="flex flex-wrap gap-4 pt-4 border-t">
         {(template.status === "field_configured" || template.status === "active") && (
           <Button
@@ -246,7 +318,7 @@ export function TemplateDetailPage() {
             Use This Template
           </Button>
         )}
-        {isOwner && configAction && (
+        {canManage && configAction && (
           <Button
             variant="outline"
             className="gap-2"
@@ -256,7 +328,7 @@ export function TemplateDetailPage() {
             {configAction.label}
           </Button>
         )}
-        {isOwner && (
+        {canManage && (
           <Button
             variant="outline"
             className="gap-2"
@@ -282,6 +354,15 @@ export function TemplateDetailPage() {
           </Button>
         )}
       </div>
+
+      {canManage && (
+        <ManageAccessDialog
+          template={template}
+          role={user?.role}
+          open={accessOpen}
+          onOpenChange={setAccessOpen}
+        />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={(open) => !isDeleting && setDeleteOpen(open)}>
         <DialogContent>

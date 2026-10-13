@@ -1,7 +1,8 @@
 import { TemplateListItem } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Lock, Globe, Building, Users, UsersRound } from "lucide-react";
+import { Lock, Globe, Building, Users, UsersRound, ShieldCheck } from "lucide-react";
+import { describeRoles } from "@/components/templates/AudienceFields";
 
 interface TemplateCardProps {
   template: TemplateListItem;
@@ -77,6 +78,43 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
               {template.visibility}
             </div>
           </div>
+
+          {Boolean(template.scope_organization || template.scope_department || template.allowed_roles?.length) && (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              {template.visibility === "organization" && template.scope_organization && (
+                <Badge
+                  variant="outline"
+                  className="max-w-full gap-1 border-indigo-200 bg-indigo-50 font-medium text-indigo-800"
+                  title={`Organization: ${template.scope_organization}`}
+                >
+                  <Building className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{template.scope_organization}</span>
+                </Badge>
+              )}
+              {template.visibility === "department" && template.scope_department && (
+                <Badge
+                  variant="outline"
+                  className="max-w-full gap-1 border-teal-200 bg-teal-50 font-medium text-teal-800"
+                  title={`Department: ${template.scope_department}${
+                    template.scope_organization ? ` (${template.scope_organization})` : ""
+                  }`}
+                >
+                  <Users className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{template.scope_department}</span>
+                </Badge>
+              )}
+              {template.allowed_roles?.length ? (
+                <Badge
+                  variant="outline"
+                  className="max-w-full gap-1 border-amber-200 bg-amber-50 font-medium text-amber-800"
+                  title={`Only: ${describeRoles(template.allowed_roles)}`}
+                >
+                  <ShieldCheck className="h-3 w-3 shrink-0" />
+                  <span className="truncate">Restricted roles</span>
+                </Badge>
+              ) : null}
+            </div>
+          )}
           
           <div className="text-xs text-slate-400">
             Uploaded on {formattedDate}
