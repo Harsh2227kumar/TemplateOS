@@ -7,12 +7,19 @@ Endpoints:
 - GET /documents
 - GET /documents/{document_id}
 - GET /documents/{document_id}/values
+
+V1.6 generation (owner only):
+- POST /documents/{document_id}/generate      render DOCX (+ PDF if configured)
+- POST /documents/{document_id}/generate-pdf  retry the PDF conversion only
+- GET  /documents/{document_id}/download?format=docx|pdf
 """
 
 import logging
 from datetime import datetime
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
@@ -22,21 +29,53 @@ from app.crud.document_crud import (
     get_documents_by_user,
 )
 from app.crud.document_value_crud import get_values_by_document, upsert_values
+from app.crud.generated_file_crud import (
+    get_generated_file,
+    get_generated_files_for_documents,
+)
 from app.crud.template_crud import get_template_by_id
 from app.crud.template_field_crud import get_fields_by_template
+from app.models.document import Document
 from app.models.template import Template
+from app.models.user import User
 from app.schemas.document import (
     DocumentCreate,
     DocumentListItem,
     DocumentRead,
+    DocumentValidationErrorResponse,
     DocumentValuesBulkRead,
     DocumentValuesBulkUpsert,
+    GenerateDocumentResponse,
 )
+from app.services import document_generation
 from app.services.document_validator import validate_document_values
+from app.services.storage_service import StorageError, storage_service
 from app.services.template_access import user_can_view_template
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+MEDIA_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pdf": "application/pdf",
+}
+
+
+def _get_owned_document(
+    db, document_id: int, user: User, include_values: bool = False
+) -> Document:
+    """404 when missing, 403 when the current user is not the owner."""
+    document = get_document_by_id(db, document_id, include_values=include_values)
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
+    if document.created_by != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only access your own drafts",
+        )
+    return document
 
 
 @router.post(
@@ -216,6 +255,7 @@ def list_user_documents(
         .all()
     )
     template_map = {t.id: t.name for t in templates}
+    generated_map = get_generated_files_for_documents(db, [d.id for d in documents])
 
     return [
         DocumentListItem(
@@ -226,6 +266,7 @@ def list_user_documents(
             status=d.status,
             created_at=d.created_at,
             updated_at=d.updated_at,
+            generated=document_generation.generated_info(d, generated_map.get(d.id)),
         )
         for d in documents
     ]
@@ -270,6 +311,9 @@ def get_document(
         status=document.status,
         created_at=document.created_at,
         updated_at=document.updated_at,
+        generated=document_generation.generated_info(
+            document, get_generated_file(db, document.id)
+        ),
         values=[
             {
                 "id": v.id,
@@ -330,4 +374,107 @@ def get_document_values(
             }
             for v in values
         ],
+    )
+
+
+# ── V1.6 generation ──────────────────────────────────────────────
+
+
+@router.post(
+    "/{document_id}/generate",
+    response_model=GenerateDocumentResponse,
+    responses={422: {"model": DocumentValidationErrorResponse}},
+    summary="Generate the DOCX (and PDF when configured) from the saved values",
+)
+def generate_document_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    document_id: int,
+):
+    """
+    Render the template's processed DOCX with the draft's SAVED values.
+
+    - Owner only (404 / 403 like the other document endpoints)
+    - 422 with [{field_name, error}] when required values are missing or
+      invalid (same validator and shape as saving); 422 with a string detail
+      when the template itself cannot be rendered
+    - 409 when the template file is missing
+    - Regenerating replaces the previous DOCX/PDF
+    - A PDF failure never fails this call: see pdf_status / pdf_error
+    - Sets the document status to "generated"
+    """
+    document = _get_owned_document(db, document_id, current_user, include_values=True)
+    template = get_template_by_id(db, document.template_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Template not found"
+        )
+    record = document_generation.generate_document(db, document, template)
+    return document_generation.generation_response(document, record)
+
+
+@router.post(
+    "/{document_id}/generate-pdf",
+    response_model=GenerateDocumentResponse,
+    summary="Retry the PDF conversion of the generated DOCX",
+)
+def retry_pdf_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    document_id: int,
+):
+    """
+    Convert the last generated DOCX to PDF again (owner only). 404 when the
+    document has not been generated. Always 200 otherwise: the outcome is
+    in pdf_status (ok / failed / not_configured).
+    """
+    document = _get_owned_document(db, document_id, current_user)
+    record = document_generation.retry_pdf(db, document)
+    return document_generation.generation_response(document, record)
+
+
+@router.get(
+    "/{document_id}/download",
+    response_class=FileResponse,
+    summary="Download the generated DOCX or PDF",
+)
+def download_document(
+    db: DbSession,
+    current_user: CurrentUser,
+    document_id: int,
+    format: Literal["docx", "pdf"] = Query("docx"),
+):
+    """
+    Stream the generated file as an attachment named after the draft.
+    404 when the document has not been generated; 409 when the PDF is not
+    available (failed / not configured) or the stored file is missing.
+    """
+    document = _get_owned_document(db, document_id, current_user)
+    record = get_generated_file(db, document.id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document has not been generated yet",
+        )
+    relative_path = record.docx_path if format == "docx" else record.pdf_path
+    if not relative_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The PDF is not available for this document",
+        )
+    try:
+        path = storage_service.file_path(relative_path)
+    except StorageError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The generated file is missing; generate the document again",
+        ) from None
+    filename = document_generation.download_filename(document, format)
+    return FileResponse(
+        path,
+        media_type=MEDIA_TYPES[format],
+        headers={
+            "Content-Disposition": document_generation.content_disposition(filename),
+            "Cache-Control": "no-store",
+        },
     )

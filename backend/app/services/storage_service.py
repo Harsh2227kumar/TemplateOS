@@ -88,6 +88,13 @@ class LocalStorageService:
             raise StoredFileNotFoundError(f"Stored file not found: {relative_path}")
         return file_path.read_bytes()
 
+    def file_path(self, relative_path: str | Path) -> Path:
+        """Absolute path of an existing stored file (for streaming responses)."""
+        file_path = self._resolve_relative_path(relative_path)
+        if not file_path.is_file():
+            raise StoredFileNotFoundError(f"Stored file not found: {relative_path}")
+        return file_path
+
     def delete_file(self, relative_path: str | Path) -> bool:
         file_path = self._resolve_relative_path(relative_path)
         if not file_path.exists():

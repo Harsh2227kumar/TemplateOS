@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from app.models.template import Template
     from app.models.user import User
     from app.models.document_value import DocumentValue
+    from app.models.generated_file import GeneratedFile
 
 DOCUMENT_STATUSES = ("draft", "generated", "submitted", "approved", "rejected", "final")
 
@@ -71,6 +72,14 @@ class Document(Base):
     creator: Mapped["User"] = relationship("User", back_populates="documents")
     values: Mapped[list["DocumentValue"]] = relationship(
         "DocumentValue", back_populates="document", cascade="all, delete-orphan"
+    )
+    # V1.6: latest generated DOCX/PDF (1:1). The DB FK is also ON DELETE
+    # CASCADE; stored files are removed by app.services.generated_file_cleanup.
+    generated_file: Mapped["GeneratedFile | None"] = relationship(
+        "GeneratedFile",
+        back_populates="document",
+        uselist=False,
+        cascade="all, delete-orphan",
     )
 
     @validates("status")
