@@ -6,7 +6,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
+from app.models.organization import Department, Organization
 from app.models.user import USER_ROLES, User
+from app.services.org_directory import (
+    clean_name,
+    create_department,
+    create_organization,
+    find_department_by_name,
+    find_organization_by_name,
+    set_user_membership,
+)
 
 
 @dataclass(frozen=True)
@@ -134,6 +143,22 @@ def build_demo_user_seeds(values: Mapping[str, str | None]) -> tuple[DemoUserSee
     return tuple(seeds)
 
 
+def _get_or_create_organization(db: Session, name: str | None) -> Organization | None:
+    if clean_name(name) is None:
+        return None
+    return find_organization_by_name(db, name) or create_organization(db, name)
+
+
+def _get_or_create_department(
+    db: Session, organization: Organization, name: str | None
+) -> Department | None:
+    if clean_name(name) is None:
+        return None
+    return find_department_by_name(db, organization.id, name) or create_department(
+        db, organization, name
+    )
+
+
 def seed_demo_users(db: Session, seeds: Sequence[DemoUserSeed]) -> list[User]:
     seeded_users: list[User] = []
     for seed in seeds:
@@ -148,8 +173,16 @@ def seed_demo_users(db: Session, seeds: Sequence[DemoUserSeed]) -> list[User]:
 
         user.full_name = seed.full_name.strip()
         user.role = seed.role
-        user.department = seed.department
-        user.organization = seed.organization
+        organization = _get_or_create_organization(db, seed.organization)
+        department = (
+            _get_or_create_department(db, organization, seed.department)
+            if organization is not None
+            else None
+        )
+        set_user_membership(user, organization, department)
+        if organization is None:
+            # No organization to hang it on: keep the legacy string only.
+            user.department = clean_name(seed.department)
         user.job_title = seed.job_title
         user.phone = seed.phone
         user.avatar_url = seed.avatar_url
