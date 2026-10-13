@@ -168,6 +168,8 @@ export interface TemplateField {
   section: string | null;
   ai_enabled: boolean;
   display_order: number;
+  /** Provenance: detected | cleaned | manual | ai. */
+  source?: string;
   created_at: string;
   updated_at: string;
 }
@@ -190,6 +192,17 @@ export interface PlaceholderDetectionResponse {
     invalid_count: number;
     duplicate_count: number;
   };
+  /** "processed" when the cleaned copy was scanned. */
+  source_file?: "original" | "processed";
+  /** Keys created by this run (non-force re-runs only add new keys). */
+  added_fields?: string[];
+  /** Fields whose placeholder is no longer in the scanned document. */
+  stale_fields?: string[];
+}
+
+export interface PlaceholderFix {
+  raw: string;
+  key: string;
 }
 
 // --- V1.3 Phase 3: field metadata editor ---
@@ -198,7 +211,7 @@ export interface TemplateFieldUpsert {
   id?: number;
   field_name: string;
   field_label?: string;
-  field_type: string;
+  field_type?: string;
   default_value?: string;
   is_required: boolean;
   description?: string;
@@ -217,7 +230,7 @@ export interface FieldSyncPayload {
 
 export interface DocSegment {
   index: number;
-  location: "body" | "table" | "header" | "footer";
+  location: "body" | "table" | "header" | "footer" | "textbox";
   text: string;
 }
 
@@ -225,15 +238,74 @@ export interface TemplateContent {
   template_id: number;
   segments: DocSegment[];
   has_processed: boolean;
+  source?: "original" | "processed";
+}
+
+/** Exact spot in the ORIGINAL document (from /clean-suggestions). */
+export interface CleanAnchor {
+  paragraph_id: number;
+  start: number;
+  end: number;
+  action: "replace" | "insert" | "list";
+  paragraph_ids?: number[];
 }
 
 export interface PlaceholderReplacement {
+  /** Text to replace; may be empty for an anchored insert. */
   sample_text: string;
   placeholder_key: string;
   field_label?: string;
   field_type?: string;
   section?: string;
   segment_index?: number;
+  anchor?: CleanAnchor;
+  example_value?: string;
+  validation_rule?: string;
+  is_required?: boolean;
+  ai_enabled?: boolean;
+}
+
+export type SuggestionGroup =
+  | "fixes"
+  | "lists"
+  | "tables"
+  | "blanks"
+  | "brackets"
+  | "empty_values"
+  | "filled_values"
+  | "detected_values";
+
+export interface CleanSuggestion {
+  id: string;
+  kind: string;
+  group: SuggestionGroup;
+  placeholder_key: string;
+  field_label: string;
+  field_type: string;
+  validation_rule: string | null;
+  is_required: boolean;
+  ai_enabled: boolean;
+  section: string | null;
+  example_value: string | null;
+  confidence: number;
+  high_confidence: boolean;
+  reason: string;
+  sample_text: string;
+  location: DocSegment["location"];
+  shared_key_count: number;
+  anchor: CleanAnchor;
+  context: { before: string; match: string; after: string; paragraph_text: string };
+}
+
+export interface CleanSuggestionsResponse {
+  template_id: number;
+  source: "original";
+  has_processed: boolean;
+  suggestion_count: number;
+  high_confidence_count: number;
+  high_confidence_threshold: number;
+  existing_placeholders: string[];
+  suggestions: CleanSuggestion[];
 }
 
 export interface ReplacementResult {
@@ -250,10 +322,23 @@ export interface CleanResponse {
   processed_file_path: string;
   created_fields: TemplateField[];
   results: ReplacementResult[];
-  warnings: {
-    unmatched: string[];
-    invalid_keys: string[];
-  };
+  warnings: CleanWarnings;
+  detected_keys?: string[];
+}
+
+export interface CleanWarnings {
+  unmatched: string[];
+  invalid_keys: string[];
+  stale_fields?: string[];
+  render_error?: string | null;
+}
+
+export interface CleanPreviewResponse {
+  template_id: number;
+  segments: DocSegment[];
+  results: ReplacementResult[];
+  warnings: CleanWarnings;
+  detected_keys: string[];
 }
 
 export interface CleanTemplatePayload {
@@ -394,8 +479,41 @@ export const templatesApi = {
     );
   },
 
-  getContent: async (token: string, id: number): Promise<TemplateContent> => {
-    return request<TemplateContent>(`/templates/${id}/content`, {}, token);
+  getContent: async (
+    token: string,
+    id: number,
+    source: "original" | "processed" = "original",
+  ): Promise<TemplateContent> => {
+    const query = source === "processed" ? "?source=processed" : "";
+    return request<TemplateContent>(`/templates/${id}/content${query}`, {}, token);
+  },
+
+  getCleanSuggestions: async (token: string, id: number): Promise<CleanSuggestionsResponse> => {
+    return request<CleanSuggestionsResponse>(`/templates/${id}/clean-suggestions`, {}, token);
+  },
+
+  previewClean: async (
+    token: string,
+    id: number,
+    payload: CleanTemplatePayload,
+  ): Promise<CleanPreviewResponse> => {
+    return request<CleanPreviewResponse>(
+      `/templates/${id}/clean-preview`,
+      { method: "POST", body: JSON.stringify(payload) },
+      token,
+    );
+  },
+
+  fixPlaceholders: async (
+    token: string,
+    id: number,
+    fixes: PlaceholderFix[],
+  ): Promise<PlaceholderDetectionResponse> => {
+    return request<PlaceholderDetectionResponse>(
+      `/templates/${id}/fix-placeholders`,
+      { method: "POST", body: JSON.stringify({ fixes }) },
+      token,
+    );
   },
 
   cleanTemplate: async (
