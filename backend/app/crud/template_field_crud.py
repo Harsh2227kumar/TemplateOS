@@ -29,6 +29,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.template_field import TemplateField
+from app.services.field_inference import infer_field_meta
 from app.schemas.template_field import (
     TemplateFieldCreate,
     TemplateFieldUpdate,
@@ -284,12 +285,26 @@ def sync_fields(
                 db.delete(field)
         db.flush()
 
+        # Two-phase rename: park every renamed field on a unique temporary
+        # key first, so swaps/chains (x->y, y->z) never trip the unique
+        # constraint mid-flush. Final names are unique (checked above).
+        renamed = [
+            item
+            for item in items
+            if item.id is not None and by_id[item.id].field_name != item.field_name
+        ]
+        for item in renamed:
+            by_id[item.id].field_name = f"__renaming_{item.id}"
+        if renamed:
+            db.flush()
+
         for index, item in enumerate(items):
             if item.id is not None:
                 field = by_id[item.id]
                 payload = item.model_dump(
                     exclude_unset=True, exclude={"id", "display_order"}
                 )
+                payload["field_name"] = item.field_name
                 for key, value in payload.items():
                     setattr(field, key, value)
                 field.display_order = index
@@ -298,6 +313,15 @@ def sync_fields(
                     exclude={"id", "display_order"}, exclude_none=True
                 )
                 payload.setdefault("source", "manual")
+                if "field_type" not in payload or "field_label" not in payload:
+                    # Smart defaults for fields added without a type/label.
+                    meta = infer_field_meta(
+                        item.field_name,
+                        label=item.field_label,
+                        value=item.example_value,
+                    )
+                    payload.setdefault("field_type", meta.field_type)
+                    payload.setdefault("field_label", meta.field_label)
                 db.add(
                     TemplateField(
                         template_id=template_id,
@@ -312,3 +336,20 @@ def sync_fields(
         raise
 
     return get_fields_by_template(db, template_id)
+
+
+def move_field_to(
+    db: Session, template_id: int, field_id: int, position: int
+) -> list[TemplateField]:
+    """
+    Move one field to `position` (clamped to 0..n-1), shifting the others —
+    "insert at position" semantics for explicit display_order on create and
+    update. Leaves display_order contiguous 0..n-1.
+    """
+    ordered = [field.id for field in get_fields_by_template(db, template_id)]
+    if field_id not in ordered:
+        raise ValueError(f"Field id {field_id} does not belong to template {template_id}")
+    ordered.remove(field_id)
+    position = max(0, min(position, len(ordered)))
+    ordered.insert(position, field_id)
+    return reorder_fields(db, template_id, ordered)

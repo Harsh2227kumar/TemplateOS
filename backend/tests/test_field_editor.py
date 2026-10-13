@@ -391,29 +391,42 @@ def test_sync_fields_rejects_id_from_another_template(db):
     ]
 
 
-def test_sync_fields_rolls_back_on_integrity_error(db):
-    """A cross-item rename collision fails at commit: nothing is written."""
-    template = _make_template(db, name="Sync Rollback")
+def test_sync_fields_rename_chain_uses_two_phase_rename(db):
+    """x -> y while y -> z: no transient unique-key collision any more."""
+    template = _make_template(db, name="Sync Rename Chain")
     x = _make_field(db, template.id, "x")
     y = _make_field(db, template.id, "y")
 
-    # Renaming x -> y collides with y (y is kept, renamed to z in the same
-    # flush) -> IntegrityError -> full rollback.
-    with pytest.raises(IntegrityError):
+    fields = sync_fields(
+        db,
+        template.id,
+        [
+            TemplateFieldUpsert(id=x.id, field_name="y"),
+            TemplateFieldUpsert(id=y.id, field_name="z"),
+        ],
+    )
+    assert [(f.id, f.field_name) for f in fields] == [(x.id, "y"), (y.id, "z")]
+
+
+def test_sync_fields_rolls_back_on_error(db):
+    """Any failure inside the sync leaves the previous state untouched."""
+    template = _make_template(db, name="Sync Rollback")
+    x = _make_field(db, template.id, "x")
+    _make_field(db, template.id, "y")
+
+    with pytest.raises(ValueError):
         sync_fields(
             db,
             template.id,
             [
-                TemplateFieldUpsert(id=x.id, field_name="y"),
-                TemplateFieldUpsert(id=y.id, field_name="z"),
+                TemplateFieldUpsert(id=x.id, field_name="renamed"),
+                TemplateFieldUpsert(field_name="renamed"),
             ],
         )
 
     fields = get_fields_by_template(db, template.id)
     assert [f.field_name for f in fields] == ["x", "y"]
     assert [f.display_order for f in fields] == [0, 1]
-    assert get_field_by_id(db, x.id) is not None
-    assert get_field_by_id(db, y.id) is not None
 
 
 # ── 3. ORM-level type validation ──────────────────────────────────

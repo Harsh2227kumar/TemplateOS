@@ -1,74 +1,57 @@
-import asyncio
+"""
+Template core routes: list / library / access-options / get / access /
+delete / field list / upload.
+
+Router modules under the /templates prefix (included in this order by
+app/api/v1/api.py, which preserves the original route order):
+  templates             -> this module (static /library and /access-options
+                           are declared BEFORE /{template_id})
+  template_placeholders -> detect-placeholders, fix-placeholders
+  template_cleaning     -> content, clean-suggestions, clean-preview, clean
+  template_ai           -> suggest-fields
+  template_fields       -> field editor (create / reorder / update / delete / sync)
+Shared helpers live in _template_common.
+"""
+
 import logging
 import zipfile
 from io import BytesIO
-from typing import Annotated
 
 from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
-from app.core.config import settings
-from app.services import ai_service, docx_parser
-from app.services.ai_service import AiUnavailableError
-from app.services.docx_cleaner import (
-    apply_replacements_with_results,
-    get_renderable_path,
+from app.api.v1.endpoints._template_common import require_manage
+from app.services.storage_service import StorageError, storage_service
+from app.services.template_access import (
+    ASSIGNABLE_ROLES,
+    DEPARTMENT_PUBLISHERS,
+    ORG_PUBLISHERS,
+    ROLE_LABELS,
+    PublishRuleError,
+    can_manage,
+    clean_scope,
+    normalize_scope,
+    parse_roles_csv,
+    resolve_publish_access,
+    user_can_view_template,
 )
-from app.services.storage_service import (
-    StorageError,
-    StoredFileNotFoundError,
-    storage_service,
-)
-from app.services.template_access import user_can_view_template
-from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.template_crud import (
-    advance_status,
     create_template,
     get_templates_by_user,
     get_template_by_id,
     get_library_templates,
-    set_processed_path,
 )
-from app.crud.template_field_crud import (
-    append_field,
-    bulk_create_fields,
-    create_field,
-    delete_field,
-    delete_fields_by_template,
-    field_exists,
-    get_field_by_id,
-    get_fields_by_template,
-    reorder_fields,
-    sync_fields,
-    update_field,
-)
+from app.crud.template_field_crud import get_fields_by_template
 from app.schemas.template import (
+    TemplateAccessOptions,
+    TemplateAccessUpdate,
     TemplateCreate,
     TemplateResponse,
     TemplateListItem,
     TemplateLibraryResponse,
 )
-from app.schemas.ai import SuggestFieldsResponse
-from app.schemas.template_field import (
-    DetectionSummary,
-    DetectionWarnings,
-    DuplicateFieldWarning,
-    FieldReorderRequest,
-    FieldSyncRequest,
-    InvalidFieldNameWarning,
-    PlaceholderDetectionResponse,
-    TemplateFieldCreate,
-    TemplateFieldRead,
-    TemplateFieldUpdate,
-)
-from app.schemas.cleaning import (
-    CleanTemplateRequest,
-    CleanTemplateResponse,
-    CleanWarnings,
-    ReplacementResult,
-)
+from app.schemas.template_field import TemplateFieldRead
 from app.models.template import Template
 from app.models.template_field import TemplateField
 from app.models.user import User
@@ -114,6 +97,22 @@ def _docx_content_error(content: bytes) -> str | None:
     if sum(entry.file_size for entry in entries) > MAX_UNCOMPRESSED_DOCX_BYTES:
         return "DOCX content is too large"
     return None
+
+
+def _template_response(template: Template, user: User) -> TemplateResponse:
+    """TemplateResponse with `can_manage` computed for the requesting user."""
+    response = TemplateResponse.model_validate(template)
+    response.can_manage = can_manage(user, template)
+    return response
+
+
+def _list_item(template: Template, user: User) -> TemplateListItem:
+    item = TemplateListItem.model_validate(template)
+    item.can_manage = can_manage(user, template)
+    return item
+
+def _publish_error(exc: PublishRuleError) -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
 
 
 def validate_filter_param(
@@ -166,7 +165,7 @@ def list_library_templates(
     )
 
     return {
-        "templates": templates,
+        "templates": [_list_item(template, current_user) for template in templates],
         "total": total,
         "page": page,
         "limit": limit,
@@ -177,9 +176,68 @@ def list_library_templates(
 def list_my_templates(
     current_user: CurrentUser,
     db: DbSession,
-) -> list[Template]:
+) -> list[TemplateListItem]:
     """Return all templates uploaded by the current user, newest first."""
-    return get_templates_by_user(db, current_user.id)
+    return [
+        _list_item(template, current_user)
+        for template in get_templates_by_user(db, current_user.id)
+    ]
+
+
+# Declared BEFORE /{template_id} so "access-options" is not parsed as an id.
+@router.get("/access-options", response_model=TemplateAccessOptions)
+def get_access_options(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TemplateAccessOptions:
+    """
+    Choices for the upload / manage-access audience pickers.
+
+    - roles: every role a template can be restricted to (no super_admin).
+    - organizations / departments: distinct non-empty values from user
+      profiles. super_admin gets all of them; everyone else only sees their
+      own organization (they can never publish anywhere else).
+    - can_publish: which scoped visibilities the current user may use.
+    - defaults: the current user's own organization / department.
+    """
+    rows = db.execute(select(User.organization, User.department).distinct()).all()
+    own_org = normalize_scope(current_user.organization)
+    see_all = current_user.role == "super_admin"
+
+    organizations: dict[str, str] = {}
+    departments: dict[tuple[str, str], dict] = {}
+    for organization, department in rows:
+        org = clean_scope(organization)
+        dept = clean_scope(department)
+        if not see_all and normalize_scope(org) != own_org:
+            continue
+        if org is not None:
+            organizations.setdefault(normalize_scope(org), org)
+        if dept is not None:
+            departments.setdefault(
+                (normalize_scope(org), normalize_scope(dept)),
+                {"organization": org, "department": dept},
+            )
+
+    return TemplateAccessOptions(
+        roles=[
+            {"value": role, "label": ROLE_LABELS.get(role, role)}
+            for role in ASSIGNABLE_ROLES
+        ],
+        organizations=sorted(organizations.values(), key=str.lower),
+        departments=sorted(
+            departments.values(),
+            key=lambda d: ((d["organization"] or "").lower(), d["department"].lower()),
+        ),
+        can_publish={
+            "organization": current_user.role in ORG_PUBLISHERS,
+            "department": current_user.role in DEPARTMENT_PUBLISHERS,
+        },
+        defaults={
+            "organization": clean_scope(current_user.organization),
+            "department": clean_scope(current_user.department),
+        },
+    )
 
 
 @router.get("/{template_id}", response_model=TemplateResponse)
@@ -187,8 +245,8 @@ def get_template(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
-) -> Template:
-    """Return a single template by ID. Accessible if user owns it OR it is public."""
+) -> TemplateResponse:
+    """Return a single template by ID if the user may view it (template_access)."""
     template = get_template_by_id(db, template_id)
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
@@ -196,11 +254,53 @@ def get_template(
         raise HTTPException(
             status_code=403, detail="You do not have access to this template"
         )
-    return template
+    return _template_response(template, current_user)
+
+
+@router.patch("/{template_id}/access", response_model=TemplateResponse)
+def update_template_access(
+    template_id: int,
+    request: TemplateAccessUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> TemplateResponse:
+    """
+    Change who can see / use a template: visibility, scope and role
+    restriction. Requires can_manage; the publish rules are applied for the
+    ACTING user (e.g. an org_admin can only scope to their own organization).
+    """
+    template = get_template_by_id(db, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    require_manage(template, current_user, "change access to")
+
+    try:
+        resolved = resolve_publish_access(
+            current_user,
+            request.visibility,
+            request.scope_organization,
+            request.scope_department,
+            request.allowed_roles,
+        )
+    except PublishRuleError as exc:
+        raise _publish_error(exc) from None
+
+    template.visibility = resolved.visibility
+    template.scope_organization = resolved.scope_organization
+    template.scope_department = resolved.scope_department
+    template.allowed_roles = resolved.allowed_roles
+    db.commit()
+    db.refresh(template)
+    logger.info(
+        f"Access for template {template_id} set to {resolved.visibility} "
+        f"(org={resolved.scope_organization!r}, dept={resolved.scope_department!r}, "
+        f"roles={resolved.allowed_roles}) by user {current_user.id}"
+    )
+    return _template_response(template, current_user)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_template(
+def delete_template(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
@@ -208,7 +308,9 @@ async def delete_template(
     """
     Permanently delete a template: the DB record (fields cascade) and every
     stored file (original + processed). Super-admin only — a destructive,
-    irreversible action, so even the template owner cannot perform it.
+    irreversible action that also removes every user's documents, so it is
+    deliberately NOT part of can_manage: owners and org/department admins
+    cannot delete (they can make a template private instead).
     """
     if current_user.role != "super_admin":
         raise HTTPException(
@@ -231,7 +333,7 @@ async def delete_template(
         if not relative_path:
             continue
         try:
-            await asyncio.to_thread(storage_service.delete_file, relative_path)
+            storage_service.delete_file(relative_path)
         except StorageError:
             logger.warning(
                 f"Template {template_id} deleted from DB but file could not be "
@@ -272,15 +374,20 @@ def get_template_fields(
     response_model=TemplateResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_template(
+def upload_template(
     current_user: CurrentUser,
     db: DbSession,
     file: UploadFile = File(...),
-    name: str = Form(...),
+    name: str = Form(default=""),
     description: str | None = Form(default=None),
     category: str = Form(...),
     visibility: str = Form(...),
-) -> Template:
+    scope_organization: str | None = Form(default=None),
+    scope_department: str | None = Form(default=None),
+    allowed_roles: str | None = Form(
+        default=None, description="Comma-separated roles; empty = everyone in scope"
+    ),
+) -> TemplateResponse:
     # Audited V1.2 Phase 2 — all validation, storage, and DB logic verified
     # 1. Validate file type
     filename = file.filename or "template.docx"
@@ -288,7 +395,7 @@ async def upload_template(
         raise HTTPException(status_code=400, detail="Only DOCX files are accepted")
 
     # 2. Read (bounded: never load more than the limit + 1 byte) + empty check
-    content = await file.read(MAX_FILE_SIZE_BYTES + 1)
+    content = file.file.read(MAX_FILE_SIZE_BYTES + 1)
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
@@ -321,12 +428,22 @@ async def upload_template(
     if visibility not in ALLOWED_VISIBILITY:
         raise HTTPException(status_code=400, detail="Invalid visibility value")
 
+    # 6b. Audience / publish rules (checked before anything is written to disk)
+    try:
+        access = resolve_publish_access(
+            current_user,
+            visibility,
+            scope_organization,
+            scope_department,
+            parse_roles_csv(allowed_roles),
+        )
+    except PublishRuleError as exc:
+        raise _publish_error(exc) from None
+
     # 7. Save file via storage_service (in thread pool)
     try:
         logger.info(f"Saving template {filename} for user {current_user.id}")
-        stored = await asyncio.to_thread(
-            storage_service.save_bytes, "templates_original", filename, content
-        )
+        stored = storage_service.save_bytes("templates_original", filename, content)
     except StorageError as e:
         logger.error(f"Storage error while saving {filename}: {e}")
         raise HTTPException(
@@ -345,6 +462,9 @@ async def upload_template(
         file_size_bytes=stored.size_bytes,
         file_extension=".docx",
         uploaded_by=current_user.id,
+        scope_organization=access.scope_organization,
+        scope_department=access.scope_department,
+        allowed_roles=access.allowed_roles,
     )
 
     try:
@@ -354,680 +474,9 @@ async def upload_template(
         logger.error(
             f"DB error while creating template record: {e}. Rolling back file."
         )
-        await asyncio.to_thread(storage_service.delete_file, stored.path)
+        storage_service.delete_file(stored.path)
         raise HTTPException(
             status_code=500, detail="Could not save template record"
         ) from None
 
-    return template
-
-
-@router.post(
-    "/{template_id}/detect-placeholders",
-    response_model=PlaceholderDetectionResponse,
-)
-async def detect_placeholders(
-    template_id: int,
-    current_user: CurrentUser,
-    db: DbSession,
-    force: bool = Query(False, description="Replace existing fields with a fresh scan"),
-) -> PlaceholderDetectionResponse:
-    """
-    Detect every {{placeholder}} in the template's original DOCX and persist
-    the valid ones as ordered template_fields. Read-only on the DOCX.
-
-    Owner-only. Idempotent: re-running without force returns the existing
-    fields plus fresh warnings; force=true replaces the stored fields.
-    """
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can detect placeholders"
-        )
-
-    if not template.original_file_path:
-        raise HTTPException(status_code=409, detail="Template has no source file")
-
-    logger.info(
-        f"Placeholder detection started for template {template_id} (force={force})"
-    )
-    try:
-        docx_bytes = await asyncio.to_thread(
-            storage_service.read_bytes, template.original_file_path
-        )
-    except StoredFileNotFoundError:
-        raise HTTPException(
-            status_code=409, detail="Source file missing on disk"
-        ) from None
-
-    try:
-        result = await asyncio.to_thread(docx_parser.detect_placeholders, docx_bytes)
-    except Exception as e:
-        logger.error(f"Placeholder detection failed for template {template_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Could not parse the template document"
-        ) from None
-
-    existing_fields = get_fields_by_template(db, template_id)
-    already_detected = bool(existing_fields) and not force
-
-    if already_detected:
-        # Do not duplicate: return the existing fields with fresh warnings.
-        detected_fields = existing_fields
-    else:
-        if force:
-            delete_fields_by_template(db, template_id)
-        field_payloads = [
-            TemplateFieldCreate(
-                field_name=field.key,
-                field_label=docx_parser.humanize_key(field.key),
-                field_type="text",
-                is_required=True,
-                display_order=field.display_order,
-            )
-            for field in result.valid_fields
-        ]
-        detected_fields = bulk_create_fields(db, template_id, field_payloads)
-
-        # Advance the status without ever downgrading field_configured/active.
-        if template.status in ("uploaded", "placeholder_detected"):
-            template.status = "placeholder_detected"
-            db.commit()
-            db.refresh(template)
-
-    logger.info(
-        f"Placeholder detection finished for template {template_id}: "
-        f"{result.unique_valid} valid, {len(result.invalid_names)} invalid, "
-        f"{len(result.duplicates)} duplicates (already_detected={already_detected})"
-    )
-
-    return PlaceholderDetectionResponse(
-        template_id=template_id,
-        status=template.status,
-        already_detected=already_detected,
-        detected_fields=detected_fields,
-        warnings=DetectionWarnings(
-            duplicates=[
-                DuplicateFieldWarning(key=duplicate.key, count=duplicate.count)
-                for duplicate in result.duplicates
-            ],
-            invalid_names=[
-                InvalidFieldNameWarning(
-                    raw=invalid.raw,
-                    suggested_key=invalid.suggested_key,
-                    count=invalid.count,
-                    reason=invalid.reason,
-                )
-                for invalid in result.invalid_names
-            ],
-            parse_error=result.parse_warning,
-        ),
-        summary=DetectionSummary(
-            total_matches=result.total_matches,
-            unique_valid=result.unique_valid,
-            invalid_count=len(result.invalid_names),
-            duplicate_count=len(result.duplicates),
-        ),
-    )
-
-
-@router.get("/{template_id}/content")
-async def get_template_content(
-    template_id: int,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> dict:
-    """
-    Return the ORIGINAL DOCX's text segments (body, tables, headers, footers)
-    so the owner can select sample text for cleaning. View-access protected.
-    """
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    if not user_can_view_template(current_user, template):
-        raise HTTPException(
-            status_code=403, detail="You do not have access to this template"
-        )
-    if not template.original_file_path:
-        raise HTTPException(status_code=409, detail="Template has no source file")
-
-    try:
-        docx_bytes = await asyncio.to_thread(
-            storage_service.read_bytes, template.original_file_path
-        )
-    except StoredFileNotFoundError:
-        raise HTTPException(
-            status_code=409, detail="Source file missing on disk"
-        ) from None
-
-    try:
-        segments = await asyncio.to_thread(
-            docx_parser.extract_text_segments, docx_bytes
-        )
-    except Exception as e:
-        logger.error(f"Content extraction failed for template {template_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Could not read the template document"
-        ) from None
-
-    return {
-        "template_id": template_id,
-        "segments": segments,
-        "has_processed": template.processed_file_path is not None,
-    }
-
-
-@router.post("/{template_id}/clean", response_model=CleanTemplateResponse)
-async def clean_template(
-    template_id: int,
-    request: CleanTemplateRequest,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> CleanTemplateResponse:
-    """
-    Convert owner-confirmed sample text into {{placeholders}} in a NEW
-    processed DOCX (templates/processed/). The original file is never
-    modified. Owner-only, manual-confirmation required. Re-cleaning always
-    regenerates from the ORIGINAL, so replacements never stack.
-    """
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can clean this template"
-        )
-
-    if not request.confirm:
-        raise HTTPException(status_code=400, detail="Cleaning must be confirmed")
-
-    if not request.replacements:
-        raise HTTPException(
-            status_code=400, detail="At least one replacement is required"
-        )
-
-    if not template.original_file_path:
-        raise HTTPException(status_code=409, detail="Template has no source file")
-
-    logger.info(
-        f"Cleaning started for template {template_id}: "
-        f"{len(request.replacements)} replacement(s) from user {current_user.id}"
-    )
-
-    # ALWAYS start from the original bytes (re-clean regenerates, never stacks).
-    try:
-        original_bytes = await asyncio.to_thread(
-            storage_service.read_bytes, template.original_file_path
-        )
-    except StoredFileNotFoundError:
-        raise HTTPException(
-            status_code=409, detail="Source file missing on disk"
-        ) from None
-
-    try:
-        processed_bytes, results = await asyncio.to_thread(
-            apply_replacements_with_results,
-            original_bytes,
-            request.replacements,
-        )
-    except Exception as e:
-        logger.error(f"Cleaning failed for template {template_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Could not apply the requested replacements"
-        ) from None
-
-    # Save the processed copy (separate file; original untouched).
-    try:
-        stored = await asyncio.to_thread(
-            storage_service.save_bytes,
-            "templates_processed",
-            template.original_filename or "template.docx",
-            processed_bytes,
-        )
-    except StorageError as e:
-        logger.error(f"Storage error while saving cleaned template {template_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Could not save the cleaned template"
-        ) from None
-    previous_processed_path = template.processed_file_path
-    template = set_processed_path(db, template, stored.path)
-
-    # Re-cleaning replaces the processed copy; drop the superseded file.
-    if previous_processed_path and previous_processed_path != stored.path:
-        try:
-            await asyncio.to_thread(storage_service.delete_file, previous_processed_path)
-        except StorageError:
-            logger.warning(
-                f"Could not remove superseded processed file for template "
-                f"{template_id}: {previous_processed_path}"
-            )
-
-    # Upsert a field per MATCHED replacement (append_field skips duplicates).
-    created_fields = []
-    for replacement, result in zip(request.replacements, results):
-        if not result.matched:
-            continue
-        field = append_field(
-            db,
-            template_id,
-            TemplateFieldCreate(
-                field_name=replacement.placeholder_key,
-                field_label=replacement.field_label
-                or docx_parser.humanize_key(replacement.placeholder_key),
-                field_type=replacement.field_type or "text",
-                example_value=replacement.sample_text,
-                is_required=True,
-                section=replacement.section,
-                source="cleaned",
-            ),
-        )
-        if field is not None:
-            created_fields.append(field)
-
-    # Status: field_configured when marked, else placeholder_detected —
-    # advance_status is forward-only and never downgrades.
-    target = "field_configured" if request.mark_configured else "placeholder_detected"
-    template = advance_status(db, template, target)
-
-    unmatched = [
-        r.sample_text for r in results if not r.matched and r.reason != "invalid_key"
-    ]
-    invalid_keys = [r.placeholder_key for r in results if r.reason == "invalid_key"]
-    logger.info(
-        f"Cleaning finished for template {template_id}: "
-        f"{len(created_fields)} field(s) created, "
-        f"{len(unmatched)} unmatched, {len(invalid_keys)} invalid key(s)"
-    )
-
-    return CleanTemplateResponse(
-        template_id=template_id,
-        status=template.status,
-        processed_file_path=stored.path,
-        created_fields=created_fields,
-        results=[
-            ReplacementResult(
-                placeholder_key=result.placeholder_key,
-                sample_text=result.sample_text,
-                occurrences=result.occurrences,
-                matched=result.matched,
-                reason=result.reason,
-            )
-            for result in results
-        ],
-        warnings=CleanWarnings(unmatched=unmatched, invalid_keys=invalid_keys),
-    )
-
-
-# --- V1.3 Phase 4: AI field suggestions (owner-only, proposals only) ---
-
-
-@router.post(
-    "/{template_id}/suggest-fields",
-    response_model=SuggestFieldsResponse,
-)
-async def suggest_template_fields(
-    template_id: int,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> SuggestFieldsResponse:
-    """
-    Ask Claude Sonnet on AWS Bedrock (via instructor, validated output) to
-    propose ADDITIONAL fields for this template based on its document text.
-
-    Owner-only. Persists NOTHING to template_fields — suggestions are
-    proposals the owner explicitly accepts through the Phase 3 field
-    endpoints (source="ai"). Every attempt (success AND error) is logged to
-    ai_generations. If AI is not configured or the provider fails, returns
-    503 — the rest of the app keeps working without AI.
-    """
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="Only the template owner can request AI field suggestions",
-        )
-    if not template.original_file_path:
-        raise HTTPException(status_code=409, detail="Template has no source file")
-
-    try:
-        docx_bytes = await asyncio.to_thread(
-            storage_service.read_bytes, template.original_file_path
-        )
-    except StoredFileNotFoundError:
-        raise HTTPException(
-            status_code=409, detail="Source file missing on disk"
-        ) from None
-
-    try:
-        segments = await asyncio.to_thread(
-            docx_parser.extract_text_segments, docx_bytes
-        )
-    except Exception as e:
-        logger.error(f"Content extraction failed for template {template_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail="Could not read the template document"
-        ) from None
-
-    document_text = "\n".join(segment["text"] for segment in segments)
-    existing_keys = [
-        field.field_name for field in get_fields_by_template(db, template_id)
-    ]
-
-    logger.info(
-        f"AI field suggestion started for template {template_id} "
-        f"by user {current_user.id} (existing_fields={len(existing_keys)})"
-    )
-    try:
-        suggestions = await asyncio.to_thread(
-            ai_service.suggest_fields, document_text, existing_keys
-        )
-    except AiUnavailableError as e:
-        log_ai_generation(
-            db,
-            action_type="suggest_fields",
-            model=settings.bedrock_model_suggestions,
-            template_id=template_id,
-            created_by=current_user.id,
-            status="error",
-            suggestions_count=0,
-            detail=str(e),
-        )
-        logger.warning(f"AI unavailable for template {template_id}: {e}")
-        raise HTTPException(status_code=503, detail=str(e)) from None
-
-    log_ai_generation(
-        db,
-        action_type="suggest_fields",
-        model=settings.bedrock_model_suggestions,
-        template_id=template_id,
-        created_by=current_user.id,
-        status="success",
-        suggestions_count=len(suggestions),
-    )
-    logger.info(
-        f"AI field suggestion finished for template {template_id}: "
-        f"{len(suggestions)} suggestion(s) (nothing persisted)"
-    )
-
-    return SuggestFieldsResponse(
-        template_id=template_id,
-        model=settings.bedrock_model_suggestions,
-        existing_count=len(existing_keys),
-        suggestion_count=len(suggestions),
-        suggestions=suggestions,
-    )
-
-
-# --- V1.3 Phase 3: field editor (owner-only writes) ---
-# ROUTE ORDERING: /{template_id}/fields/reorder is declared BEFORE the
-# parameterized /{template_id}/fields/{field_id} so the static "reorder"
-# suffix is never captured as a field_id. /library stays first in the file.
-
-
-def _require_owner_editable(
-    db: Session, template_id: int, current_user: User
-) -> Template:
-    """
-    Load a template and enforce the guards shared by every field-editor
-    write route: template exists (404), current user is the owner (403),
-    and the template is not locked (403).
-    """
-    template = get_template_by_id(db, template_id)
-    if template is None:
-        raise HTTPException(status_code=404, detail="Template not found")
-    if template.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403, detail="Only the template owner can edit fields"
-        )
-    if template.status == "locked":
-        raise HTTPException(
-            status_code=403, detail="Template is locked and cannot be edited"
-        )
-    return template
-
-
-def _field_value_error(exc: ValueError) -> HTTPException:
-    """Map a CRUD/model ValueError: duplicate field_name -> 409, else -> 422."""
-    message = str(exc)
-    if "already exists" in message:
-        return HTTPException(status_code=409, detail=message)
-    return HTTPException(status_code=422, detail=message)
-
-
-def _ensure_contiguous_order(db: Session, template_id: int) -> list[TemplateField]:
-    """
-    Renumber a template's fields to contiguous display_order 0..n-1 if an
-    operation (e.g. a create with an explicit display_order) left gaps or
-    duplicates. Relative order (display_order, id) is preserved.
-    """
-    fields = get_fields_by_template(db, template_id)
-    if [field.display_order for field in fields] == list(range(len(fields))):
-        return fields
-    return reorder_fields(db, template_id, [field.id for field in fields])
-
-
-@router.post(
-    "/{template_id}/fields",
-    response_model=TemplateFieldRead,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_template_field(
-    template_id: int,
-    request: TemplateFieldCreate,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> TemplateField:
-    """
-    Add one field to a template (field editor). Owner-only; locked templates
-    reject writes. `display_order` defaults to the append position; an
-    explicit value is honored and the set is renumbered to stay contiguous
-    0..n-1. Duplicate field_name -> 409; invalid field_type -> 422.
-    """
-    _require_owner_editable(db, template_id, current_user)
-
-    if field_exists(db, template_id, request.field_name):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Field '{request.field_name}' already exists for this template",
-        )
-
-    try:
-        field = create_field(db, template_id, request)
-    except ValueError as exc:
-        raise _field_value_error(exc) from None
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"Field '{request.field_name}' already exists for this template",
-        ) from None
-
-    total = len(_ensure_contiguous_order(db, template_id))
-    logger.info(
-        f"Field '{field.field_name}' (id={field.id}) created on template "
-        f"{template_id} by user {current_user.id} (total_fields={total})"
-    )
-    return field
-
-
-@router.put("/{template_id}/fields/reorder", response_model=list[TemplateFieldRead])
-def reorder_template_fields(
-    template_id: int,
-    request: FieldReorderRequest,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> list[TemplateField]:
-    """
-    Reorder a template's fields. `ordered_ids` must be the full permutation
-    of the template's current field ids, in the desired order — anything
-    else (missing, extra, duplicated ids) -> 422. Owner-only; locked
-    templates reject writes. Returns the fresh ordered field set.
-    """
-    _require_owner_editable(db, template_id, current_user)
-
-    try:
-        fields = reorder_fields(db, template_id, request.ordered_ids)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
-
-    logger.info(
-        f"Fields reordered on template {template_id} by user {current_user.id}: "
-        f"{len(fields)} field(s)"
-    )
-    return fields
-
-
-@router.patch("/{template_id}/fields/{field_id}", response_model=TemplateFieldRead)
-def update_template_field(
-    template_id: int,
-    field_id: int,
-    request: TemplateFieldUpdate,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> TemplateField:
-    """
-    Partially update one field's metadata (label, type, required, help text,
-    example, validation, section, AI flag, order) — only sent attributes are
-    applied. Renaming to a key that exists on another field -> 409; invalid
-    field_type -> 422. Owner-only; locked templates reject writes.
-    """
-    _require_owner_editable(db, template_id, current_user)
-
-    field = get_field_by_id(db, field_id)
-    if field is None or field.template_id != template_id:
-        raise HTTPException(status_code=404, detail="Field not found on this template")
-
-    if (
-        request.field_name is not None
-        and request.field_name != field.field_name
-        and field_exists(db, template_id, request.field_name)
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Field '{request.field_name}' already exists for this template",
-        )
-
-    try:
-        field = update_field(db, field, request)
-    except ValueError as exc:
-        raise _field_value_error(exc) from None
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail=f"Field '{request.field_name}' already exists for this template",
-        ) from None
-
-    logger.info(
-        f"Field {field_id} ('{field.field_name}') updated on template "
-        f"{template_id} by user {current_user.id}"
-    )
-    return field
-
-
-@router.delete(
-    "/{template_id}/fields/{field_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_template_field(
-    template_id: int,
-    field_id: int,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> None:
-    """
-    Remove one field. The template's remaining fields are reindexed to
-    contiguous display_order 0..n-1 (no gaps, no duplicates). Owner-only;
-    locked templates reject writes.
-    """
-    _require_owner_editable(db, template_id, current_user)
-
-    field = get_field_by_id(db, field_id)
-    if field is None or field.template_id != template_id:
-        raise HTTPException(status_code=404, detail="Field not found on this template")
-
-    field_name = field.field_name
-    delete_field(db, field)
-    remaining = len(get_fields_by_template(db, template_id))
-    logger.info(
-        f"Field '{field_name}' (id={field_id}) deleted from template {template_id} "
-        f"by user {current_user.id} ({remaining} field(s) remain)"
-    )
-
-
-@router.put("/{template_id}/fields", response_model=list[TemplateFieldRead])
-def sync_template_fields(
-    template_id: int,
-    request: FieldSyncRequest,
-    current_user: CurrentUser,
-    db: DbSession,
-) -> list[TemplateField]:
-    """
-    BULK SYNC — the field editor's "Save all" (full-sync semantics).
-
-    `fields` is the COMPLETE desired state of the template's fields:
-    - item with an id    -> update that field (only sent attributes applied)
-    - item without an id -> create a new field (source defaults to 'manual')
-    - existing fields ABSENT from the payload -> DELETED
-
-    `display_order` is taken from array position (client values are ignored)
-    and the save is all-or-nothing: a validation failure rolls everything
-    back. Duplicate field_name in the payload -> 422; an id belonging to
-    another template -> 422; a key conflict (e.g. two fields swapping names
-    in one save) -> 409.
-
-    With `mark_configured=true` (default) and at least one field saved, the
-    template's status advances to `field_configured` (forward-only — a
-    template already `active` is never downgraded). Returns the fresh,
-    ordered field set.
-    """
-    template = _require_owner_editable(db, template_id, current_user)
-
-    # Payload integrity: duplicate keys and foreign ids -> 422 before any write.
-    seen_names: set[str] = set()
-    for item in request.fields:
-        if item.field_name in seen_names:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Duplicate field_name in payload: '{item.field_name}'",
-            )
-        seen_names.add(item.field_name)
-
-    existing_ids = {field.id for field in get_fields_by_template(db, template_id)}
-    for item in request.fields:
-        if item.id is not None and item.id not in existing_ids:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Field id {item.id} does not belong to template {template_id}",
-            )
-
-    try:
-        fields = sync_fields(db, template_id, request.fields)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from None
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="Field name conflict: this save would leave duplicate field "
-            "keys (two fields cannot swap names in one save)",
-        ) from None
-
-    if request.mark_configured and fields:
-        template = advance_status(db, template, "field_configured")
-
-    kept_ids = {item.id for item in request.fields if item.id is not None}
-    created_count = sum(1 for item in request.fields if item.id is None)
-    logger.info(
-        f"Field sync on template {template_id} by user {current_user.id}: "
-        f"{created_count} created, {len(request.fields) - created_count} updated, "
-        f"{len(existing_ids - kept_ids)} deleted -> {len(fields)} total "
-        f"(status={template.status})"
-    )
-    return fields
+    return _template_response(template, current_user)
