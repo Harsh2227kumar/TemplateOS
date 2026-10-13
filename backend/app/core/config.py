@@ -71,8 +71,26 @@ class Settings(BaseSettings):
     database_url: str = Field(alias="DATABASE_URL")
     jwt_secret_key: str = Field(alias="JWT_SECRET_KEY")
     jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    # Short-lived access JWT (cookie `templateos_access` or Bearer header);
+    # sessions are extended through the rotating refresh token.
     access_token_expire_minutes: int = Field(
-        default=60, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+        default=15, ge=1, alias="ACCESS_TOKEN_EXPIRE_MINUTES"
+    )
+    refresh_token_expire_days: int = Field(
+        default=7, ge=1, alias="REFRESH_TOKEN_EXPIRE_DAYS"
+    )
+    # None -> Secure follows APP_ENV (on in production, off otherwise so the
+    # cookies work over plain http://localhost during development).
+    cookie_secure_override: bool | None = Field(default=None, alias="COOKIE_SECURE")
+    # None/"" -> host-only cookies (the safest default).
+    cookie_domain_setting: str | None = Field(default=None, alias="COOKIE_DOMAIN")
+    # In-memory login throttling (per client IP and per email).
+    login_rate_limit_enabled: bool = Field(default=True, alias="LOGIN_RATE_LIMIT_ENABLED")
+    login_rate_limit_attempts: int = Field(
+        default=10, ge=1, alias="LOGIN_RATE_LIMIT_ATTEMPTS"
+    )
+    login_rate_limit_window_seconds: int = Field(
+        default=300, ge=1, alias="LOGIN_RATE_LIMIT_WINDOW_SECONDS"
     )
     # A relative path is resolved against the repository root (see
     # storage_root), so the location does not depend on the working directory.
@@ -127,6 +145,17 @@ class Settings(BaseSettings):
         return self.app_env.strip().lower() in {"production", "prod"}
 
     @property
+    def cookie_secure(self) -> bool:
+        if self.cookie_secure_override is None:
+            return self.is_production
+        return self.cookie_secure_override
+
+    @property
+    def cookie_domain(self) -> str | None:
+        domain = (self.cookie_domain_setting or "").strip()
+        return domain or None
+
+    @property
     def storage_root(self) -> Path:
         path = Path(self.storage_base_path)
         if not path.is_absolute():
@@ -164,6 +193,11 @@ class Settings(BaseSettings):
                 raise ValueError("APP_DEBUG must be false in production")
             if "*" in self.cors_origins:
                 raise ValueError("BACKEND_CORS_ORIGINS must not contain '*' in production")
+            if not self.cookie_secure:
+                logger.warning(
+                    "COOKIE_SECURE is off in production; session cookies will be "
+                    "sent over plain HTTP"
+                )
         elif weak_secret:
             logger.warning(
                 "JWT_SECRET_KEY is the example value or shorter than %d characters; "
