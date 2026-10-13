@@ -696,10 +696,15 @@ export interface ImproveTextResponse {
 }
 
 export const aiApi = {
-  improveText: async (token: string, payload: ImproveTextRequest): Promise<ImproveTextResponse> => {
+  /** Pass `signal` to cancel the request (e.g. the form was reset meanwhile). */
+  improveText: async (
+    token: string,
+    payload: ImproveTextRequest,
+    signal?: AbortSignal,
+  ): Promise<ImproveTextResponse> => {
     return request<ImproveTextResponse>(
       "/ai/improve-text",
-      { method: "POST", body: JSON.stringify(payload) },
+      { method: "POST", body: JSON.stringify(payload), signal },
       token,
     );
   },
