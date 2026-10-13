@@ -36,6 +36,8 @@ test("auth endpoints never trigger a refresh", () => {
 test("refresh status maps to refreshed / rejected / unavailable", () => {
   assert.equal(refreshOutcomeFromStatus(200), "refreshed");
   assert.equal(refreshOutcomeFromStatus(204), "refreshed");
+  // Another tab already rotated the refresh token; this tab has the new cookies.
+  assert.equal(refreshOutcomeFromStatus(409), "refreshed");
   assert.equal(refreshOutcomeFromStatus(401), "rejected");
   assert.equal(refreshOutcomeFromStatus(403), "rejected");
   assert.equal(refreshOutcomeFromStatus(500), "unavailable");
@@ -138,6 +140,27 @@ test("concurrent 401s share one refresh and each retries once", async () => {
   const responses = await Promise.all(pending);
   assert.deepEqual(responses.map((r) => r.status), [200, 200, 200]);
   assert.deepEqual([...sendsByPath.values()], [2, 2, 2]);
+});
+
+test("409 (rotated by another tab) counts as success: retry once, no sign-out", async () => {
+  const { refresh, settle, calls } = controlledRefresh();
+  const statuses = new Map<string, number[]>([
+    ["/a", [401, 200]],
+    ["/b", [401, 200]],
+  ]);
+  const make = (path: string) =>
+    sendWithRefresh({
+      path,
+      send: async () => res(statuses.get(path)!.shift()!),
+      refresh,
+      onSessionExpired: () => assert.fail("409 must not sign the user out"),
+    });
+  const pending = [make("/a"), make("/b")];
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(calls(), 1, "still single-flight within the tab");
+  settle(refreshOutcomeFromStatus(409));
+  const responses = await Promise.all(pending);
+  assert.deepEqual(responses.map((r) => r.status), [200, 200]);
 });
 
 test("a rejected refresh expires the session once per request and returns the 401", async () => {

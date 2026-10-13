@@ -25,9 +25,15 @@ export function shouldRefreshAfter401(path: string): boolean {
   return !NO_REFRESH_PATHS.includes(pathname);
 }
 
-/** Map the status of a POST /auth/refresh response to an outcome. */
+/**
+ * Map the status of a POST /auth/refresh response to an outcome.
+ *
+ * 409 "Refresh token already rotated" means another tab refreshed a moment
+ * ago and the browser already holds the new cookies: treat it as success.
+ */
 export function refreshOutcomeFromStatus(status: number): RefreshOutcome {
   if (status >= 200 && status < 300) return "refreshed";
+  if (status === 409) return "refreshed";
   if (status === 401 || status === 403) return "rejected";
   return "unavailable";
 }

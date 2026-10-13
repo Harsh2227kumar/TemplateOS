@@ -23,12 +23,26 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly detail?: any,
+    /** Seconds from a Retry-After header (e.g. 429 on too many login attempts). */
+    public readonly retryAfterSeconds?: number,
   ) {
     super(message);
   }
 }
 
-/** One raw fetch with the session cookies and the CSRF header. */
+function parseRetryAfter(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, Math.round((date - Date.now()) / 1000));
+}
+
+/**
+ * One raw fetch with the session cookies and the CSRF header. Never sends an
+ * Authorization header: the backend does not fall back to the cookie when a
+ * bearer token is present.
+ */
 function send(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers);
   headers.set(CSRF_HEADER, CSRF_HEADER_VALUE);
@@ -68,7 +82,7 @@ async function toApiError(response: Response, fallback: string): Promise<ApiErro
   } catch {
     // Keep a safe user-facing fallback when the server does not return JSON.
   }
-  return new ApiError(message, response.status, detail);
+  return new ApiError(message, response.status, detail, parseRetryAfter(response.headers.get("Retry-After")));
 }
 
 async function execute<T>(path: string, options: RequestInit, fallbackMessage: string): Promise<T> {
