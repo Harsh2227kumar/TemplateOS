@@ -378,7 +378,7 @@ def upload_template(
     current_user: CurrentUser,
     db: DbSession,
     file: UploadFile = File(...),
-    name: str = Form(...),
+    name: str = Form(default=""),
     description: str | None = Form(default=None),
     category: str = Form(...),
     visibility: str = Form(...),
