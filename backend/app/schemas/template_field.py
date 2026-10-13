@@ -9,6 +9,32 @@ from app.models.template_field import FIELD_SOURCES, FIELD_TYPES
 # and Phase 2's PLACEHOLDER_KEY_PATTERN (app/schemas/cleaning.py).
 _FIELD_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
+# validation_rule grammar understood by app/services/document_validator.py.
+_RULE_PART = re.compile(r"^(email|min:\d+|max:\d+)$")
+VALIDATION_RULE_HELP = (
+    "validation_rule must be 'email', 'min:N', 'max:N' or a '|'-joined "
+    "combination such as 'min:2|max:50'"
+)
+
+
+def check_validation_rule(value: str | None) -> str | None:
+    """Normalize ('' -> None, trimmed parts) and reject rules the validator ignores."""
+    if value is None:
+        return None
+    parts = [part.strip().lower() for part in value.split("|") if part.strip()]
+    if not parts:
+        return None
+    if any(not _RULE_PART.match(part) for part in parts):
+        raise ValueError(VALIDATION_RULE_HELP)
+    return "|".join(parts)
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
 
 class TemplateFieldBase(BaseModel):
     field_name: str = Field(..., max_length=100)
@@ -64,6 +90,16 @@ class TemplateFieldUpdate(BaseModel):
     ai_enabled: bool | None = None
     display_order: int | None = None
     source: str | None = Field(None, max_length=20)
+
+    @field_validator("validation_rule")
+    @classmethod
+    def validate_rule(cls, value: str | None) -> str | None:
+        return check_validation_rule(value)
+
+    @field_validator("field_label", "section", "example_value", "default_value")
+    @classmethod
+    def strip_blank(cls, value: str | None) -> str | None:
+        return _blank_to_none(value)
 
     @field_validator("field_name")
     @classmethod
@@ -140,6 +176,16 @@ class TemplateFieldUpsert(BaseModel):
         max_length=20,
         description=f"One of {FIELD_SOURCES} if provided; defaults to 'manual' on create",
     )
+
+    @field_validator("validation_rule")
+    @classmethod
+    def validate_rule(cls, value: str | None) -> str | None:
+        return check_validation_rule(value)
+
+    @field_validator("field_label", "section", "example_value", "default_value")
+    @classmethod
+    def strip_blank(cls, value: str | None) -> str | None:
+        return _blank_to_none(value)
 
     @field_validator("field_name")
     @classmethod
@@ -234,3 +280,14 @@ class PlaceholderDetectionResponse(BaseModel):
     detected_fields: list[TemplateFieldRead] = Field(default_factory=list)
     warnings: DetectionWarnings
     summary: DetectionSummary
+    source_file: str = Field(
+        default="original",
+        description="'processed' when the cleaned copy was scanned, else 'original'",
+    )
+    added_fields: list[str] = Field(
+        default_factory=list, description="Keys newly created by this run"
+    )
+    stale_fields: list[str] = Field(
+        default_factory=list,
+        description="Existing fields with no placeholder in the scanned file",
+    )

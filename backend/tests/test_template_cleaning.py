@@ -425,7 +425,10 @@ def test_clean_persists_processed_path_and_field(clean_owner_token):
     assert len(results) == 1
     assert results[0]["matched"] is True
     assert results[0]["occurrences"] == 2  # body + split-run paragraph
-    assert body["warnings"] == {"unmatched": [], "invalid_keys": []}
+    assert body["warnings"]["unmatched"] == []
+    assert body["warnings"]["invalid_keys"] == []
+    assert body["warnings"]["render_error"] is None
+    assert body["detected_keys"] == ["meeting_title"]
 
     # Original preserved on the record; processed path set.
     detail = client.get(
