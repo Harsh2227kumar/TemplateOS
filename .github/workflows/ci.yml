@@ -1,0 +1,72 @@
+name: CI
+
+# Runs on every pull request into the permanent branches and on pushes to them,
+# so a red check shows up on the PR before anyone merges.
+on:
+  pull_request:
+    branches: [main, dev, frontend, backend]
+  push:
+    branches: [main, dev, frontend, backend]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Tests use in-memory / temporary SQLite. No real database, no AWS.
+      DATABASE_URL: sqlite://
+      JWT_SECRET_KEY: ci-test-secret-that-is-long-enough-for-auth-tests
+      API_V1_PREFIX: /api/v1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests -q -p no:cacheprovider
+
+  frontend:
+    name: Frontend type-check, tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24: the unit tests run TypeScript directly with `node --test`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (npm workspace)
+        run: npm ci
+
+      - name: Type-check
+        working-directory: frontend
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test --if-present
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
