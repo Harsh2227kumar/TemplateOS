@@ -9,12 +9,12 @@ Member 2's endpoints call these:
 - delete_document          -> DELETE /documents/{id}
 """
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.clock import utc_now_naive
 from app.models.document import Document, DOCUMENT_STATUSES
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ def update_document_status(
     document = db.get(Document, document_id)
     if document:
         document.status = status
-        document.updated_at = datetime.utcnow()
+        document.updated_at = utc_now_naive()
         db.commit()
         db.refresh(document)
     return document
