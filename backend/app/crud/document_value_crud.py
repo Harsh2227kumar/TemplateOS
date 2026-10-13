@@ -7,11 +7,12 @@ Member 2's endpoints call these:
 - delete_values_by_document -> cascade delete (called by document_crud.delete_document)
 """
 
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from app.core.clock import utc_now_naive
 
 if TYPE_CHECKING:
     from app.models.document_value import DocumentValue
@@ -34,7 +35,7 @@ def upsert_values(
     from app.models.document import Document
     from app.models.document_value import DocumentValue
 
-    now = datetime.utcnow()
+    now = utc_now_naive()
     result = []
     for val in values:
         field_name = val["field_name"]

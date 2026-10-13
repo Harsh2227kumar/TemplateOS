@@ -74,29 +74,13 @@ client = TestClient(app)
 
 OWNER_EMAIL = "suggest_owner@example.com"
 
-# Member 2's ai_service + suggest-fields route are not shipped yet — probe
-# for them at import time and skip the endpoint tests until they land.
-try:
-    import app.services.ai_service as ai_service_module
+# suggest-fields shipped in V1.3 Phase 4; these tests always run. The path is
+# fixed rather than discovered from app.routes, which FastAPI >= 0.140 no
+# longer flattens.
+import app.services.ai_service as ai_service_module
+from app.services.ai_service import AiUnavailableError
 
-    AiUnavailableError = getattr(ai_service_module, "AiUnavailableError", None)
-except Exception:  # pragma: no cover - depends on Member 2's module
-    ai_service_module = None
-    AiUnavailableError = None
-
-SUGGEST_ROUTE_PATH = next(
-    (
-        route.path
-        for route in app.routes
-        if getattr(route, "path", "").rstrip("/").endswith("suggest-fields")
-    ),
-    None,
-)
-
-requires_suggest_endpoint = pytest.mark.skipif(
-    ai_service_module is None or SUGGEST_ROUTE_PATH is None,
-    reason="Member 2's ai_service / suggest-fields endpoint is not shipped yet",
-)
+SUGGEST_ROUTE_PATH = "/api/v1/templates/{template_id}/suggest-fields"
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -346,7 +330,6 @@ def test_field_created_without_source_defaults_detected(owner_token, owner_id):
 # ── 3. Endpoint contract (mocked AI — never real Bedrock) ───────────
 
 
-@requires_suggest_endpoint
 def test_suggest_fields_success_returns_suggestions_and_logs_one_row(
     monkeypatch, owner_token, owner_id
 ):
@@ -414,7 +397,6 @@ def test_suggest_fields_success_returns_suggestions_and_logs_one_row(
         assert rows[0].suggestions_count == 2
 
 
-@requires_suggest_endpoint
 def test_suggest_fields_unavailable_returns_503_and_logs_error_row(
     monkeypatch, owner_token, owner_id
 ):

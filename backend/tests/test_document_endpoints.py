@@ -27,6 +27,7 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
 
+from app.core.clock import utc_now_naive
 from app.crud.template_field_crud import create_field
 from app.db.base import Base
 from app.db.session import get_db
@@ -411,7 +412,7 @@ def _backdate(document_id: int, when: datetime) -> None:
 def test_save_bumps_updated_at_and_list_order(owner_token, template_id):
     older = _create_doc(owner_token, template_id, name="Older")
     newer = _create_doc(owner_token, template_id, name="Newer")
-    long_ago = datetime.utcnow() - timedelta(days=30)
+    long_ago = utc_now_naive() - timedelta(days=30)
     _backdate(older["id"], long_ago)
     _backdate(newer["id"], long_ago + timedelta(days=1))
 
