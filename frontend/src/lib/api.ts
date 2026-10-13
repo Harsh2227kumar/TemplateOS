@@ -81,7 +81,7 @@ export const authApi = {
   me: (token: string) => request<User>("/auth/me", {}, token),
 };
 
-export interface TemplateListItem {
+export interface TemplateListItem extends TemplateAudience {
   id: number;
   name: string;
   category: string;
@@ -98,7 +98,7 @@ export interface TemplateLibraryResponse {
   limit: number;
 }
 
-export interface TemplateResponse {
+export interface TemplateResponse extends TemplateAudience {
   id: number;
   name: string;
   description: string | null;
@@ -114,6 +114,45 @@ export interface TemplateResponse {
   updated_at: string;
   processed_file_path?: string | null;
 }
+
+// --- Template audience: organization / department scope + role restriction ---
+
+export type TemplateVisibility = "private" | "public" | "organization" | "department" | "group";
+
+export interface TemplateAudience {
+  scope_organization: string | null;
+  scope_department: string | null;
+  /** null = every role in scope */
+  allowed_roles: string[] | null;
+  /** Computed by the server for the current user. */
+  can_manage: boolean;
+}
+
+export interface TemplateAccessUpdate {
+  visibility: TemplateVisibility;
+  scope_organization?: string | null;
+  scope_department?: string | null;
+  allowed_roles?: string[] | null;
+}
+
+export interface TemplateAccessOptions {
+  roles: { value: string; label: string }[];
+  organizations: string[];
+  departments: { organization: string | null; department: string }[];
+  can_publish: { organization: boolean; department: boolean };
+  defaults: { organization: string | null; department: string | null };
+}
+
+export const templateAccessApi = {
+  getOptions: (token: string) =>
+    request<TemplateAccessOptions>("/templates/access-options", {}, token),
+  update: (token: string, id: number, body: TemplateAccessUpdate) =>
+    request<TemplateResponse>(
+      `/templates/${id}/access`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      token,
+    ),
+};
 
 export interface TemplateField {
   id: number;
@@ -383,6 +422,9 @@ export const templatesApi = {
       description?: string;
       category: string;
       visibility: string;
+      scope_organization?: string;
+      scope_department?: string;
+      allowed_roles?: string[];
     },
   ): Promise<TemplateResponse> => {
     const formData = new FormData();
@@ -391,6 +433,9 @@ export const templatesApi = {
     if (payload.description) formData.append("description", payload.description);
     formData.append("category", payload.category);
     formData.append("visibility", payload.visibility);
+    if (payload.scope_organization) formData.append("scope_organization", payload.scope_organization);
+    if (payload.scope_department) formData.append("scope_department", payload.scope_department);
+    if (payload.allowed_roles?.length) formData.append("allowed_roles", payload.allowed_roles.join(","));
 
     const response = await fetch(`${API_BASE_URL}/templates/upload`, {
       method: "POST",
