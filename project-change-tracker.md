@@ -2857,3 +2857,57 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge order: #142 -> `backend`, retarget #143 to `backend` and merge; #144 and #145 -> `frontend`; #140 -> `frontend`, retarget #146 and merge; then integrate `backend` and `frontend` into `dev`.
 - After merge: run `alembic upgrade head` (migration `a3c7e1f9b2d6`) and set `organization` / `department` on user profiles so scoping applies.
 - Open decisions: template delete stays super_admin only; a manager who sets a template they do not own to private loses access to it; table columns become per-row fields (no repeating-table field type yet); re-cleaning starts from the original, so keys renamed with `/fix-placeholders` must be re-applied in the clean step.
+
+### Checkpoint 0057
+
+- Date: 2026-10-13
+- Member: AI Assistant (parallel agents: backend structure, backend auth, frontend data layer; CI by coordinator)
+- Branch:
+  - `fix/frontend-use-template-ai-toolbar` (PR #146, merged) and `fix/backend-clean-blank-example-value` (PR #148, merged)
+  - `chore/ci-github-actions` (from `dev`, PR #149 into `dev`)
+  - `refactor/backend-split-template-routers` (from `backend`, PR #150 into `backend`)
+  - `feature/backend-cookie-auth-refresh` (from `backend`, PR #151 into `backend`)
+  - `refactor/frontend-data-layer-cookie-auth` (from `frontend`, PR #152 into `frontend`)
+  - This entry: `docs/project-change-tracker-wave1` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0056 -> 2026-10-13
+
+#### Summary
+
+- Fixed the problems found in PR #146 (timezone-shifted "x ago" labels, blank example hints), added CI, and completed the Wave 1 architecture upgrades: template routers split, blocking DB calls removed from async endpoints, httpOnly cookie sessions with refresh rotation, TanStack Query data layer, `api.ts` and large pages split.
+
+#### Completed Tasks
+
+- #146 fixes: naive UTC API timestamps parsed as UTC (`lib/dates.ts`), so "Last saved"/My Drafts no longer show "about 6 hours ago"; blank example hints ("e.g. -------") hidden. #148: cleaning no longer stores replaced blanks as example values.
+- CI: GitHub Actions for backend pytest (SQLite) and frontend tsc + unit tests + build on PRs/pushes to main, dev, frontend, backend.
+- Backend structure: `endpoints/templates.py` (~1,600 lines) split into `templates`, `template_cleaning`, `template_placeholders`, `template_fields`, `template_ai`, `_template_common`; OpenAPI byte-identical; 11 async endpoints that used the sync DB session made sync (threadpool); `datetime.utcnow` replaced (`app/core/clock.py`), warnings 267 -> 0; flaky DOCX byte-compare test fixed.
+- Backend auth: httpOnly `templateos_access` (15 min) and `templateos_refresh` (7 days, path `/api/v1/auth`) cookies; `/auth/refresh` with hashed, rotated refresh tokens, family revocation on reuse and a 30 s multi-tab grace window (409); `/auth/logout`; Bearer still accepted; CSRF header middleware (`X-Requested-With: TemplateOS`); CORS with credentials; in-memory login rate limit (429 + Retry-After).
+- Frontend: `lib/api/` modules with barrel; TanStack Query hooks with key factories and targeted invalidation, one fetch per resource; cleaning, field setup, placeholder review, create/edit draft pages split into feature folders; cookie session client with single-flight refresh (409 = success), logout clears cache, 429 message.
+
+#### Code Changes
+
+- Backend: `api/v1/endpoints/*` (split), `api/v1/api.py`, `endpoints/__init__.py`, `core/clock.py`, `core/csrf.py`, `core/rate_limit.py`, `core/security.py`, `core/config.py`, `api/deps.py`, `endpoints/auth.py`, `main.py`, `models/refresh_token.py`, `crud/refresh_token_crud.py`, document CRUD/models, migration `f1b7c3d9e2a4_add_refresh_tokens_table.py`, `tests/conftest.py`, `tests/test_cookie_auth.py`, `tests/test_template_cleaning.py`, `.env.example`.
+- Frontend: `lib/api/*`, `lib/query/*`, `hooks/queries/*`, `hooks/use-seed-once.ts`, `lib/route-params.ts`, `lib/dates.ts`, `features/{template-cleaning,field-setup,placeholder-review,documents}/*`, all migrated pages, `context/auth-context.tsx`, `main.tsx`; removed `lib/api.ts`, `lib/auth-token.ts`; new tests (refresh, query keys, combine queries, dates); dependency `@tanstack/react-query` ^5.104.2.
+- Repo: `.github/workflows/ci.yml`.
+
+#### Features Added / Updated / Removed
+
+- Added: CI; cookie sessions with silent refresh; refresh-token table; CSRF protection; login rate limiting; query caching.
+- Updated: access token lifetime 60 -> 15 minutes; endpoints run in the threadpool; page and API module structure.
+- Removed: localStorage access tokens; `lib/api.ts` and `lib/auth-token.ts` monoliths.
+
+#### Issues Fixed
+
+- "Last saved about 6 hours ago" right after saving (naive UTC parsed as local time).
+- "e.g. -------" hints from cleaned blanks.
+- Every page fetched each resource twice.
+- Async endpoints blocked the event loop with sync DB calls.
+- Flaky `test_apply_replacements_produces_placeholder_and_preserves_original`.
+- Two tabs refreshing at once would have logged the user out (grace window).
+
+#### Notes For Next Push
+
+- Verified on the merged stack (throwaway SQLite, 1-minute access token): backend 444 passed, frontend 47/47 tests + tsc + build; browser: real login form sets httpOnly cookies (nothing in localStorage), dashboard fetches once, cleaning the real MoM through the split page, silent refresh after expiry (`/me` 401 -> `/refresh` 200 -> `/me` 200), draft save, logout 204 and refresh 401 afterwards.
+- Merge #151 and #152 together (the new frontend needs cookie auth), plus #150; then integrate `backend` and `frontend` into `dev`. Run `alembic upgrade head` (migration `f1b7c3d9e2a4`).
+- Local dev must use `http://localhost:8000` for the API (not `127.0.0.1`) so cookies flow from `http://localhost:5173`.
+- Next (Wave 2): user management, organizations/departments tables, document generation (DOCX/PDF, local storage).
