@@ -10,16 +10,21 @@ import { toast } from "@/components/ui/toast";
 import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { latestTimestamp } from "@/features/documents/draft-timestamps";
+import { GenerationPanel } from "@/features/documents/GenerationPanel";
+import type { DownloadFormat } from "@/features/documents/generation";
 import { useDraftForm, useNow } from "@/features/documents/use-draft-form";
 import {
   combineQueries,
   useDocument,
+  useDownloadGenerated,
+  useGenerateDocument,
+  useRetryPdf,
   useSaveDocumentValues,
   useTemplate,
   useTemplateFields,
 } from "@/hooks/queries";
 import { useSeedOnce } from "@/hooks/use-seed-once";
-import type { ApiError, DocumentFormValues, TemplateField } from "@/lib/api";
+import type { ApiError, DocumentFormValues, GeneratedInfo, TemplateField } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
 
@@ -37,6 +42,14 @@ export function EditDocumentPage() {
   const load = combineQueries<ApiError>([documentQuery, templateQuery, fieldsQuery]);
   const template = templateQuery.data ?? null;
   const saveValues = useSaveDocumentValues();
+  const generateDocument = useGenerateDocument();
+  const retryPdf = useRetryPdf();
+  const downloadGenerated = useDownloadGenerated();
+  // The latest generate / retry result; null falls back to the draft's own
+  // `generated` (refetched after each generate, retry and save).
+  const [latestGenerated, setLatestGenerated] = useState<GeneratedInfo | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
 
   // Fields as of seeding: the schema and inputs never change under the user.
   const [fields, setFields] = useState<TemplateField[]>([]);
@@ -82,10 +95,11 @@ export function EditDocumentPage() {
   );
 
   useUnsavedChangesWarning(isDirty);
-  useSaveShortcut(requestSubmit, isSeeded && !saving);
+  useSaveShortcut(requestSubmit, isSeeded && !saving && !generateDocument.isPending);
 
-  const handleUpdateDraft = async (formData: DocumentFormValues) => {
-    if (!documentId || saving) return;
+  /** Save the form; true on success. */
+  const saveDraft = async (formData: DocumentFormValues): Promise<boolean> => {
+    if (!documentId || saving) return false;
 
     setSaving(true);
     setSaveError(null);
@@ -106,10 +120,90 @@ export function EditDocumentPage() {
       if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current);
       savedTimerRef.current = window.setTimeout(() => setJustSaved(false), 2000);
       toast({ title: "Draft saved", duration: 2500 });
+      // The refetched draft now carries the server's "values changed" flag.
+      setLatestGenerated(null);
+      return true;
     } catch (err) {
       setSaveError(describeSaveError(err, "Failed to update draft. Please try again."));
+      return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleUpdateDraft = async (formData: DocumentFormValues) => {
+    await saveDraft(formData);
+  };
+
+  const runGenerate = async () => {
+    setGenerateError(null);
+    try {
+      const result = await generateDocument.mutateAsync(documentId);
+      setLatestGenerated(result);
+      toast({
+        title: "Document generated",
+        description:
+          result.pdf_status === "ok"
+            ? "DOCX and PDF are ready to download."
+            : result.pdf_status === "failed"
+              ? "The DOCX is ready; the PDF conversion failed."
+              : "The DOCX is ready to download.",
+        duration: 3500,
+      });
+    } catch (err) {
+      // 422 with field errors maps onto the inputs like a failed save.
+      setGenerateError(
+        describeSaveError(err, "Failed to generate the document. Please try again.") ??
+          "Some fields need attention. Fix the highlighted fields, then generate again.",
+      );
+    }
+  };
+
+  /** Generation uses the SAVED values, so unsaved edits are saved first. */
+  const handleGenerate = () => {
+    if (saving || generateDocument.isPending) return;
+    if (!isDirty) {
+      void runGenerate();
+      return;
+    }
+    void form.handleSubmit(async (formData) => {
+      if (await saveDraft(formData)) await runGenerate();
+    }, handleInvalid)();
+  };
+
+  const handleRetryPdf = async () => {
+    try {
+      const result = await retryPdf.mutateAsync(documentId);
+      setLatestGenerated(result);
+      toast(
+        result.pdf_status === "ok"
+          ? { title: "PDF ready", duration: 2500 }
+          : { variant: "destructive", title: "PDF still unavailable", description: result.pdf_error ?? undefined },
+      );
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Couldn't retry the PDF",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    }
+  };
+
+  const handleDownload = async (format: DownloadFormat) => {
+    setDownloading(format);
+    try {
+      await downloadGenerated.mutateAsync({ documentId, format, name: document?.name });
+    } catch (err) {
+      const status = (err as ApiError | undefined)?.status;
+      toast({
+        variant: "destructive",
+        title: status === 409 && format === "pdf" ? "PDF not available" : "Download failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+      // The server state may differ from what we show (e.g. file removed).
+      if (status === 404 || status === 409) void documentQuery.refetch();
+    } finally {
+      setDownloading(null);
     }
   };
 
@@ -164,8 +258,22 @@ export function EditDocumentPage() {
       onSubmit={form.handleSubmit(handleUpdateDraft, handleInvalid)}
       fields={fields}
       aiContext={{ templateId: document.template_id, documentId: document.id }}
-      disabled={saving}
+      disabled={saving || generateDocument.isPending}
       saveError={saveError}
+      notice={
+        <GenerationPanel
+          generated={latestGenerated ?? document.generated ?? null}
+          isDirty={isDirty}
+          generating={generateDocument.isPending}
+          retryingPdf={retryPdf.isPending}
+          downloading={downloading}
+          disabled={saving}
+          error={generateError}
+          onGenerate={handleGenerate}
+          onRetryPdf={() => void handleRetryPdf()}
+          onDownload={(format) => void handleDownload(format)}
+        />
+      }
       title="Edit draft"
       description={
         <>
@@ -234,7 +342,7 @@ export function EditDocumentPage() {
               <RotateCcw className="mr-2 h-4 w-4" />
               Reset Form
             </Button>
-            <Button type="submit" disabled={saving} className="w-full sm:w-auto">
+            <Button type="submit" disabled={saving || generateDocument.isPending} className="w-full sm:w-auto">
               {saving ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
