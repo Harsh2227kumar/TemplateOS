@@ -102,9 +102,14 @@ export function useSaveTemplateFields(id: number) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: FieldSyncPayload) => templatesApi.saveFields(id, payload),
-    onSuccess: (saved) => {
+    onSuccess: (saved, payload) => {
       queryClient.setQueryData(templateKeys.fields(id), saved);
-      // mark_configured may have changed the status.
+      // mark_configured moves a template with fields to field_configured;
+      // show that at once, then confirm with the server.
+      const current = queryClient.getQueryData<TemplateResponse>(templateKeys.detail(id))?.status;
+      if (payload.mark_configured && saved.length > 0 && current !== "active" && current !== "field_configured") {
+        setTemplateStatus(queryClient, id, "field_configured");
+      }
       void queryClient.invalidateQueries({ queryKey: templateKeys.detail(id), exact: true });
       void queryClient.invalidateQueries({ queryKey: templateKeys.lists() });
     },
