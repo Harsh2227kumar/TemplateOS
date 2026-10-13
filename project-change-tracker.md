@@ -2768,3 +2768,92 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Live result: Claude Sonnet 4.5 OK (8.0 s), Nova Micro OK (1.1 s), Nova Lite OK (1.0 s).
 - `.env` now has `BEDROCK_MODEL_NOVA_MICRO=apac.amazon.nova-micro-v1:0` and `BEDROCK_MODEL_NOVA_LITE=apac.amazon.nova-lite-v1:0`; restart the backend after changing `.env`.
 - Windows consoles: set `PYTHONIOENCODING=utf-8` if the script's dashes print as `?`.
+
+### Checkpoint 0055
+
+- Date: 2026-10-12
+- Member: AI Assistant (V1.5 Phase 1 verification, all members)
+- Branch: `fix/frontend-empty-list-field-default` (from `frontend`, PR #140 into `frontend`); this entry on `docs/project-change-tracker-v15-p1-verification` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0054 -> 2026-10-12
+
+#### Summary
+
+- Verified V1.5 Phase 1 (Basic AI Actions) is complete for Member 1, 2 and 3 on `dev`, including an end-to-end browser run against real Amazon Nova on Bedrock (throwaway SQLite DB, Neon untouched). Found and fixed one V1.4 bug that blocked saving drafts.
+
+#### Completed Tasks
+
+- Re-checked every prompt item for M1/M2/M3 on current `dev`, including after the security and auth PRs #132-#136.
+- Backend suite: 319 passed (51 AI tests). Frontend `tsc --noEmit` and `npm run build` pass.
+- Live UI run: toolbar only on `ai_enabled` text/textarea fields; spinner, read-only field and disabled buttons while running; Fix grammar (Nova Micro), Professional / Concise / Formal (Nova Lite) replaced text in ~1-3 s; Undo shown; draft saved; AI on the edit page logged with the draft's `document_id`; AI text persisted after save + reload. 8 `ai_generations` rows with correct model ids.
+- Fixed: list fields without a default were reset to `""`, so an untouched optional list blocked Save Draft ("Expected array, received string").
+
+#### Code Changes
+
+- `frontend/src/pages/create-document-page.tsx`, `frontend/src/pages/edit-document-page.tsx` (list fields always start as an array)
+
+#### Features Added / Updated / Removed
+
+- Added: None
+- Updated: list-field initialisation on both draft pages
+- Removed: None
+
+#### Issues Fixed
+
+- Save Draft silently failed for any template with an optional list field left empty (V1.4 bug, found during the V1.5 end-to-end run).
+
+#### Notes For Next Push
+
+- V1.5 Phase 1 is complete across all three members once PR #140 is merged and `frontend` is integrated into `dev`.
+- Console noise seen in local testing (`ERR_CONNECTION_REFUSED`) came from Vite's dev-server reconnect polling after a test server stopped, not from app code.
+
+### Checkpoint 0056
+
+- Date: 2026-10-13
+- Member: AI Assistant (three parallel agents: access, template pipeline, use-template), covering Member 1, 2 and 3 areas
+- Branch: five short-lived branches, backend and frontend kept separate:
+  - `feature/backend-template-access-scopes` (from `backend`, PR #142 into `backend`)
+  - `feature/backend-smart-template-pipeline` (stacked on #142, PR #143; retarget to `backend` after #142 merges)
+  - `feature/frontend-template-access-scopes` (from `frontend`, PR #144 into `frontend`)
+  - `feature/frontend-smart-template-pipeline` (from `frontend`, PR #145 into `frontend`)
+  - `fix/frontend-use-template-ai-toolbar` (stacked on #140, PR #146; retarget to `frontend` after #140 merges)
+- Push status: before push
+- Range covered: after Checkpoint 0055 -> 2026-10-13
+
+#### Summary
+
+- University access model: templates published to an organization or a department, optionally limited to roles (e.g. faculty but not students); only admins publish and manage them.
+- Smart template pipeline: automatic cleaning suggestions (including empty values), anchored cleaning, robust detection and field inference.
+- Use-template page: AI menu rebuilt as a style switcher and form-filling polish; upload dropdown bugs fixed.
+
+#### Completed Tasks
+
+- Access: `scope_organization`, `scope_department`, `allowed_roles` on templates (migration `a3c7e1f9b2d6`, backfilled from uploaders); one shared view rule for detail and library (parity-tested); `can_manage` for super_admin, owner, org_admin / department_admin of the scope on every modifying endpoint; publish rules; `PATCH /templates/{id}/access`, `GET /templates/access-options`; Audience UI on upload, Manage access dialog and View only badge on detail, scope badges in the library.
+- Pipeline: `GET /templates/{id}/clean-suggestions` (empty labels, blank lines, table cells, bracket hints, filled pairs, lists, dates/emails/phones), anchored `/clean` incl. insert-into-empty, `/clean-preview`, `/fix-placeholders`, detection on the cleaned copy that only adds new keys, field metadata inference, field editor fixes; rebuilt cleaning, placeholder review and field setup pages.
+- Use template: AI style switcher (every style from the user's own text, cached, Original restores), toolbar race and focus fixes, typed inputs, rebuilt list field, progress, scroll to first error, Ctrl+S, unsaved-changes warning, validation matching the backend, My Drafts fixes.
+- Upload dropdowns: transparent menus (missing Tailwind `popover`/`destructive` tokens), uncontrolled Selects, missing onBlur validation, focus-on-error, mobile overflow and layering, stuck progress strip.
+
+#### Code Changes
+
+- Backend: `services/template_access.py`, `crud/template_crud.py`, `models/template.py`, `schemas/template.py`, `api/v1/endpoints/templates.py`, `alembic/versions/a3c7e1f9b2d6_add_template_access_scopes.py`, new `services/docx_walker.py`, `services/clean_suggester.py`, `services/field_inference.py`, plus `docx_parser.py`, `docx_cleaner.py`, `schemas/cleaning.py`, `schemas/template_field.py`, `crud/template_field_crud.py`; new tests `test_template_access_scopes.py`, `test_template_access_migration.py`, `test_smart_template_pipeline.py`.
+- Frontend: upload form and page, template detail page, TemplateCard, new `AudienceFields.tsx` and `ManageAccessDialog.tsx`, `ui/select.tsx`, `tailwind.config.ts`, `styles.css`; cleaning, placeholder review and field setup pages, `AiSuggestionsPanel.tsx`, new `pipeline-ui.tsx`, `lib/template-pipeline.ts`; `DynamicField.tsx`, `ListField.tsx`, `AiActionToolbar.tsx`, new `ai-style-state.ts`, `use-ai-style-switcher.ts`, `DocumentFormSections.tsx`, `form-values.ts`, `use-form-guards.ts`, `lib/validation.ts`, `ui/toast.tsx`, create/edit document pages, dashboard My Drafts; new `frontend/tests/*.test.ts` and `npm test` script.
+
+#### Features Added / Updated / Removed
+
+- Added: org/department scopes with role audiences; Manage access; automatic cleaning suggestions; clean preview; one-click placeholder fixes; field inference; AI style switcher; frontend unit tests.
+- Updated: every template-modifying endpoint uses `can_manage`; detection scans the cleaned copy; form inputs by type.
+- Removed: owner-only permission checks on template preparation endpoints.
+
+#### Issues Fixed
+
+- AI menu: after one style (e.g. Formal) other styles appeared to do nothing; Undo only went back one step; double requests; late results overwriting a reset form.
+- Cleaning could not handle labels with no value; the real MoM format produced 0 placeholders and 0 suggestions (now 13).
+- Upload page Select menus were transparent and did not reset or validate.
+- Inference enabled AI on list fields, which the AI endpoint rejects (now text/textarea only).
+
+#### Notes For Next Push
+
+- Verified on the fully merged stack (throwaway SQLite, real Bedrock): backend 411 passed; frontend tsc, build and 18 unit tests pass. Browser: CSE-only template for faculty + department admins is hidden from CSE students and other departments; department admin cleaned the real MoM into 13 typed fields that render with docxtpl; faculty is View only and the AI switcher gave distinct Formal / Concise / Professional results, cached re-selection and exact Original restore.
+- Merge order: #142 -> `backend`, retarget #143 to `backend` and merge; #144 and #145 -> `frontend`; #140 -> `frontend`, retarget #146 and merge; then integrate `backend` and `frontend` into `dev`.
+- After merge: run `alembic upgrade head` (migration `a3c7e1f9b2d6`) and set `organization` / `department` on user profiles so scoping applies.
+- Open decisions: template delete stays super_admin only; a manager who sets a template they do not own to private loses access to it; table columns become per-row fields (no repeating-table field type yet); re-cleaning starts from the original, so keys renamed with `/fix-placeholders` must be re-applied in the clean step.
