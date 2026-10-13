@@ -291,8 +291,10 @@ def test_apply_replacements_produces_placeholder_and_preserves_original():
     assert b"{{ meeting_title }}" in _document_xml(
         processed
     ) or b"{{meeting_title}}" in _document_xml(processed)
-    # Original is untouched: bytes identical, no placeholder introduced.
-    assert original_bytes == _build_sample_docx()
+    # Original is untouched: same document content, no placeholder introduced.
+    # Compare document.xml, not raw bytes: the zip container embeds a
+    # timestamp, so two builds a second apart differ at the byte level.
+    assert _document_xml(original_bytes) == _document_xml(_build_sample_docx())
     assert b"{{ meeting_title }}" not in _document_xml(original_bytes)
 
 
