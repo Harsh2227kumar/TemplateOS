@@ -63,8 +63,8 @@ const audienceSchema = z.object({
     z.enum(["private", "public", "organization", "department", "group"]),
     z.literal(""),
   ]),
-  scope_organization: z.string(),
-  scope_department: z.string(),
+  scope_organization_id: z.number().int().nullable(),
+  scope_department_id: z.number().int().nullable(),
   role_mode: z.enum(["all", "selected"]),
   allowed_roles: z.array(z.string()),
 });
@@ -170,8 +170,8 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadRes
         description: values.description?.trim() || undefined,
         category: values.category,
         visibility: access.visibility,
-        scope_organization: access.scope_organization ?? undefined,
-        scope_department: access.scope_department ?? undefined,
+        scope_organization_id: access.scope_organization_id ?? undefined,
+        scope_department_id: access.scope_department_id ?? undefined,
         allowed_roles: access.allowed_roles ?? undefined,
       });
       setSuccess(result);
@@ -312,8 +312,8 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadRes
             const audienceErrors = form.formState.errors.audience;
             const errors: AudienceErrors = {
               visibility: audienceErrors?.visibility?.message,
-              scope_organization: audienceErrors?.scope_organization?.message,
-              scope_department: audienceErrors?.scope_department?.message,
+              scope_organization_id: audienceErrors?.scope_organization_id?.message,
+              scope_department_id: audienceErrors?.scope_department_id?.message,
               allowed_roles: audienceErrors?.allowed_roles?.message,
             };
             return (

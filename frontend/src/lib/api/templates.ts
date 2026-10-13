@@ -23,8 +23,8 @@ export interface TemplateUploadPayload {
   description?: string;
   category: string;
   visibility: string;
-  scope_organization?: string;
-  scope_department?: string;
+  scope_organization_id?: number;
+  scope_department_id?: number;
   allowed_roles?: string[];
 }
 
@@ -63,8 +63,12 @@ export const templateCatalogApi = {
     if (payload.description) formData.append("description", payload.description);
     formData.append("category", payload.category);
     formData.append("visibility", payload.visibility);
-    if (payload.scope_organization) formData.append("scope_organization", payload.scope_organization);
-    if (payload.scope_department) formData.append("scope_department", payload.scope_department);
+    if (payload.scope_organization_id != null) {
+      formData.append("scope_organization_id", String(payload.scope_organization_id));
+    }
+    if (payload.scope_department_id != null) {
+      formData.append("scope_department_id", String(payload.scope_department_id));
+    }
     if (payload.allowed_roles?.length) formData.append("allowed_roles", payload.allowed_roles.join(","));
     return uploadForm<TemplateResponse>("/templates/upload", formData);
   },
