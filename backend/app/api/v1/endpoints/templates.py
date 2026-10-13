@@ -1126,6 +1126,9 @@ def _field_from_replacement(replacement) -> TemplateFieldCreate:
     if anchor is not None and anchor.action in ("insert", "list"):
         sample = None  # nothing was "filled" there (or it was a list block)
     example = replacement.example_value or sample
+    if example and not any(ch.isalnum() for ch in example):
+        # A replaced blank ("-------", "______") is a fill-in mark, not an example.
+        example = None
     meta = infer_field_meta(
         replacement.placeholder_key,
         label=replacement.field_label,

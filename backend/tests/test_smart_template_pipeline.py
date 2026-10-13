@@ -813,6 +813,27 @@ def test_preview_then_clean_then_detect_flow(owner_token):
     assert [f["display_order"] for f in forced["detected_fields"]] == list(range(len(forced_fields)))
 
 
+def test_clean_never_stores_blank_marks_as_examples(owner_token):
+    """Replaced leaders/dashes ("_____", "-----") are fill-in marks, not examples."""
+    template = _upload(owner_token, "Pipeline Blank Examples", build_notice_docx())
+    tid = template["id"]
+    suggestions = client.get(
+        f"/api/v1/templates/{tid}/clean-suggestions", headers=_auth(owner_token)
+    ).json()["suggestions"]
+    blank_kinds = {s["kind"] for s in suggestions} & {"leader", "inline_blank"}
+    assert blank_kinds, "fixture should contain blank lines"
+
+    cleaned = client.post(
+        f"/api/v1/templates/{tid}/clean",
+        headers=_auth(owner_token),
+        json={"replacements": _accept_payload(suggestions), "confirm": True},
+    )
+    assert cleaned.status_code == 200, cleaned.text
+    for field in cleaned.json()["created_fields"]:
+        example = field["example_value"]
+        assert example is None or any(ch.isalnum() for ch in example), field
+
+
 def test_reclean_reports_stale_fields(owner_token):
     template = _upload(owner_token, "Pipeline Stale", build_notice_docx())
     tid = template["id"]
