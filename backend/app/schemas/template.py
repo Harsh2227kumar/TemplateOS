@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 
 def _decode_allowed_roles(value: object) -> object:
@@ -35,14 +35,27 @@ class TemplateCreate(TemplateBase):
     file_size_bytes: int | None = None
     file_extension: str | None = None
     uploaded_by: int
+    scope_organization_id: int | None = None
+    scope_department_id: int | None = None
+    # Legacy name copies, written alongside the ids (app/services/org_directory.py).
     scope_organization: str | None = None
     scope_department: str | None = None
     allowed_roles: str | None = None  # JSON text, as stored
 
 
 class TemplateAudienceMixin(BaseModel):
-    scope_organization: str | None = None
-    scope_department: str | None = None
+    scope_organization_id: int | None = None
+    scope_department_id: int | None = None
+    # Display names read from the linked organizations / departments rows
+    # (Template.scope_organization_name), not from the legacy string columns.
+    scope_organization: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("scope_organization_name", "scope_organization"),
+    )
+    scope_department: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("scope_department_name", "scope_department"),
+    )
     allowed_roles: list[str] | None = None
     # Computed for the requesting user (see template_access.can_manage).
     can_manage: bool = False
@@ -95,6 +108,10 @@ class TemplateAccessUpdate(BaseModel):
     """PATCH /templates/{id}/access body."""
 
     visibility: Literal["private", "public", "organization", "department", "group"]
+    scope_organization_id: int | None = None
+    scope_department_id: int | None = None
+    # Optional fallback for older clients: case-insensitive names of existing
+    # rows. Ignored when the matching *_id is given.
     scope_organization: str | None = Field(default=None, max_length=255)
     scope_department: str | None = Field(default=None, max_length=255)
     allowed_roles: list[str] | None = None
@@ -105,9 +122,15 @@ class AccessRoleOption(BaseModel):
     label: str
 
 
+class AccessOrganizationOption(BaseModel):
+    id: int
+    name: str
+
+
 class AccessDepartmentOption(BaseModel):
-    organization: str | None
-    department: str
+    id: int
+    organization_id: int
+    name: str
 
 
 class AccessPublishFlags(BaseModel):
@@ -116,15 +139,15 @@ class AccessPublishFlags(BaseModel):
 
 
 class AccessDefaults(BaseModel):
-    organization: str | None
-    department: str | None
+    organization_id: int | None
+    department_id: int | None
 
 
 class TemplateAccessOptions(BaseModel):
     """GET /templates/access-options response."""
 
     roles: list[AccessRoleOption]
-    organizations: list[str]
+    organizations: list[AccessOrganizationOption]
     departments: list[AccessDepartmentOption]
     can_publish: AccessPublishFlags
     defaults: AccessDefaults
