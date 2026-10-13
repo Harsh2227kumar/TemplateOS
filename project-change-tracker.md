@@ -2911,3 +2911,52 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge #151 and #152 together (the new frontend needs cookie auth), plus #150; then integrate `backend` and `frontend` into `dev`. Run `alembic upgrade head` (migration `f1b7c3d9e2a4`).
 - Local dev must use `http://localhost:8000` for the API (not `127.0.0.1`) so cookies flow from `http://localhost:5173`.
 - Next (Wave 2): user management, organizations/departments tables, document generation (DOCX/PDF, local storage).
+
+### Checkpoint 0058
+
+- Date: 2026-10-13
+- Member: AI Assistant (parallel agents per area; integration and verification by coordinator)
+- Branch:
+  - `feature/backend-user-management-org-tables` (from `backend`, PR #156 into `backend`)
+  - `feature/backend-document-generation` (stacked on the users branch, PR #157; retarget to `backend` after #156 merges)
+  - `feature/frontend-user-management-org-tables` (from `frontend`, PR #158 into `frontend`)
+  - `feature/frontend-document-generation` (from `frontend`, PR #159 into `frontend`)
+  - `fix/frontend-list-field-placeholder-json` (from `frontend`, PR #160 into `frontend`)
+  - This entry: `docs/project-change-tracker-wave2` (into `dev`)
+- Push status: pushed, PRs open
+- Range covered: after Checkpoint 0057 -> 2026-10-13
+
+#### Summary
+
+- Wave 2: organizations/departments tables with id-based template access, admin user management, editable profile, and final document generation (DOCX, PDF through Gotenberg or LibreOffice) from saved drafts.
+
+#### Completed Tasks
+
+- Backend users/orgs: `organizations` and `departments` tables with a backfill from the existing strings; template access matches `scope_organization_id` / `scope_department_id`; `/admin` users, organizations and departments API scoped by role; `PATCH /auth/me`.
+- Backend generation: `generated_files` table; `POST /documents/{id}/generate`, `POST /documents/{id}/generate-pdf`, `GET /documents/{id}/download?format=docx|pdf`. Renders saved values: dates DD-MM-YYYY, lists one item per line or loopable, no "None" or leftover tags.
+- Frontend: admin Users and Organizations pages; audience pickers by id; editable profile; "Final document" panel (generate, download DOCX/PDF, retry PDF, out-of-date notice); dashboard "Generated" badge.
+- Fix: list fields showed their JSON example (`["Budget approval", "Venue selection"]`) as the placeholder, which looked like a filled value; each row now shows one example item.
+
+#### Code Changes
+
+- Backend: org/department models, CRUD and `services/org_directory.py`, `services/user_admin.py`, `services/template_access.py`; `services/generation_service.py`, `services/document_generation.py`, `services/pdf_service.py`, `services/generated_file_cleanup.py`; admin and document endpoints; migrations `c7a1d3e5f9b2` (org tables), `b6d2e8f4a1c7` (generated files), `d8f2a4c6e1b9` (merge heads); tests.
+- Frontend: `features/admin/*`, `pages/admin-users-page.tsx`, `pages/admin-organizations-page.tsx`, `lib/audience.ts`, `lib/admin-permissions.ts`, `lib/api/admin.ts`, `hooks/queries/admin.ts`, `components/templates/AudienceFields.tsx`, `pages/profile-page.tsx`; `features/documents/GenerationPanel.tsx`, `features/documents/generation.ts`, `lib/download.ts`, `pages/edit-document-page.tsx`, `pages/dashboard-page.tsx`; `lib/list-example.ts`, `components/forms/ListField.tsx`, `tests/list-example.test.ts`.
+
+#### Features Added / Updated / Removed
+
+- Added: organization/department directory; admin user management; profile editing; DOCX/PDF generation and download.
+- Updated: template audience scoping uses ids (legacy string columns kept in sync); list field placeholders.
+- Removed: free-text organization/department entry in audience pickers.
+
+#### Issues Fixed
+
+- Free-text org/department spellings split audiences ("CSE" vs "Computer Science") for new data.
+- List field example rendered as raw JSON in the input.
+- The reported "Add item does not add a second input" on the edit page could not be reproduced on the real stack (mouse click, JS `.click()`, Enter). 2- and 3-item lists saved, reloaded and rendered fully in the DOCX. The earlier report was most likely a script that set `input.value` without React's onChange.
+
+#### Notes For Next Push
+
+- Verified: backend pytest 477 passed (users branch) and 509 passed (generation branch) on pinned requirements (fastapi 0.143.0); frontend tsc + build OK, tests 66/66, 52/52 and 51/51 per branch, 75/75 with all three frontend branches merged. Browser on the merged stack (throwaway SQLite): org/department created, users assigned, template scoped by ids, draft with a 3-item list generated, and the DOCX showed every item and the date 13-10-2026. Student gets 403. PDF converted with LibreOffice present and shows "not set up" without a converter.
+- Merge order: #156 -> `backend`; retarget #157 to `backend` and merge; #158, #159 and #160 -> `frontend`; then integrate `backend` and `frontend` into `dev`.
+- After merge: run `alembic upgrade head` (`c7a1d3e5f9b2`, `b6d2e8f4a1c7`, `d8f2a4c6e1b9`). For PDF, set `GOTENBERG_URL` or install LibreOffice.
+- Open decisions: org_admins cannot see users without an organization (new signups), so only super_admin onboards them; org/department delete returns 409 while in use; spelling variants are not auto-merged; legacy org/department string columns are kept in sync.
