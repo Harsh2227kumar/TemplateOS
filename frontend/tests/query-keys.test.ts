@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { documentKeys, keyStartsWith, queryKeys, templateKeys } from "../src/lib/query/keys.ts";
+import { adminKeys, documentKeys, keyStartsWith, queryKeys, templateKeys } from "../src/lib/query/keys.ts";
 import { errorStatus, shouldRetryQuery } from "../src/lib/query/retry.ts";
 
 test("keys are stable: same input, equal key", () => {
@@ -68,4 +68,20 @@ test("errorStatus reads a numeric status only", () => {
   assert.equal(errorStatus({ status: "404" }), undefined);
   assert.equal(errorStatus(null), undefined);
   assert.equal(errorStatus(new Error("x")), undefined);
+});
+
+test("admin keys: user pages and department lists invalidate by prefix", () => {
+  assert.equal(queryKeys.admin, adminKeys);
+  assert.deepEqual(adminKeys.userList({ search: "", role: "faculty" }), [
+    "admin",
+    "users",
+    { role: "faculty" },
+  ]);
+  assert.deepEqual(adminKeys.userList({ search: "" }), adminKeys.userList({}));
+  assert.ok(keyStartsWith(adminKeys.userList({ page: 2 }), adminKeys.users()));
+  assert.ok(keyStartsWith(adminKeys.departments(3), adminKeys.departmentLists()));
+  assert.ok(keyStartsWith(adminKeys.departments(), adminKeys.departmentLists()));
+  assert.notDeepEqual(adminKeys.departments(3), adminKeys.departments());
+  assert.ok(!keyStartsWith(adminKeys.organizations(), adminKeys.users()));
+  assert.ok(!keyStartsWith(adminKeys.users(), templateKeys.all));
 });

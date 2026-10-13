@@ -28,6 +28,8 @@ export function DashboardLayout() {
     if (location.pathname === "/profile") return "Profile";
     if (location.pathname === "/templates") return "My Templates";
     if (location.pathname === "/upload-template") return "Upload Template";
+    if (location.pathname === "/admin/users") return "Users";
+    if (location.pathname === "/admin/organizations") return "Organizations";
     return "Dashboard";
   };
 
