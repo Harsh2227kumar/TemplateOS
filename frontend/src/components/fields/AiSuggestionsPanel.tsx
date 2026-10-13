@@ -12,8 +12,8 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
-import { ApiError, templatesApi, type FieldSuggestion } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
+import { useSuggestFields } from "@/hooks/queries";
+import { ApiError, type FieldSuggestion } from "@/lib/api";
 
 
 type PanelStatus = "idle" | "loading" | "success" | "error";
@@ -50,6 +50,8 @@ export function AiSuggestionsPanel({
     unavailable: boolean;
   } | null>(null);
 
+  const suggestFields = useSuggestFields(templateId);
+
   const isTaken = (key: string) =>
     existingKeys.includes(key) || acceptedKeys.includes(key);
 
@@ -57,9 +59,8 @@ export function AiSuggestionsPanel({
     if (status === "loading") return; // no double requests
     setStatus("loading");
     setError(null);
-    const token = getAccessToken();
     try {
-      const response = await templatesApi.suggestFields(token, templateId);
+      const response = await suggestFields.mutateAsync();
       setSuggestions(response.suggestions);
       setAcceptedKeys([]);
       setModel(response.model);

@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { templatesApi, TemplateResponse } from "@/lib/api";
+import { useDeleteTemplate, useTemplate } from "@/hooks/queries";
+import { parseRouteId } from "@/lib/route-params";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +31,6 @@ import {
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { getAccessToken } from "@/lib/auth-token";
 import { ManageAccessDialog } from "@/components/templates/ManageAccessDialog";
 import { describeRoles } from "@/components/templates/AudienceFields";
 
@@ -77,36 +77,30 @@ export function TemplateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [template, setTemplate] = useState<TemplateResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<{ message: string; status?: number } | null>(null);
+  const routeId = parseRouteId(id);
+  // A non-numeric id never reaches the API; treat it like a missing template.
+  const invalidId = routeId === null;
+  const templateQuery = useTemplate(routeId ?? 0);
+  const template = templateQuery.data ?? null;
+  const deleteMutation = useDeleteTemplate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
+  const isDeleting = deleteMutation.isPending;
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [accessOpen, setAccessOpen] = useState(false);
 
-  useEffect(() => {
-    fetchTemplate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const fetchTemplate = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const token = getAccessToken();
-      const data = await templatesApi.getTemplateDetail(token, Number(id));
-      setTemplate(data);
-    } catch (err: any) {
-      setError({
-        message: err.message || "Failed to load template",
-        status: err.status,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Loading covers the first fetch and a retry after an error.
+  const isLoading =
+    !invalidId && (templateQuery.isPending || (templateQuery.isError && templateQuery.isFetching));
+  const error = invalidId
+    ? { message: "Template not found", status: 404 as number | undefined }
+    : templateQuery.isError && !template
+      ? {
+          message: templateQuery.error.message || "Failed to load template",
+          status: templateQuery.error.status as number | undefined,
+        }
+      : null;
+  const fetchTemplate = () => void templateQuery.refetch();
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
@@ -184,17 +178,14 @@ export function TemplateDetailPage() {
   };
 
   const handleDelete = async () => {
-    setIsDeleting(true);
+    if (isDeleting) return;
     setDeleteError(null);
     try {
-      const token = getAccessToken();
-      await templatesApi.deleteTemplate(token, template.id);
+      await deleteMutation.mutateAsync(template.id);
       setDeleteOpen(false);
       navigate("/templates");
     } catch (err: any) {
       setDeleteError(err.message || "Failed to delete the template. Please try again.");
-    } finally {
-      setIsDeleting(false);
     }
   };
 
@@ -370,7 +361,6 @@ export function TemplateDetailPage() {
           role={user?.role}
           open={accessOpen}
           onOpenChange={setAccessOpen}
-          onSaved={setTemplate}
         />
       )}
 

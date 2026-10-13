@@ -2,8 +2,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useFormContext, useWatch } from "react-hook-form";
 
 import { toast } from "@/components/ui/toast";
-import { aiApi, ApiError, MAX_AI_TEXT_CHARS } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
+import { useImproveText } from "@/hooks/queries";
+import { ApiError, MAX_AI_TEXT_CHARS } from "@/lib/api";
 import {
   aiStyleReducer,
   initialAiStyleState,
@@ -75,6 +75,9 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
   const inFlightRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const requestSeqRef = useRef(0);
+  const { mutateAsync: improveText } = useImproveText();
+  const improveTextRef = useRef(improveText);
+  improveTextRef.current = improveText;
 
   // Any change to the field value (user typing, form reset, Reset Form)
   // is reported to the state machine.
@@ -147,17 +150,16 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
       setAnnouncement(`Rewriting ${opts.fieldLabel} in ${label} style…`);
 
       try {
-        const response = await aiApi.improveText(
-          getAccessToken(),
-          {
+        const response = await improveTextRef.current({
+          payload: {
             template_id: opts.templateId,
             document_id: opts.documentId ?? null,
             field_name: opts.fieldName,
             original_text: plan.source,
             action_type: style,
           },
-          controller.signal,
-        );
+          signal: controller.signal,
+        });
         if (controller.signal.aborted || requestSeqRef.current !== requestId) return;
 
         const text = normalizeAiResult(response?.improved_text ?? "", opts.multiline);

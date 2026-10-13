@@ -1,95 +1,101 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-
-import { ApiError, authApi, type User } from "@/lib/api";
 import {
-  SESSION_EXPIRED_EVENT,
-  clearAccessToken,
-  getAccessToken,
-  setAccessToken,
-} from "@/lib/auth-token";
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { ApiError, SESSION_EXPIRED_EVENT, authApi, type User } from "@/lib/api";
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (fullName: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/**
+ * The session lives in httpOnly cookies the SPA cannot read, so "am I signed
+ * in?" is answered by GET /auth/me. The API client refreshes an expired access
+ * cookie on its own (once, single-flight) and fires SESSION_EXPIRED_EVENT when
+ * the refresh cookie is rejected too.
+ */
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => getAccessToken() || null);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // StrictMode runs mount effects twice in development; ask /auth/me once.
+  const startedRef = useRef(false);
 
   useEffect(() => {
-    let active = true;
-    if (!token) {
-      setUser(null);
-      setIsLoading(false);
-      return () => {
-        active = false;
-      };
-    }
+    if (startedRef.current) return;
+    startedRef.current = true;
 
-    setIsLoading(true);
     authApi
-      .me(token)
-      .then((currentUser) => {
-        if (active) setUser(currentUser);
-      })
+      .me()
+      .then((currentUser) => setUser(currentUser))
       .catch((error: unknown) => {
-        // Only a 401 means the token is bad. A network error, a 5xx or a
-        // request aborted by a page reload must not sign the user out.
-        if (error instanceof ApiError && error.status === 401) {
-          clearAccessToken();
-          if (active) setToken(null);
+        // A 401 here means the refresh failed as well: signed out. A network
+        // error, a 5xx or an aborted request must NOT sign the user out: no
+        // logout call is made and the cookies stay, so a reload restores the
+        // session once the API is reachable again.
+        if (!(error instanceof ApiError && error.status === 401)) {
+          console.warn("Could not check the session:", error);
         }
-        if (active) setUser(null);
+        setUser(null);
       })
-      .finally(() => {
-        if (active) setIsLoading(false);
-      });
+      .finally(() => setIsLoading(false));
+  }, []);
 
-    return () => {
-      active = false;
-    };
-  }, [token]);
-
-  // Any API call rejected with 401 means the token expired or was revoked:
-  // sign out so ProtectedRoute sends the user back to the login page.
+  // The refresh cookie was rejected mid-session: drop the user so
+  // ProtectedRoute sends them back to the login page. Cached data belongs to
+  // the old session, so it goes too.
   useEffect(() => {
     const handleExpired = () => {
-      clearAccessToken();
-      setToken(null);
+      queryClient.clear();
       setUser(null);
     };
     window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+  }, [queryClient]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    await authApi.login({ email, password });
+    const currentUser = await authApi.me();
+    // Never show a previous account's cached templates or drafts.
+    queryClient.clear();
+    setUser(currentUser);
+  }, [queryClient]);
+
+  const signup = useCallback(async (fullName: string, email: string, password: string) => {
+    await authApi.signup({ full_name: fullName, email, password });
   }, []);
 
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      // Sign out locally anyway; the cookies expire on their own.
+      console.warn("Logout request failed:", error);
+    }
+    queryClient.clear();
+    setUser(null);
+    navigate("/login", { replace: true });
+  }, [navigate, queryClient]);
+
   const value = useMemo<AuthContextValue>(
-    () => ({
-      user,
-      isLoading,
-      login: async (email, password) => {
-        const result = await authApi.login({ email, password });
-        const currentUser = await authApi.me(result.access_token);
-        setAccessToken(result.access_token);
-        setToken(result.access_token);
-        setUser(currentUser);
-      },
-      signup: async (fullName, email, password) => {
-        await authApi.signup({ full_name: fullName, email, password });
-      },
-      logout: () => {
-        clearAccessToken();
-        setToken(null);
-        setUser(null);
-      },
-    }),
-    [isLoading, user],
+    () => ({ user, isLoading, login, signup, logout }),
+    [isLoading, user, login, signup, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
