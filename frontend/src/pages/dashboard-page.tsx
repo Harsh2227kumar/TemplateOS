@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { templatesApi, documentsApi, TemplateListItem, Document } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth-token";
+import { parseServerDate, serverTime } from "@/lib/dates";
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -32,11 +33,7 @@ export function DashboardPage() {
     setDraftsError(null);
     try {
       const data = await documentsApi.getMyDocuments(token);
-      const time = (d: Document) => {
-        const t = new Date(d.updated_at).getTime();
-        return Number.isNaN(t) ? 0 : t;
-      };
-      setMyDrafts([...data].sort((a, b) => time(b) - time(a)));
+      setMyDrafts([...data].sort((a, b) => serverTime(b.updated_at) - serverTime(a.updated_at)));
     } catch (err) {
       setDraftsError(err instanceof Error && err.message ? err.message : "Couldn't load your drafts.");
     } finally {
@@ -145,7 +142,7 @@ export function DashboardPage() {
                     {t.name}
                   </p>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(t.created_at))}
+                    {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(parseServerDate(t.created_at) ?? new Date())}
                   </p>
                 </div>
               </div>
@@ -202,8 +199,8 @@ export function DashboardPage() {
     const displayDrafts = myDrafts.slice(0, 5);
 
     const describeUpdated = (value: string) => {
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return { relative: "unknown", absolute: undefined };
+      const date = parseServerDate(value);
+      if (!date) return { relative: "unknown", absolute: undefined };
       return { relative: formatDistanceToNow(date, { addSuffix: true }), absolute: date.toLocaleString() };
     };
 

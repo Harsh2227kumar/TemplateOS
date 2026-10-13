@@ -75,7 +75,20 @@ export function getFieldErrorMessage(errors: FieldErrors, name: string): string 
  * a type-appropriate input, hints (example, rules, character counter), the
  * AI style switcher where enabled, and a single error message.
  */
-export function DynamicField({ field, aiContext, disabled }: DynamicFieldProps) {
+/**
+ * Cleaning may have stored the blank it replaced ("-------", "______") as the
+ * example value. Such a hint tells the user nothing, so drop examples that
+ * contain no letters or digits.
+ */
+function usableExample(value: string | null): string | null {
+  return value && /[\p{L}\p{N}]/u.test(value) ? value : null;
+}
+
+export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFieldProps) {
+  const field = useMemo(
+    () => ({ ...rawField, example_value: usableExample(rawField.example_value) }),
+    [rawField],
+  );
   const { formState: { errors } } = useFormContext();
   const name = field.field_name;
   const inputId = `field-${name}`;

@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { getAccessToken } from "@/lib/auth-token";
 import { buildFormSchema } from "@/lib/validation";
+import { parseServerDate, serverTime } from "@/lib/dates";
 
 /** Re-renders every 30s so relative times ("2 minutes ago") stay current. */
 function useNow(intervalMs = 30_000) {
@@ -37,8 +38,8 @@ function useNow(intervalMs = 30_000) {
 function latestTimestamp(times: Array<string | null | undefined>): string | null {
   let best: string | null = null;
   for (const t of times) {
-    if (!t || Number.isNaN(new Date(t).getTime())) continue;
-    if (best === null || new Date(t) > new Date(best)) best = t;
+    if (!t || !parseServerDate(t)) continue;
+    if (best === null || serverTime(t) > serverTime(best)) best = t;
   }
   return best;
 }
@@ -260,9 +261,9 @@ export function EditDocumentPage() {
     );
   }
 
-  const savedDate = lastSavedAt ? new Date(lastSavedAt) : null;
+  const savedDate = parseServerDate(lastSavedAt);
   const savedLabel =
-    savedDate && !Number.isNaN(savedDate.getTime())
+    savedDate
       ? formatDistanceToNow(savedDate, { addSuffix: true })
       : "unknown";
 
