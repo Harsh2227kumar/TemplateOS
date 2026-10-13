@@ -57,7 +57,6 @@ import {
   type TemplateContent,
 } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
-import { getAccessToken } from "@/lib/auth-token";
 import {
   FIELD_TYPE_OPTIONS,
   FIELD_TYPE_VALUES,
@@ -204,10 +203,9 @@ export function TemplateCleaningPage() {
       setIsLoading(true);
       setLoadError(null);
       try {
-        const token = getAccessToken();
         const [templateData, contentData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, templateId),
-          templatesApi.getContent(token, templateId),
+          templatesApi.getTemplateDetail(templateId),
+          templatesApi.getContent(templateId),
         ]);
         if (!active) return;
         setTemplate(templateData);
@@ -229,7 +227,7 @@ export function TemplateCleaningPage() {
     setSuggestionsLoading(true);
     setSuggestionsError(null);
     try {
-      const data = await templatesApi.getCleanSuggestions(getAccessToken(), templateId);
+      const data = await templatesApi.getCleanSuggestions(templateId);
       setSuggestionData(data);
       setDecisions(
         Object.fromEntries(
@@ -416,7 +414,7 @@ export function TemplateCleaningPage() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const data = await templatesApi.previewClean(getAccessToken(), templateId, {
+      const data = await templatesApi.previewClean(templateId, {
         replacements: buildPayload(),
         confirm: false,
       });
@@ -433,7 +431,7 @@ export function TemplateCleaningPage() {
     setIsApplying(true);
     setActionError(null);
     try {
-      const response = await templatesApi.cleanTemplate(getAccessToken(), templateId, {
+      const response = await templatesApi.cleanTemplate(templateId, {
         replacements: buildPayload(),
         confirm: true,
       });

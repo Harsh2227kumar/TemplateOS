@@ -30,7 +30,6 @@ import {
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { getAccessToken } from "@/lib/auth-token";
 import { ManageAccessDialog } from "@/components/templates/ManageAccessDialog";
 import { describeRoles } from "@/components/templates/AudienceFields";
 
@@ -95,8 +94,7 @@ export function TemplateDetailPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const token = getAccessToken();
-      const data = await templatesApi.getTemplateDetail(token, Number(id));
+      const data = await templatesApi.getTemplateDetail(Number(id));
       setTemplate(data);
     } catch (err: any) {
       setError({
@@ -187,8 +185,7 @@ export function TemplateDetailPage() {
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      const token = getAccessToken();
-      await templatesApi.deleteTemplate(token, template.id);
+      await templatesApi.deleteTemplate(template.id);
       setDeleteOpen(false);
       navigate("/templates");
     } catch (err: any) {

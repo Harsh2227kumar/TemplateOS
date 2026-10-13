@@ -21,6 +21,7 @@ export interface User {
   preferences: UserPreferences | null;
 }
 
+/** Body of POST /auth/login. The session itself travels in httpOnly cookies. */
 export interface TokenResponse {
   access_token: string;
   token_type: string;

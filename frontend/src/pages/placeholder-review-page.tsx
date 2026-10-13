@@ -31,7 +31,6 @@ import { EmptyState } from "@/components/empty-state";
 import { MonoKey, Notice, PipelineLoadError, PipelineSteps } from "@/components/fields/pipeline-ui";
 import { templatesApi, type PlaceholderDetectionResponse, type TemplateField } from "@/lib/api";
 import { useAuth } from "@/context/auth-context";
-import { getAccessToken } from "@/lib/auth-token";
 import {
   KEY_PATTERN,
   KEY_RULE_MESSAGE,
@@ -71,10 +70,9 @@ export function PlaceholderReviewPage() {
       setLoadError(null);
       setDetection(null);
       try {
-        const token = getAccessToken();
         const [templateData, fieldData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, templateId),
-          templatesApi.getFields(token, templateId),
+          templatesApi.getTemplateDetail(templateId),
+          templatesApi.getFields(templateId),
         ]);
         if (!active) return;
         setTemplate(templateData);
@@ -107,7 +105,7 @@ export function PlaceholderReviewPage() {
       setActionError(null);
       if (!quiet) setActionMessage(null);
       try {
-        const result = await templatesApi.detectPlaceholders(getAccessToken(), templateId, force);
+        const result = await templatesApi.detectPlaceholders(templateId, force);
         applyDetection(result);
         if (!quiet) {
           const added = result.added_fields?.length ?? 0;
@@ -150,7 +148,7 @@ export function PlaceholderReviewPage() {
     setActionError(null);
     setActionMessage(null);
     try {
-      const result = await templatesApi.fixPlaceholders(getAccessToken(), templateId, fixes);
+      const result = await templatesApi.fixPlaceholders(templateId, fixes);
       applyDetection(result);
       setActionMessage(
         `Fixed ${fixes.length} placeholder name${fixes.length === 1 ? "" : "s"} in the cleaned copy.`,

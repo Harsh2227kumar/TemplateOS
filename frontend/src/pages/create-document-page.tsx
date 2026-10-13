@@ -19,7 +19,6 @@ import {
   type TemplateResponse,
   type TemplateField,
 } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import { buildFormSchema } from "@/lib/validation";
 
 export function CreateDocumentPage() {
@@ -41,7 +40,6 @@ export function CreateDocumentPage() {
   const formRef = useRef<HTMLFormElement>(null);
   const redirectTimerRef = useRef<number | null>(null);
 
-  const token = getAccessToken();
 
   useEffect(() => {
     if (!templateId) {
@@ -54,8 +52,8 @@ export function CreateDocumentPage() {
       setLoadError(null);
       try {
         const [templateData, fieldsData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, templateId),
-          templatesApi.getFields(token, templateId),
+          templatesApi.getTemplateDetail(templateId),
+          templatesApi.getFields(templateId),
         ]);
         if (cancelled) return;
         setTemplate(templateData);
@@ -79,7 +77,7 @@ export function CreateDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [templateId, token, reloadKey, navigate]);
+  }, [templateId, reloadKey, navigate]);
 
   useEffect(
     () => () => {
@@ -125,13 +123,13 @@ export function CreateDocumentPage() {
       // Step 1: create the document (skipped on retry if it already exists).
       let docId = createdDocIdRef.current;
       if (docId === null) {
-        const doc = await documentsApi.createDocument(token, { template_id: templateId });
+        const doc = await documentsApi.createDocument({ template_id: templateId });
         docId = doc.id;
         createdDocIdRef.current = docId;
       }
 
       // Step 2: save values (lists as JSON arrays, blank items dropped).
-      await documentsApi.saveValues(token, docId, { values: serializeValues(fields, formData) });
+      await documentsApi.saveValues(docId, { values: serializeValues(fields, formData) });
 
       // Mark the form clean so the unsaved-changes guard lets the redirect through.
       form.reset(normalizeSavedFormValues(fields, formData));

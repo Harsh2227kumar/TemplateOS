@@ -5,7 +5,6 @@ import { TemplateSearchBar } from "@/components/templates/TemplateSearchBar";
 import { TemplateFilters } from "@/components/templates/TemplateFilters";
 import { TemplateGrid } from "@/components/templates/TemplateGrid";
 import { Button } from "@/components/ui/button";
-import { getAccessToken } from "@/lib/auth-token";
 
 export function TemplateLibraryPage() {
   const navigate = useNavigate();
@@ -28,8 +27,7 @@ export function TemplateLibraryPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const token = getAccessToken();
-      const data = await templatesApi.getLibrary(token, {
+      const data = await templatesApi.getLibrary({
         search,
         category,
         visibility,

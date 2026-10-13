@@ -11,7 +11,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiError, templateAccessApi, type TemplateResponse } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import {
   AudienceFields,
   audienceFromTemplate,
@@ -68,9 +67,7 @@ export function ManageAccessDialog({
     setSaving(true);
     setSaveError(null);
     try {
-      const updated = await templateAccessApi.update(
-        getAccessToken(),
-        template.id,
+      const updated = await templateAccessApi.update(template.id,
         toAccessPayload(value),
       );
       onSaved(updated);

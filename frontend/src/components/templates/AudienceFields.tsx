@@ -18,7 +18,6 @@ import type {
   TemplateAudience,
   TemplateVisibility,
 } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import { formatRole } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -187,7 +186,7 @@ export function useAccessOptions(enabled = true) {
     if (!enabled) return;
     let cancelled = false;
     templateAccessApi
-      .getOptions(getAccessToken())
+      .getOptions()
       .then((data) => {
         if (!cancelled) setOptions(data);
       })

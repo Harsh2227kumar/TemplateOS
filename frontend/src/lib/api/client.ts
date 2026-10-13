@@ -1,15 +1,22 @@
-import { SESSION_EXPIRED_EVENT } from "@/lib/auth-token";
+import {
+  refreshOutcomeFromStatus,
+  sendWithRefresh,
+  singleFlight,
+  type RefreshOutcome,
+} from "./refresh";
+import { SESSION_EXPIRED_EVENT } from "./session";
 
 // Production builds must set VITE_API_BASE_URL; without it they call the
 // same-origin /api/v1 instead of silently targeting a developer's localhost.
+// Keep "localhost" (not 127.0.0.1) in dev: the SPA runs on localhost:5173 and
+// the session cookies are only sent to the same site.
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ??
   (import.meta.env.DEV ? "http://localhost:8000/api/v1" : "/api/v1");
 
-/** Tell the auth context the stored token was rejected so it can sign out. */
-function notifyIfSessionExpired(status: number, token?: string): void {
-  if (status === 401 && token) window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-}
+/** Required by the backend's CSRF rule on POST/PUT/PATCH/DELETE; sent on every request. */
+const CSRF_HEADER = "X-Requested-With";
+const CSRF_HEADER_VALUE = "TemplateOS";
 
 export class ApiError extends Error {
   constructor(
@@ -21,51 +28,68 @@ export class ApiError extends Error {
   }
 }
 
-export async function request<T>(path: string, options: RequestInit = {}, token?: string): Promise<T> {
+/** One raw fetch with the session cookies and the CSRF header. */
+function send(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers);
-  if (options.body !== undefined) headers.set("Content-Type", "application/json");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
-  if (!response.ok) {
-    notifyIfSessionExpired(response.status, token);
-    let message = "Something went wrong. Please try again.";
-    let detail: any = undefined;
-    try {
-      const body = await response.json();
-      if (typeof body.detail === "string") {
-        message = body.detail;
-      } else if (Array.isArray(body.detail)) {
-        message = "Validation failed";
-        detail = body.detail;
-      }
-    } catch {
-      // Keep a safe user-facing fallback when the server does not return JSON.
-    }
-    throw new ApiError(message, response.status, detail);
+  headers.set(CSRF_HEADER, CSRF_HEADER_VALUE);
+  // FormData bodies get their multipart Content-Type (with boundary) from the browser.
+  if (options.body !== undefined && !(options.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
   }
+  return fetch(`${API_BASE_URL}${path}`, { ...options, headers, credentials: "include" });
+}
+
+/** POST /auth/refresh, shared by every request that hit a 401 at the same time. */
+const refreshSession = singleFlight(async (): Promise<RefreshOutcome> => {
+  try {
+    const response = await send("/auth/refresh", { method: "POST" });
+    return refreshOutcomeFromStatus(response.status);
+  } catch {
+    return "unavailable";
+  }
+});
+
+/** Tell the auth context the session is over so ProtectedRoute sends the user to /login. */
+function notifySessionExpired(): void {
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+async function toApiError(response: Response, fallback: string): Promise<ApiError> {
+  let message = fallback;
+  let detail: any = undefined;
+  try {
+    const body = await response.json();
+    if (typeof body.detail === "string") {
+      message = body.detail;
+    } else if (Array.isArray(body.detail)) {
+      message = "Validation failed";
+      detail = body.detail;
+    }
+  } catch {
+    // Keep a safe user-facing fallback when the server does not return JSON.
+  }
+  return new ApiError(message, response.status, detail);
+}
+
+async function execute<T>(path: string, options: RequestInit, fallbackMessage: string): Promise<T> {
+  const response = await sendWithRefresh({
+    path,
+    send: () => send(path, options),
+    refresh: refreshSession,
+    onSessionExpired: notifySessionExpired,
+  });
+  if (!response.ok) throw await toApiError(response, fallbackMessage);
   // 204 No Content (e.g. DELETE endpoints) has no body to parse.
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-/** POST a multipart form (file uploads). The browser sets the multipart boundary. */
-export async function uploadForm<T>(path: string, formData: FormData, token: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    // Do NOT set Content-Type — browser sets it with the correct multipart boundary
-    body: formData,
-  });
+/** JSON request. A 401 refreshes the session once and repeats the request once. */
+export function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return execute<T>(path, options, "Something went wrong. Please try again.");
+}
 
-  if (!response.ok) {
-    notifyIfSessionExpired(response.status, token);
-    let message = "Upload failed. Please try again.";
-    try {
-      const body = (await response.json()) as { detail?: string };
-      if (typeof body.detail === "string") message = body.detail;
-    } catch { /* keep fallback */ }
-    throw new ApiError(message, response.status);
-  }
-  return response.json() as Promise<T>;
+/** POST a multipart form (file uploads), with the same cookie/refresh handling. */
+export function uploadForm<T>(path: string, formData: FormData): Promise<T> {
+  return execute<T>(path, { method: "POST", body: formData }, "Upload failed. Please try again.");
 }

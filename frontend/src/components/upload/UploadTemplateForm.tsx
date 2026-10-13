@@ -33,7 +33,6 @@ import {
   type TemplateResponse,
 } from "@/lib/api";
 import { UploadZone } from "./UploadZone";
-import { getAccessToken } from "@/lib/auth-token";
 import { useAuth } from "@/context/auth-context";
 import {
   AudienceFields,
@@ -161,11 +160,10 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadRes
   const onSubmit = async (values: UploadTemplateValues) => {
     setError("");
 
-    const token = getAccessToken();
     try {
       onUploadStart?.();
       const access = toAccessPayload(values.audience);
-      const result = await templatesApi.upload(token, {
+      const result = await templatesApi.upload({
         file: values.file,
         name: values.name.trim(),
         description: values.description?.trim() || undefined,

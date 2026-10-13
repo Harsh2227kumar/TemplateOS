@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { templatesApi, documentsApi, TemplateListItem, Document } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import { parseServerDate, serverTime } from "@/lib/dates";
 
 export function DashboardPage() {
@@ -24,15 +23,10 @@ export function DashboardPage() {
 
   // Most recently edited first; drafts with an unreadable date go last.
   const fetchDrafts = useCallback(async () => {
-    const token = getAccessToken();
-    if (!token) {
-      setDraftsLoading(false);
-      return;
-    }
     setDraftsLoading(true);
     setDraftsError(null);
     try {
-      const data = await documentsApi.getMyDocuments(token);
+      const data = await documentsApi.getMyDocuments();
       setMyDrafts([...data].sort((a, b) => serverTime(b.updated_at) - serverTime(a.updated_at)));
     } catch (err) {
       setDraftsError(err instanceof Error && err.message ? err.message : "Couldn't load your drafts.");
@@ -43,13 +37,8 @@ export function DashboardPage() {
 
   useEffect(() => {
     async function fetchTemplates() {
-      const token = getAccessToken();
-      if (!token) {
-        setTemplatesLoading(false);
-        return;
-      }
       try {
-        const data = await templatesApi.getMyTemplates(token);
+        const data = await templatesApi.getMyTemplates();
         setMyTemplates(data);
       } catch (err) {
         // silent fail

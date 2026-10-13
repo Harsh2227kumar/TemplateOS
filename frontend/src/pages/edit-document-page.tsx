@@ -21,7 +21,6 @@ import {
   type TemplateField,
   type TemplateResponse,
 } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import { buildFormSchema } from "@/lib/validation";
 import { parseServerDate, serverTime } from "@/lib/dates";
 
@@ -66,7 +65,6 @@ export function EditDocumentPage() {
   const savedTimerRef = useRef<number | null>(null);
   useNow();
 
-  const token = getAccessToken();
 
   useEffect(() => {
     if (!documentId) {
@@ -82,7 +80,7 @@ export function EditDocumentPage() {
       setTemplate(null);
       let doc: Document;
       try {
-        doc = await documentsApi.getDocument(token, documentId);
+        doc = await documentsApi.getDocument(documentId);
       } catch (err) {
         if (cancelled) return;
         console.error("Failed to load document:", err);
@@ -99,8 +97,8 @@ export function EditDocumentPage() {
       }
       try {
         const [templateData, fieldsData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, doc.template_id),
-          templatesApi.getFields(token, doc.template_id),
+          templatesApi.getTemplateDetail(doc.template_id),
+          templatesApi.getFields(doc.template_id),
         ]);
         if (cancelled) return;
         setFields(fieldsData);
@@ -125,7 +123,7 @@ export function EditDocumentPage() {
     return () => {
       cancelled = true;
     };
-  }, [documentId, token, reloadKey, navigate]);
+  }, [documentId, reloadKey, navigate]);
 
   useEffect(
     () => () => {
@@ -173,7 +171,7 @@ export function EditDocumentPage() {
     setSaveError(null);
 
     try {
-      const saved = await documentsApi.saveValues(token, documentId, {
+      const saved = await documentsApi.saveValues(documentId, {
         values: serializeValues(fields, formData),
       });
 

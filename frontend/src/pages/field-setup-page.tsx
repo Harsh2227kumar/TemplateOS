@@ -38,7 +38,6 @@ import { useAuth } from "@/context/auth-context";
 import { AiSuggestionsPanel } from "@/components/fields/AiSuggestionsPanel";
 import { MonoKey, Notice, PipelineLoadError, PipelineSteps } from "@/components/fields/pipeline-ui";
 import { ApiError, templatesApi, type FieldSuggestion, type TemplateField } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import {
   FIELD_TYPE_OPTIONS,
   FIELD_TYPE_VALUES,
@@ -205,11 +204,10 @@ export function FieldSetupPage() {
     const load = async () => {
       setIsLoading(true);
       setLoadError(null);
-      const token = getAccessToken();
       try {
         const [templateData, fieldData] = await Promise.all([
-          templatesApi.getTemplateDetail(token, templateId),
-          templatesApi.getFields(token, templateId),
+          templatesApi.getTemplateDetail(templateId),
+          templatesApi.getFields(templateId),
         ]);
         if (!active) return;
         const ordered = [...fieldData].sort((a, b) => a.display_order - b.display_order);
@@ -275,7 +273,7 @@ export function FieldSetupPage() {
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      const saved = await templatesApi.saveFields(getAccessToken(), templateId, {
+      const saved = await templatesApi.saveFields(templateId, {
         fields: values.fields.map((field) => ({
           id: field.rowId,
           field_name: field.field_name.trim(),

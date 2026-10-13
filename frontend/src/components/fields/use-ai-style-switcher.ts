@@ -3,7 +3,6 @@ import { useFormContext, useWatch } from "react-hook-form";
 
 import { toast } from "@/components/ui/toast";
 import { aiApi, ApiError, MAX_AI_TEXT_CHARS } from "@/lib/api";
-import { getAccessToken } from "@/lib/auth-token";
 import {
   aiStyleReducer,
   initialAiStyleState,
@@ -147,9 +146,7 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
       setAnnouncement(`Rewriting ${opts.fieldLabel} in ${label} style…`);
 
       try {
-        const response = await aiApi.improveText(
-          getAccessToken(),
-          {
+        const response = await aiApi.improveText({
             template_id: opts.templateId,
             document_id: opts.documentId ?? null,
             field_name: opts.fieldName,
