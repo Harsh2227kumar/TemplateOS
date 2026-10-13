@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from fastapi import Response
 from pwdlib import PasswordHash
 
 from app.core.config import settings
@@ -43,3 +44,47 @@ def decode_access_token(token: str) -> str:
     if not isinstance(subject, str) or not subject:
         raise jwt.InvalidTokenError("Token subject is missing")
     return subject
+
+
+# --- Cookie sessions -------------------------------------------------------
+# Contract shared with the frontend; see app/api/v1/endpoints/auth.py.
+ACCESS_COOKIE_NAME = "templateos_access"
+REFRESH_COOKIE_NAME = "templateos_refresh"
+# The refresh cookie is only ever sent to the auth endpoints.
+REFRESH_COOKIE_PATH = f"{settings.api_v1_prefix}/auth"
+CSRF_HEADER_NAME = "X-Requested-With"
+CSRF_HEADER_VALUE = "TemplateOS"
+
+
+def _cookie_options() -> dict:
+    return {
+        "httponly": True,
+        "secure": settings.cookie_secure,
+        "samesite": "lax",
+        "domain": settings.cookie_domain,
+    }
+
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
+    response.set_cookie(
+        ACCESS_COOKIE_NAME,
+        access_token,
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+        **_cookie_options(),
+    )
+    response.set_cookie(
+        REFRESH_COOKIE_NAME,
+        refresh_token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        path=REFRESH_COOKIE_PATH,
+        **_cookie_options(),
+    )
+
+
+def clear_auth_cookies(response: Response) -> None:
+    # Attributes must match the ones used when setting, or browsers keep them.
+    response.delete_cookie(ACCESS_COOKIE_NAME, path="/", **_cookie_options())
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME, path=REFRESH_COOKIE_PATH, **_cookie_options()
+    )
