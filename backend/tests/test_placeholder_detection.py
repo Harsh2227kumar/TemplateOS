@@ -320,23 +320,11 @@ def test_detection_flow_invalid_names_never_reach_persistence():
 
 # --- 2. Endpoint tests (activate once Member 2's routes exist) ----------------
 
-ROUTE_PATHS = {getattr(route, "path", "") for route in app.routes}
-DETECT_ENDPOINT_MISSING = not any(
-    p.endswith("/detect-placeholders") for p in ROUTE_PATHS
-)
-FIELDS_ENDPOINT_MISSING = not any(p.endswith("/fields") for p in ROUTE_PATHS)
-
-requires_detect_endpoint = pytest.mark.skipif(
-    DETECT_ENDPOINT_MISSING,
-    reason="POST /templates/{id}/detect-placeholders not implemented yet (Member 2, V1.3 Phase 1)",
-)
-requires_fields_endpoint = pytest.mark.skipif(
-    FIELDS_ENDPOINT_MISSING,
-    reason="GET /templates/{id}/fields not implemented yet (Member 2, V1.3 Phase 1)",
-)
+# The detect-placeholders and fields endpoints shipped in V1.3; these tests
+# always run. (The old app.routes probe silently skipped them on FastAPI
+# >= 0.140, which no longer flattens included routers into app.routes.)
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_persists_ordered_fields(owner_token):
     template = _upload_template(owner_token, "Detection Clean", CLEAN_DOCX)
     response = client.post(
@@ -376,7 +364,6 @@ def test_detect_placeholders_persists_ordered_fields(owner_token):
     assert _persisted_field_names(template["id"]) == EXPECTED_VALID_FIELDS
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_is_idempotent(owner_token):
     template = _upload_template(owner_token, "Detection Idempotent", CLEAN_DOCX)
     headers = {"Authorization": f"Bearer {owner_token}"}
@@ -399,7 +386,6 @@ def test_detect_placeholders_is_idempotent(owner_token):
     assert _persisted_field_count(template["id"]) == 3
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_force_replaces_fields(owner_token):
     template = _upload_template(owner_token, "Detection Force", CLEAN_DOCX)
     headers = {"Authorization": f"Bearer {owner_token}"}
@@ -420,7 +406,6 @@ def test_detect_placeholders_force_replaces_fields(owner_token):
     assert _persisted_field_names(template["id"]) == EXPECTED_VALID_FIELDS
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_reports_invalid_names_without_500(owner_token):
     template = _upload_template(owner_token, "Detection Malformed", MALFORMED_DOCX)
     response = client.post(
@@ -450,7 +435,6 @@ def test_detect_placeholders_reports_invalid_names_without_500(owner_token):
     assert body["summary"]["total_matches"] == 5
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_is_owner_only(owner_token, other_token):
     template = _upload_template(owner_token, "Detection Private", CLEAN_DOCX)
     response = client.post(
@@ -461,7 +445,6 @@ def test_detect_placeholders_is_owner_only(owner_token, other_token):
     assert _persisted_field_count(template["id"]) == 0
 
 
-@requires_detect_endpoint
 def test_detect_placeholders_template_not_found(owner_token):
     response = client.post(
         "/api/v1/templates/999999/detect-placeholders",
@@ -470,7 +453,6 @@ def test_detect_placeholders_template_not_found(owner_token):
     assert response.status_code == 404
 
 
-@requires_fields_endpoint
 def test_get_fields_returns_ordered_list(owner_token):
     template = _upload_template(owner_token, "Detection Fields Read", CLEAN_DOCX)
     detect = client.post(
@@ -487,7 +469,6 @@ def test_get_fields_returns_ordered_list(owner_token):
     assert [f["field_name"] for f in response.json()] == EXPECTED_VALID_FIELDS
 
 
-@requires_fields_endpoint
 def test_get_fields_enforces_view_access(owner_token, other_token):
     template = _upload_template(owner_token, "Detection Fields Access", CLEAN_DOCX)
     detect = client.post(

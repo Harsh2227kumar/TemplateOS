@@ -343,13 +343,8 @@ def test_apply_replacements_reports_unmatched():
 
 # ── 4. Endpoint tests (skip until Member 2's clean routes exist) ────
 
-ROUTE_PATHS = {getattr(route, "path", "") for route in app.routes}
-CLEAN_ENDPOINT_MISSING = not any(p.endswith("/clean") for p in ROUTE_PATHS)
-
-requires_clean_endpoint = pytest.mark.skipif(
-    CLEAN_ENDPOINT_MISSING,
-    reason="POST /templates/{id}/clean not implemented yet (Member 2, V1.3 Phase 2)",
-)
+# The clean endpoint shipped in V1.3; these tests always run. (The old
+# app.routes probe silently skipped them on FastAPI >= 0.140.)
 
 
 def _signup_and_login(email: str, full_name: str) -> str:
@@ -394,7 +389,6 @@ def _upload_template(token: str, name: str) -> dict:
     return response.json()
 
 
-@requires_clean_endpoint
 def test_clean_persists_processed_path_and_field(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean Happy Path")
     response = client.post(
@@ -452,7 +446,6 @@ def test_clean_persists_processed_path_and_field(clean_owner_token):
     )
 
 
-@requires_clean_endpoint
 def test_clean_requires_confirm(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean No Confirm")
     response = client.post(
@@ -472,7 +465,6 @@ def test_clean_requires_confirm(clean_owner_token):
     assert detail["processed_file_path"] is None
 
 
-@requires_clean_endpoint
 def test_clean_rejects_non_owner(clean_owner_token, clean_other_token):
     template = _upload_template(clean_owner_token, "Clean Ownership")
     response = client.post(
@@ -486,7 +478,6 @@ def test_clean_rejects_non_owner(clean_owner_token, clean_other_token):
     assert response.status_code == 403
 
 
-@requires_clean_endpoint
 def test_clean_rejects_empty_replacements(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean Empty")
     response = client.post(
@@ -497,7 +488,6 @@ def test_clean_rejects_empty_replacements(clean_owner_token):
     assert response.status_code in (400, 422)
 
 
-@requires_clean_endpoint
 def test_clean_rejects_invalid_key_via_schema(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean Invalid Key")
     response = client.post(
@@ -513,7 +503,6 @@ def test_clean_rejects_invalid_key_via_schema(clean_owner_token):
     assert response.status_code == 422  # schema rejects before reaching the endpoint
 
 
-@requires_clean_endpoint
 def test_clean_is_idempotent_across_reruns(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean Idempotent")
     headers = {"Authorization": f"Bearer {clean_owner_token}"}
@@ -545,7 +534,6 @@ def test_clean_is_idempotent_across_reruns(clean_owner_token):
     assert second.json()["processed_file_path"]
 
 
-@requires_clean_endpoint
 def test_clean_mark_configured_advances_status(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean Mark Configured")
     response = client.post(
@@ -561,7 +549,6 @@ def test_clean_mark_configured_advances_status(clean_owner_token):
     assert response.json()["status"] == "field_configured"
 
 
-@requires_clean_endpoint
 def test_clean_does_not_downgrade_configured_status(clean_owner_token):
     template = _upload_template(clean_owner_token, "Clean No Downgrade")
     with TestSession() as session:
