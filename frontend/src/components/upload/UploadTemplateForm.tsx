@@ -28,11 +28,11 @@ import { Badge } from "@/components/ui/badge";
 
 import {
   ApiError,
-  templatesApi,
   type TemplateAccessOptions,
   type TemplateResponse,
 } from "@/lib/api";
 import { UploadZone } from "./UploadZone";
+import { useUploadTemplate } from "@/hooks/queries";
 import { useAuth } from "@/context/auth-context";
 import {
   AudienceFields,
@@ -133,6 +133,7 @@ interface UploadTemplateFormProps {
 export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadReset }: UploadTemplateFormProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const uploadTemplate = useUploadTemplate();
   const { options: accessOptions, error: accessOptionsError } = useAccessOptions();
 
   const [error, setError] = useState("");
@@ -163,7 +164,7 @@ export function UploadTemplateForm({ onUploadStart, onUploadSuccess, onUploadRes
     try {
       onUploadStart?.();
       const access = toAccessPayload(values.audience);
-      const result = await templatesApi.upload({
+      const result = await uploadTemplate.mutateAsync({
         file: values.file,
         name: values.name.trim(),
         description: values.description?.trim() || undefined,

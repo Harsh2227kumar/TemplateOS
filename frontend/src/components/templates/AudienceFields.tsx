@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { templateAccessApi } from "@/lib/api";
+import { useTemplateAccessOptions } from "@/hooks/queries";
 import type {
   TemplateAccessOptions,
   TemplateAccessUpdate,
@@ -177,29 +177,16 @@ export function withScopeDefaults(
   return next;
 }
 
-/** Load GET /templates/access-options once; null while loading or on failure. */
+/** GET /templates/access-options (cached); null while loading or on failure. */
 export function useAccessOptions(enabled = true) {
-  const [options, setOptions] = useState<TemplateAccessOptions | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    templateAccessApi
-      .getOptions()
-      .then((data) => {
-        if (!cancelled) setOptions(data);
-      })
-      .catch((caught: unknown) => {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Could not load audience options");
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled]);
-
+  const query = useTemplateAccessOptions(enabled);
+  const options: TemplateAccessOptions | null = query.data ?? null;
+  const error =
+    query.isError && !query.data
+      ? query.error instanceof Error
+        ? query.error.message
+        : "Could not load audience options"
+      : null;
   return { options, error };
 }
 

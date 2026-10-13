@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { templatesApi, TemplateListItem } from "@/lib/api";
+import { useTemplateLibrary } from "@/hooks/queries";
 import { TemplateSearchBar } from "@/components/templates/TemplateSearchBar";
 import { TemplateFilters } from "@/components/templates/TemplateFilters";
 import { TemplateGrid } from "@/components/templates/TemplateGrid";
@@ -11,38 +11,18 @@ export function TemplateLibraryPage() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [visibility, setVisibility] = useState("");
-  const [templates, setTemplates] = useState<TemplateListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const limit = 20;
 
-  useEffect(() => {
-    fetchLibrary();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, category, visibility, page]);
-
-  const fetchLibrary = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await templatesApi.getLibrary({
-        search,
-        category,
-        visibility,
-        page,
-        limit,
-      });
-      setTemplates(data.templates);
-      setTotal(data.total);
-    } catch (err: any) {
-      setError(err.message || "Failed to fetch templates");
-      setTemplates([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const library = useTemplateLibrary({ search, category, visibility, page, limit });
+  // A retry after an error shows the skeleton again, as before.
+  const isLoading = library.isPending || (library.isError && library.isFetching);
+  const error =
+    library.isError && !library.isFetching && !library.data
+      ? library.error.message || "Failed to fetch templates"
+      : null;
+  const templates = library.data?.templates ?? [];
+  const total = library.data?.total ?? 0;
 
   const handleClearAll = () => {
     setSearch("");
@@ -100,7 +80,7 @@ export function TemplateLibraryPage() {
       {error ? (
         <div className="p-4 rounded-md bg-red-50 text-red-800 border border-red-200 flex flex-col items-start gap-3">
           <p>{error}</p>
-          <Button variant="outline" size="sm" onClick={fetchLibrary} className="bg-white">
+          <Button variant="outline" size="sm" onClick={() => void library.refetch()} className="bg-white">
             Retry
           </Button>
         </div>

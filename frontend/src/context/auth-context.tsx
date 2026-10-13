@@ -9,8 +9,9 @@ import {
   type ReactNode,
 } from "react";
 import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 
-import { ApiError, SESSION_EXPIRED_EVENT, authApi, clearLegacyAccessToken, type User } from "@/lib/api";
+import { ApiError, SESSION_EXPIRED_EVENT, authApi, type User } from "@/lib/api";
 
 interface AuthContextValue {
   user: User | null;
@@ -30,6 +31,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   // StrictMode runs mount effects twice in development; ask /auth/me once.
@@ -38,8 +40,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    // Tokens from the old localStorage auth must not linger.
-    clearLegacyAccessToken();
 
     authApi
       .me()
@@ -58,18 +58,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // The refresh cookie was rejected mid-session: drop the user so
-  // ProtectedRoute sends them back to the login page.
+  // ProtectedRoute sends them back to the login page. Cached data belongs to
+  // the old session, so it goes too.
   useEffect(() => {
-    const handleExpired = () => setUser(null);
+    const handleExpired = () => {
+      queryClient.clear();
+      setUser(null);
+    };
     window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
-  }, []);
+  }, [queryClient]);
 
   const login = useCallback(async (email: string, password: string) => {
     await authApi.login({ email, password });
     const currentUser = await authApi.me();
+    // Never show a previous account's cached templates or drafts.
+    queryClient.clear();
     setUser(currentUser);
-  }, []);
+  }, [queryClient]);
 
   const signup = useCallback(async (fullName: string, email: string, password: string) => {
     await authApi.signup({ full_name: fullName, email, password });
@@ -82,9 +88,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Sign out locally anyway; the cookies expire on their own.
       console.warn("Logout request failed:", error);
     }
+    queryClient.clear();
     setUser(null);
     navigate("/login", { replace: true });
-  }, [navigate]);
+  }, [navigate, queryClient]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ user, isLoading, login, signup, logout }),

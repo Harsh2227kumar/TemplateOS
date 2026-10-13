@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ApiError, templateAccessApi, type TemplateResponse } from "@/lib/api";
+import { useUpdateTemplateAccess } from "@/hooks/queries";
+import { ApiError, type TemplateResponse } from "@/lib/api";
 import {
   AudienceFields,
   audienceFromTemplate,
@@ -26,7 +27,8 @@ interface ManageAccessDialogProps {
   role: string | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: (template: TemplateResponse) => void;
+  /** The template cache is updated by the mutation; this is only a notification. */
+  onSaved?: (template: TemplateResponse) => void;
 }
 
 export function ManageAccessDialog({
@@ -40,18 +42,22 @@ export function ManageAccessDialog({
   const [value, setValue] = useState<AudienceValue>(() => audienceFromTemplate(template));
   const [errors, setErrors] = useState<AudienceErrors>({});
   const [submitted, setSubmitted] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const updateAccess = useUpdateTemplateAccess();
+  const saving = updateAccess.isPending;
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Start from the template's current audience every time the dialog opens.
+  // Only on open: a refetched template must not overwrite edits in progress.
+  const templateRef = useRef(template);
+  templateRef.current = template;
   useEffect(() => {
     if (open) {
-      setValue(audienceFromTemplate(template));
+      setValue(audienceFromTemplate(templateRef.current));
       setErrors({});
       setSubmitted(false);
       setSaveError(null);
     }
-  }, [open, template]);
+  }, [open]);
 
   const handleChange = (next: AudienceValue) => {
     setValue(next);
@@ -64,20 +70,16 @@ export function ManageAccessDialog({
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
-    setSaving(true);
+    if (saving) return;
     setSaveError(null);
     try {
-      const updated = await templateAccessApi.update(template.id,
-        toAccessPayload(value),
-      );
-      onSaved(updated);
+      const updated = await updateAccess.mutateAsync({ id: template.id, body: toAccessPayload(value) });
+      onSaved?.(updated);
       onOpenChange(false);
     } catch (caught) {
       setSaveError(
         caught instanceof ApiError ? caught.message : "Could not update access. Please try again.",
       );
-    } finally {
-      setSaving(false);
     }
   };
 

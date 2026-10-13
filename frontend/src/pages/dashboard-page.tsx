@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { FileText, FolderOpen, FileEdit, AlertCircle, ChevronRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -7,48 +6,25 @@ import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { templatesApi, documentsApi, TemplateListItem, Document } from "@/lib/api";
-import { parseServerDate, serverTime } from "@/lib/dates";
+import { useMyDocuments, useMyTemplates } from "@/hooks/queries";
+import { parseServerDate } from "@/lib/dates";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const firstName = user?.full_name?.split(" ")[0] || "User";
 
-  const [myTemplates, setMyTemplates] = useState<TemplateListItem[]>([]);
-  const [templatesLoading, setTemplatesLoading] = useState(true);
-  const [myDrafts, setMyDrafts] = useState<Document[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(true);
-  const [draftsError, setDraftsError] = useState<string | null>(null);
-
-  // Most recently edited first; drafts with an unreadable date go last.
-  const fetchDrafts = useCallback(async () => {
-    setDraftsLoading(true);
-    setDraftsError(null);
-    try {
-      const data = await documentsApi.getMyDocuments();
-      setMyDrafts([...data].sort((a, b) => serverTime(b.updated_at) - serverTime(a.updated_at)));
-    } catch (err) {
-      setDraftsError(err instanceof Error && err.message ? err.message : "Couldn't load your drafts.");
-    } finally {
-      setDraftsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    async function fetchTemplates() {
-      try {
-        const data = await templatesApi.getMyTemplates();
-        setMyTemplates(data);
-      } catch (err) {
-        // silent fail
-      } finally {
-        setTemplatesLoading(false);
-      }
-    }
-    fetchTemplates();
-    fetchDrafts();
-  }, [fetchDrafts]);
+  const { data: myTemplatesData, isPending: templatesLoading } = useMyTemplates();
+  // A failed templates request shows the empty state, as before.
+  const myTemplates = myTemplatesData ?? [];
+  const drafts = useMyDocuments();
+  const myDrafts = drafts.data ?? [];
+  // A retry after an error shows the skeleton again.
+  const draftsLoading = drafts.isPending || (drafts.isError && drafts.isFetching);
+  // A failed background refetch keeps showing the cached list.
+  const draftsError = drafts.isError && !drafts.data
+    ? drafts.error.message || "Couldn't load your drafts."
+    : null;
 
   const getCategoryColor = (category: string) => {
     switch (category.toLowerCase()) {
@@ -166,7 +142,7 @@ export function DashboardPage() {
         <div className="flex flex-col items-center gap-3 py-6 text-center" role="alert">
           <AlertCircle className="h-8 w-8 text-red-400" />
           <p className="text-sm text-slate-600">{draftsError}</p>
-          <Button variant="outline" size="sm" onClick={() => void fetchDrafts()}>
+          <Button variant="outline" size="sm" onClick={() => void drafts.refetch()}>
             Retry
           </Button>
         </div>
