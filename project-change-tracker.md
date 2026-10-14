@@ -2960,3 +2960,45 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge order: #156 -> `backend`; retarget #157 to `backend` and merge; #158, #159 and #160 -> `frontend`; then integrate `backend` and `frontend` into `dev`.
 - After merge: run `alembic upgrade head` (`c7a1d3e5f9b2`, `b6d2e8f4a1c7`, `d8f2a4c6e1b9`). For PDF, set `GOTENBERG_URL` or install LibreOffice.
 - Open decisions: org_admins cannot see users without an organization (new signups), so only super_admin onboards them; org/department delete returns 409 while in use; spelling variants are not auto-merged; legacy org/department string columns are kept in sync.
+
+### Checkpoint 0059
+
+- Date: 2026-10-14
+- Member: AI Assistant
+- Branch:
+  - `feature/backend-ai-lists-expand-pdf-check` (from `backend`, PR #164 into `backend`)
+  - `feature/frontend-ai-everywhere-pdf-retry` (from `frontend`, PR #165 into `frontend`)
+  - This entry: `docs/project-change-tracker-ai-everywhere` (into `dev`)
+- Push status: pushed, PRs open
+- Range covered: after Checkpoint 0058 -> 2026-10-14
+
+#### Summary
+
+- AI writing now works on every AI-enabled text, paragraph and list field. A new "Expand" style and a document-wide "Rewrite all with AI" bar with Undo were added. The PDF can be created after the fact, and the PDF setup can be diagnosed.
+
+#### Completed Tasks
+
+- Backend: `POST /ai/improve-text` accepts list fields (`original_items` -> `improved_items`, rewritten per item, item count enforced); `expand` action (Nova Lite); plain-text output (prompt and cleanup of Markdown, headings, quotes, list prefixes); descriptive lists inferred AI-enabled; `GET /system/pdf-check`; startup log naming the PDF converter.
+- Frontend: AI toolbar on list fields; Expand (not on one-line inputs); "Rewrite all with AI" bar on Create/Edit draft (3 requests at a time, skips fields edited meanwhile, Undo); AI switch on field setup limited to text, paragraph and list fields; "Create PDF" on drafts generated without a converter.
+
+#### Code Changes
+
+- Backend: `schemas/ai.py`, `services/ai_service.py`, `api/v1/endpoints/ai.py`, `services/field_inference.py`, `services/pdf_service.py`, `api/v1/endpoints/system.py`, `main.py`, `.env.example`; tests `test_ai_endpoints.py`, `test_smart_template_pipeline.py`, new `test_pdf_check.py`.
+- Frontend: `components/fields/{ai-style-state.ts,use-ai-style-switcher.ts,AiActionToolbar.tsx,AiRewriteAllBar.tsx}`, `components/forms/DynamicField.tsx`, `features/documents/{DraftFormShell.tsx,GenerationPanel.tsx}`, `features/field-setup/{FieldRowCard.tsx,field-setup-schema.ts}`, `lib/api/types.ts`, `pages/edit-document-page.tsx`; new `tests/ai-fields.test.ts`.
+
+#### Features Added / Updated / Removed
+
+- Added: AI on list fields; Expand style; Rewrite all with AI and Undo; Create PDF; PDF setup check.
+- Updated: AI output is plain text so it keeps the template's formatting; AI switch only on supported types.
+
+#### Issues Fixed
+
+- Fields marked AI-enabled showed no AI toolbar unless they were text or paragraph fields (the setup page allowed the switch on any type).
+- "PDF conversion is not set up" could only be cleared by regenerating, and its cause (`.env` not read until restart) was not visible.
+
+#### Notes For Next Push
+
+- Verified: backend pytest 530 passed; frontend tsc + build OK, 82/82 tests. Browser end-to-end with a fake Bedrock client: list rewrite kept 2/2 items with Markdown stripped; rewrite-all Expand changed 3 fields and Undo restored them; generated DOCX and PDF (LibreOffice via Create PDF) show the rewritten values in the template layout.
+- Merge order: #164 -> `backend`, then #165 -> `frontend`, then integrate into `dev`. No migration.
+- Local setup: put `GOTENBERG_URL=http://localhost:3000` in the repository-root `.env` and restart the backend. Check the startup log or `GET /api/v1/system/pdf-check`, then click "Create PDF" on an existing draft.
+- AI calls need a valid Bedrock key (`AWS_BEARER_TOKEN_BEDROCK`); the current local key was rejected by AWS (403) and must be regenerated.
