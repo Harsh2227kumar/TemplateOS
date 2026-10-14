@@ -19,6 +19,10 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   signup: (fullName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-read GET /auth/me (e.g. after an admin changed the current user's role). */
+  refreshUser: () => Promise<void>;
+  /** Replace the signed-in user with a fresher copy (e.g. the PATCH /auth/me response). */
+  setCurrentUser: (user: User) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -93,9 +97,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     navigate("/login", { replace: true });
   }, [navigate, queryClient]);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      setUser(await authApi.me());
+    } catch (error) {
+      // A 401 already fired SESSION_EXPIRED_EVENT; anything else keeps the old copy.
+      console.warn("Could not refresh the current user:", error);
+    }
+  }, []);
+
+  const setCurrentUser = useCallback((next: User) => setUser(next), []);
+
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isLoading, login, signup, logout }),
-    [isLoading, user, login, signup, logout],
+    () => ({ user, isLoading, login, signup, logout, refreshUser, setCurrentUser }),
+    [isLoading, user, login, signup, logout, refreshUser, setCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

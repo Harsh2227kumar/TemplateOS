@@ -1,9 +1,10 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, type KeyboardEvent } from "react";
 import { Controller, useFormContext } from "react-hook-form";
 import { ArrowDown, ArrowUp, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { listExampleItems } from "@/lib/list-example";
 import { cleanListItems } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ interface ListFieldProps {
   /** Used for the first input's id so the field label focuses it. */
   inputId: string;
   label: string;
+  /** The field's example value; a JSON array gives one placeholder per item. */
   placeholder?: string | null;
   maxItems?: number;
   invalid?: boolean;
@@ -87,6 +89,7 @@ function ListEditor({
     el?.focus();
   });
 
+  const examples = useMemo(() => listExampleItems(placeholder), [placeholder]);
   const filledCount = cleanListItems(value).length;
   const atMax = maxItems !== undefined && rows.length >= maxItems;
 
@@ -163,7 +166,7 @@ function ListEditor({
                 onChange={(e) => update(index, e.target.value)}
                 onBlur={onBlur}
                 onKeyDown={(e) => handleKeyDown(e, index)}
-                placeholder={index === 0 && placeholder ? placeholder : `Item ${index + 1}`}
+                placeholder={examples[index] ?? `Item ${index + 1}`}
                 aria-label={`${label}, item ${index + 1} of ${rows.length}`}
                 aria-invalid={invalid || undefined}
                 aria-describedby={describedBy}

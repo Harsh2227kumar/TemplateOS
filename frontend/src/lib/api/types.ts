@@ -12,6 +12,9 @@ export interface User {
   email: string;
   full_name: string;
   role: string;
+  organization_id: number | null;
+  department_id: number | null;
+  /** Names of the linked organization / department (read-only for the user). */
   department: string | null;
   organization: string | null;
   job_title: string | null;
@@ -19,6 +22,13 @@ export interface User {
   avatar_url: string | null;
   signature_path: string | null;
   preferences: UserPreferences | null;
+}
+
+/** PATCH /auth/me: the only fields a user may change on themselves. */
+export interface ProfileUpdate {
+  full_name?: string;
+  phone?: string | null;
+  job_title?: string | null;
 }
 
 /** Body of POST /auth/login. The session itself travels in httpOnly cookies. */
@@ -66,6 +76,9 @@ export interface TemplateResponse extends TemplateAudience {
 export type TemplateVisibility = "private" | "public" | "organization" | "department" | "group";
 
 export interface TemplateAudience {
+  scope_organization_id: number | null;
+  scope_department_id: number | null;
+  /** Display names of the linked organization / department rows. */
   scope_organization: string | null;
   scope_department: string | null;
   /** null = every role in scope */
@@ -76,17 +89,82 @@ export interface TemplateAudience {
 
 export interface TemplateAccessUpdate {
   visibility: TemplateVisibility;
-  scope_organization?: string | null;
-  scope_department?: string | null;
+  scope_organization_id?: number | null;
+  scope_department_id?: number | null;
   allowed_roles?: string[] | null;
+}
+
+export interface OrganizationOption {
+  id: number;
+  name: string;
+}
+
+export interface DepartmentOption {
+  id: number;
+  organization_id: number;
+  name: string;
 }
 
 export interface TemplateAccessOptions {
   roles: { value: string; label: string }[];
-  organizations: string[];
-  departments: { organization: string | null; department: string }[];
+  organizations: OrganizationOption[];
+  departments: DepartmentOption[];
   can_publish: { organization: boolean; department: boolean };
-  defaults: { organization: string | null; department: string | null };
+  defaults: { organization_id: number | null; department_id: number | null };
+}
+
+// --- Administration: users, organizations, departments ---
+
+export interface AdminUser {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  organization_id: number | null;
+  organization: string | null;
+  department_id: number | null;
+  department: string | null;
+  job_title: string | null;
+  phone: string | null;
+}
+
+export interface AdminUserList {
+  users: AdminUser[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface AdminUserListParams {
+  search?: string;
+  role?: string;
+  organization_id?: number;
+  department_id?: number;
+  page?: number;
+  limit?: number;
+}
+
+/** PATCH /admin/users/{id}: only the keys present are applied; null clears. */
+export interface AdminUserUpdate {
+  role?: string;
+  organization_id?: number | null;
+  department_id?: number | null;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  created_at: string;
+  department_count: number;
+  user_count: number;
+}
+
+export interface Department {
+  id: number;
+  organization_id: number;
+  name: string;
+  created_at: string;
+  user_count: number;
 }
 
 
@@ -324,6 +402,29 @@ export interface Document {
   updated_at: string;
   template_name?: string;
   values?: DocumentValue[];
+  /** V1.6: latest generated output; null until the first generation. */
+  generated?: GeneratedInfo | null;
+}
+
+// --- V1.6: Document generation ---
+
+export type PdfStatus = "ok" | "failed" | "not_configured";
+
+export interface GeneratedInfo {
+  generated_at: string;
+  pdf_status: PdfStatus;
+  pdf_error: string | null;
+  /** API path (with the /api/v1 prefix) of the DOCX download. */
+  docx_url: string;
+  pdf_url: string | null;
+  /** The draft's values were saved after this generation. */
+  is_stale: boolean;
+  template_version: number | null;
+}
+
+export interface GenerateDocumentResponse extends GeneratedInfo {
+  document_id: number;
+  document_status: string;
 }
 
 export type DocumentFormValues = Record<string, any>;
