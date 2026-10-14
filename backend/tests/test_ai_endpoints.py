@@ -102,8 +102,36 @@ def test_improve_text_request_accepts_each_action(action):
     assert req.document_id is None
 
 
-def test_ai_text_actions_are_the_four_phase1_actions():
-    assert set(AI_TEXT_ACTIONS) == {"grammar", "tone", "concise", "formal"}
+def test_ai_text_actions_are_the_phase1_actions_plus_expand():
+    assert set(AI_TEXT_ACTIONS) == {"grammar", "tone", "concise", "formal", "expand"}
+
+
+def test_improve_text_request_accepts_list_items_and_drops_blanks():
+    payload = {k: v for k, v in VALID_REQUEST.items() if k != "original_text"}
+    req = ImproveTextRequest(**payload, original_items=[" Venue booking ", "", "Budget"])
+    assert req.original_items == ["Venue booking", "Budget"]
+    assert req.original_text is None
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        ["  ", ""],
+        ["x"] * 51,
+        ["x" * 1001],
+        ["x" * 900] * 6,
+    ],
+)
+def test_improve_text_request_rejects_invalid_items(items):
+    payload = {k: v for k, v in VALID_REQUEST.items() if k != "original_text"}
+    with pytest.raises(ValidationError):
+        ImproveTextRequest(**payload, original_items=items)
+
+
+def test_improve_text_request_needs_exactly_one_source():
+    with pytest.raises(ValidationError):
+        ImproveTextRequest(**VALID_REQUEST, original_items=["a"])
 
 
 @pytest.mark.parametrize(
@@ -333,7 +361,13 @@ def nova_settings(monkeypatch):
 
 @pytest.mark.parametrize(
     "action, model",
-    [("grammar", NOVA_MICRO), ("tone", NOVA_LITE), ("concise", NOVA_LITE), ("formal", NOVA_LITE)],
+    [
+        ("grammar", NOVA_MICRO),
+        ("tone", NOVA_LITE),
+        ("concise", NOVA_LITE),
+        ("formal", NOVA_LITE),
+        ("expand", NOVA_LITE),
+    ],
 )
 def test_model_for_action_routes_to_nova(nova_settings, action, model):
     assert ai_service.model_for_action(action) == model
@@ -366,6 +400,42 @@ def test_improve_text_calls_nova_and_strips_result(nova_settings, monkeypatch):
     assert call["response_model"] is ai_service.TextImprovement
     assert call["messages"][0]["role"] == "system"
     assert "some long text" in call["messages"][1]["content"]
+
+
+def test_improve_text_returns_plain_text(nova_settings, monkeypatch):
+    completions = _FakeCompletions(
+        result=ai_service.TextImprovement(improved_text='"## Minutes\n**We** agreed."')
+    )
+    monkeypatch.setattr(ai_service, "_build_bedrock_client", lambda: _fake_client(completions))
+    assert ai_service.improve_text("formal", "we agreed") == "Minutes\nWe agreed."
+    # The prompt asks for plain text that fits the formatted document.
+    assert "plain text" in completions.calls[0]["messages"][0]["content"]
+
+
+def test_improve_items_rewrites_each_item_and_keeps_order(nova_settings, monkeypatch):
+    completions = _FakeCompletions(
+        result=ai_service.ItemsImprovement(items=["1. Venue booking.", "- **Budget** review"])
+    )
+    monkeypatch.setattr(ai_service, "_build_bedrock_client", lambda: _fake_client(completions))
+
+    assert ai_service.improve_items("grammar", ["venue bokking", "budget reveiw"]) == [
+        "Venue booking.",
+        "Budget review",
+    ]
+    call = completions.calls[0]
+    assert call["model"] == NOVA_MICRO
+    assert call["response_model"] is ai_service.ItemsImprovement
+    content = call["messages"][1]["content"]
+    assert "exactly 2 items" in content
+    assert "1. venue bokking\n2. budget reveiw" in content
+
+
+@pytest.mark.parametrize("items", [["Only one"], ["A", "B", "C"], ["A", "  "]])
+def test_improve_items_rejects_changed_item_count(nova_settings, monkeypatch, items):
+    completions = _FakeCompletions(result=ai_service.ItemsImprovement(items=items))
+    monkeypatch.setattr(ai_service, "_build_bedrock_client", lambda: _fake_client(completions))
+    with pytest.raises(AiUnavailableError, match="number of list items"):
+        ai_service.improve_items("formal", ["a", "b"])
 
 
 def test_improve_text_unknown_action_raises_value_error(nova_settings):
@@ -590,6 +660,40 @@ def test_improve_text_unconfigured_model_logs_placeholder(world, monkeypatch):
     assert _audit_rows()[0].model == "unconfigured"
 
 
+def test_improve_text_list_field_rewrites_items(world, monkeypatch):
+    calls = []
+
+    def fake_items(action_type, items):
+        calls.append((action_type, items))
+        return ["Venue booking.", "Budget review."]
+
+    monkeypatch.setattr(ai_service, "improve_items", fake_items)
+    _mock_improve(monkeypatch, AssertionError("text path must not run"))
+
+    response = api_client.post(
+        URL,
+        json=_body(
+            world,
+            field_name="items",
+            original_text=None,
+            original_items=["venue booking", "", "budget review"],
+            action_type="expand",
+        ),
+        headers=_auth(world.owner),
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "improved_text": "Venue booking.\nBudget review.",
+        "improved_items": ["Venue booking.", "Budget review."],
+    }
+    assert calls == [("expand", ["venue booking", "budget review"])]
+    row = _audit_rows()[0]
+    assert row.status == "success"
+    assert row.field_key == "items"
+    assert row.model == NOVA_LITE
+
+
 def test_improve_text_requires_auth(world):
     assert api_client.post(URL, json=_body(world)).status_code == 401
 
@@ -601,7 +705,8 @@ def test_improve_text_requires_auth(world):
         ({"document_id": 99999}, 404),
         ({"field_name": "missing_field"}, 404),
         ({"field_name": "notes"}, 422),  # ai_enabled = False
-        ({"field_name": "items"}, 422),  # list field
+        ({"field_name": "items"}, 422),  # list field sent as original_text
+        ({"original_text": None, "original_items": ["a"]}, 422),  # text field sent as items
         ({"action_type": "rewrite"}, 422),
         ({"original_text": "   "}, 422),
     ],

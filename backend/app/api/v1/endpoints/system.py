@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.db.session import check_database_connection
+from app.services.pdf_service import check_pdf_setup
 
 router = APIRouter()
 
@@ -17,3 +18,9 @@ def db_check() -> dict[str, str | bool]:
         "ok": is_connected,
         "message": detail,
     }
+
+
+@router.get("/pdf-check")
+def pdf_check() -> dict[str, str | bool | None]:
+    """Which PDF converter is configured and whether it answers right now."""
+    return check_pdf_setup()
