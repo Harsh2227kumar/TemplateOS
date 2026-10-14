@@ -3,7 +3,8 @@ AI endpoints for V1.5 Phase 1 — Basic AI Actions.
 
 Endpoints:
 - POST /ai/improve-text — rewrite ONE form field's text (grammar, tone,
-  concise, formal) with Amazon Nova on Bedrock and return the improved text.
+  concise, formal, expand) with Amazon Nova on Bedrock and return the
+  improved text. List fields are rewritten item by item (same item count).
 
 Rules:
 - Backend-only AI: only FastAPI calls Bedrock.
@@ -31,11 +32,13 @@ from app.services.template_access import user_can_view_template
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Field types the text actions apply to (lists/dates/numbers are not prose).
-AI_TEXT_FIELD_TYPES = ("text", "textarea")
+# Field types the text actions apply to (dates/numbers/emails are not prose).
+AI_TEXT_FIELD_TYPES = ("text", "textarea", "list")
 
 
-@router.post("/improve-text", response_model=ImproveTextResponse)
+@router.post(
+    "/improve-text", response_model=ImproveTextResponse, response_model_exclude_none=True
+)
 def improve_text(
     payload: ImproveTextRequest,
     current_user: CurrentUser,
@@ -47,8 +50,9 @@ def improve_text(
     - 404 if the template or document does not exist, or the field is not
       part of the template
     - 403 if the user cannot view the template or does not own the document
-    - 422 if the field is not an AI-enabled text/textarea field, or the
-      document belongs to another template
+    - 422 if the field is not an AI-enabled text/textarea/list field, the
+      value is sent in the wrong shape (original_items for a list field,
+      original_text otherwise), or the document belongs to another template
     - 503 if AI is not configured or Bedrock fails (logged as status="error")
     """
     template = get_template_by_id(db, payload.template_id)
@@ -96,15 +100,38 @@ def improve_text(
             detail="AI actions are not enabled for this field",
         )
 
+    is_list = field.field_type == "list"
+    if is_list != (payload.original_items is not None):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Send original_items (one entry per item) for a list field"
+                if is_list
+                else "Send original_text for a text or paragraph field"
+            ),
+        )
+
     model = ai_service.model_for_action(payload.action_type)
+    chars = (
+        sum(len(item) for item in payload.original_items)
+        if is_list
+        else len(payload.original_text)
+    )
     logger.info(
         f"AI improve-text started: action={payload.action_type} "
         f"template={template.id} document={payload.document_id} "
         f"field={payload.field_name} user={current_user.id} "
-        f"chars={len(payload.original_text)}"
+        f"chars={chars}" + (f" items={len(payload.original_items)}" if is_list else "")
     )
     try:
-        improved = ai_service.improve_text(payload.action_type, payload.original_text)
+        if is_list:
+            improved_items = ai_service.improve_items(
+                payload.action_type, payload.original_items
+            )
+            improved = "\n".join(improved_items)
+        else:
+            improved_items = None
+            improved = ai_service.improve_text(payload.action_type, payload.original_text)
     except AiUnavailableError as e:
         log_ai_generation(
             db,
@@ -140,4 +167,4 @@ def improve_text(
         f"template={template.id} field={payload.field_name} "
         f"user={current_user.id} chars_out={len(improved)}"
     )
-    return ImproveTextResponse(improved_text=improved)
+    return ImproveTextResponse(improved_text=improved, improved_items=improved_items)

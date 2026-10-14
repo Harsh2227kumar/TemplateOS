@@ -163,3 +163,39 @@ def get_pdf_converter() -> PdfConverter | None:
         if binary:
             return LibreOfficeConverter(binary, settings.libreoffice_timeout_seconds)
     return None
+
+
+_NOT_CONFIGURED_HINT = (
+    "PDF conversion is not set up: set GOTENBERG_URL (e.g. http://localhost:3000) "
+    "in the repository-root .env, or install LibreOffice, then restart the backend"
+)
+
+
+def check_pdf_setup() -> dict[str, str | bool | None]:
+    """
+    Which converter generation would use right now and whether it answers.
+    For Gotenberg this calls its /health route (short timeout). Used by
+    GET /system/pdf-check and the startup log; never raises.
+    """
+    converter = get_pdf_converter()
+    if converter is None:
+        return {"converter": None, "ok": False, "message": _NOT_CONFIGURED_HINT}
+    if isinstance(converter, GotenbergConverter):
+        health_url = converter.endpoint.removesuffix("/forms/libreoffice/convert") + "/health"
+        try:
+            response = httpx.get(health_url, timeout=5)
+        except httpx.HTTPError as exc:
+            return {
+                "converter": "gotenberg",
+                "ok": False,
+                "message": f"Gotenberg is configured but not reachable ({exc.__class__.__name__}); "
+                "is the container running and GOTENBERG_URL correct?",
+            }
+        if response.status_code != 200:
+            return {
+                "converter": "gotenberg",
+                "ok": False,
+                "message": f"Gotenberg health check returned HTTP {response.status_code}",
+            }
+        return {"converter": "gotenberg", "ok": True, "message": "Gotenberg is reachable"}
+    return {"converter": converter.name, "ok": True, "message": "LibreOffice was found"}
