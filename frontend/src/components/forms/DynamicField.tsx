@@ -24,6 +24,7 @@ import {
   parseValidationRule,
   type ValidationRule,
 } from "@/lib/validation";
+import { aiFieldKind } from "@/components/fields/ai-style-state";
 import { ListField } from "./ListField";
 
 export interface DynamicFieldDefinition {
@@ -47,14 +48,12 @@ export interface AiFieldContext {
 
 interface DynamicFieldProps {
   field: DynamicFieldDefinition;
-  /** Enables the AI style switcher on ai_enabled text/textarea fields. */
+  /** Enables the AI style switcher on ai_enabled text/textarea/list fields. */
   aiContext?: AiFieldContext;
   /** Disables input, e.g. while the form is saving. */
   disabled?: boolean;
 }
 
-// Field types the AI text actions apply to (matches the backend).
-const AI_TEXT_FIELD_TYPES = new Set(["text", "textarea"]);
 const TEXTAREA_MAX_AUTO_HEIGHT = 480;
 
 /** First error message for a field, whatever shape RHF stored it in. */
@@ -100,7 +99,9 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
   const rule = useMemo(() => parseValidationRule(field.validation_rule), [field.validation_rule]);
   const errorMessage = getFieldErrorMessage(errors, name);
   const invalid = errorMessage !== null;
-  const showAi = !!aiContext && field.ai_enabled === true && AI_TEXT_FIELD_TYPES.has(field.field_type);
+  // Field types the AI text actions apply to (matches the backend).
+  const aiKind = aiFieldKind(field.field_type);
+  const showAi = !!aiContext && field.ai_enabled === true && aiKind !== null;
 
   const describedBy = [field.description ? hintId : null, metaId, invalid ? errorId : null]
     .filter(Boolean)
@@ -136,16 +137,30 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
 
       {field.field_type === "list" ? (
         <>
-          <ListField
-            fieldName={name}
-            inputId={inputId}
-            label={label}
-            placeholder={field.example_value}
-            maxItems={rule.max}
-            invalid={invalid}
-            describedBy={describedBy}
-            disabled={disabled}
-          />
+          {showAi && aiContext ? (
+            <AiListControl
+              aiContext={aiContext}
+              fieldName={name}
+              inputId={inputId}
+              label={label}
+              placeholder={field.example_value}
+              maxItems={rule.max}
+              invalid={invalid}
+              describedBy={describedBy}
+              disabled={disabled}
+            />
+          ) : (
+            <ListField
+              fieldName={name}
+              inputId={inputId}
+              label={label}
+              placeholder={field.example_value}
+              maxItems={rule.max}
+              invalid={invalid}
+              describedBy={describedBy}
+              disabled={disabled}
+            />
+          )}
           <span id={metaId} className="sr-only">
             {describeValidationRule(field) ?? ""}
           </span>
@@ -183,17 +198,38 @@ function AiFieldControl({
   label,
   ...props
 }: FieldControlProps & { aiContext: AiFieldContext; label: string }) {
+  const kind = props.field.field_type === "textarea" ? "multiline" : "text";
   const switcher = useAiStyleSwitcher({
     fieldName: props.field.field_name,
     fieldLabel: label,
-    multiline: props.field.field_type === "textarea",
+    kind,
     templateId: aiContext.templateId,
     documentId: aiContext.documentId,
   });
   return (
     <>
       <FieldControl {...props} locked={switcher.isPending} />
-      <AiActionToolbar switcher={switcher} controlsId={props.inputId} disabled={props.disabled} />
+      <AiActionToolbar switcher={switcher} controlsId={props.inputId} disabled={props.disabled} kind={kind} />
+    </>
+  );
+}
+
+/** A list field with the AI style switcher; every item is rewritten on its own. */
+function AiListControl({
+  aiContext,
+  ...props
+}: ComponentProps<typeof ListField> & { aiContext: AiFieldContext }) {
+  const switcher = useAiStyleSwitcher({
+    fieldName: props.fieldName,
+    fieldLabel: props.label,
+    kind: "list",
+    templateId: aiContext.templateId,
+    documentId: aiContext.documentId,
+  });
+  return (
+    <>
+      <ListField {...props} disabled={props.disabled || switcher.isPending} />
+      <AiActionToolbar switcher={switcher} controlsId={props.inputId} disabled={props.disabled} kind="list" />
     </>
   );
 }

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { AI_FIELD_TYPES } from "@/components/fields/ai-style-state";
 import { MonoKey } from "@/components/fields/pipeline-ui";
 import { FIELD_TYPE_OPTIONS, VALIDATION_PRESETS, fieldTypeLabel, keyToLabel } from "@/lib/template-pipeline";
 
@@ -317,20 +318,30 @@ export function FieldRowCard({
               <FormField
                 control={form.control}
                 name={`fields.${index}.ai_enabled`}
-                render={({ field: input }) => (
-                  <FormItem>
-                    <div className="flex items-center gap-3">
-                      <FormControl>
-                        <Switch checked={input.value} onCheckedChange={input.onChange} />
-                      </FormControl>
-                      <FormLabel className="!mt-0">AI-enabled</FormLabel>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      Turn on for descriptive fields (agenda, summary); off for facts (dates, amounts).
-                    </p>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                render={({ field: input }) => {
+                  // AI rewrites text, paragraph and list fields only.
+                  const aiSupported = AI_FIELD_TYPES.includes(live.field_type ?? "text");
+                  return (
+                    <FormItem>
+                      <div className="flex items-center gap-3">
+                        <FormControl>
+                          <Switch
+                            checked={aiSupported && input.value}
+                            onCheckedChange={input.onChange}
+                            disabled={!aiSupported}
+                          />
+                        </FormControl>
+                        <FormLabel className="!mt-0">AI-enabled</FormLabel>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {aiSupported
+                          ? "Turn on for descriptive fields (agenda, summary); off for facts (names, amounts)."
+                          : "AI works on text, paragraph and list fields only."}
+                      </p>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             </div>
           </CardContent>

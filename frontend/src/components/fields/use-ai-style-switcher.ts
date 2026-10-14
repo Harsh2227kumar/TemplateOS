@@ -6,10 +6,13 @@ import { useImproveText } from "@/hooks/queries";
 import { ApiError, MAX_AI_TEXT_CHARS } from "@/lib/api";
 import {
   aiStyleReducer,
+  aiTextOf,
+  aiTextToList,
   initialAiStyleState,
-  normalizeAiResult,
+  normalizeAiResultFor,
   planAiAction,
   sourceTextFor,
+  type AiFieldKind,
   type AiStyle,
   type AiStyleState,
 } from "./ai-style-state";
@@ -19,13 +22,17 @@ export const AI_STYLE_LABELS: Record<AiStyle, string> = {
   tone: "Professional",
   concise: "Concise",
   formal: "Formal",
+  expand: "Expand",
 };
 
 export interface AiStyleSwitcherOptions {
   fieldName: string;
   fieldLabel: string;
-  /** textarea (true) keeps line breaks; a single-line input does not. */
-  multiline: boolean;
+  /**
+   * "multiline" keeps line breaks, "text" (one-line input) does not, and
+   * "list" works on the items (one per line) and rewrites each on its own.
+   */
+  kind: AiFieldKind;
   templateId: number;
   /** Saved draft id, or null before the first save. Read at request time. */
   documentId?: number | null;
@@ -60,7 +67,7 @@ function errorDetail(err: unknown): string {
 export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwitcher {
   const { control, getValues, setValue } = useFormContext();
   const watched = useWatch({ control, name: options.fieldName });
-  const fieldText = typeof watched === "string" ? watched : "";
+  const fieldText = aiTextOf(options.kind, watched);
 
   const [state, dispatch] = useReducer(aiStyleReducer, initialAiStyleState);
   const [announcement, setAnnouncement] = useState("");
@@ -103,13 +110,13 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
   );
 
   const readFieldText = useCallback((): string => {
-    const value = getValues(optionsRef.current.fieldName);
-    return typeof value === "string" ? value : "";
+    return aiTextOf(optionsRef.current.kind, getValues(optionsRef.current.fieldName));
   }, [getValues]);
 
   const writeFieldText = useCallback(
     (text: string) => {
-      setValue(optionsRef.current.fieldName, text, { shouldDirty: true, shouldValidate: true });
+      const { fieldName, kind } = optionsRef.current;
+      setValue(fieldName, kind === "list" ? aiTextToList(text) : text, { shouldDirty: true, shouldValidate: true });
     },
     [setValue],
   );
@@ -155,14 +162,19 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
             template_id: opts.templateId,
             document_id: opts.documentId ?? null,
             field_name: opts.fieldName,
-            original_text: plan.source,
+            ...(opts.kind === "list"
+              ? { original_items: aiTextToList(plan.source) }
+              : { original_text: plan.source }),
             action_type: style,
           },
           signal: controller.signal,
         });
         if (controller.signal.aborted || requestSeqRef.current !== requestId) return;
 
-        const text = normalizeAiResult(response?.improved_text ?? "", opts.multiline);
+        const raw = opts.kind === "list" && response?.improved_items
+          ? response.improved_items.join("\n")
+          : response?.improved_text ?? "";
+        const text = normalizeAiResultFor(opts.kind, raw);
         if (!text.trim()) {
           throw new Error("The AI returned an empty result.");
         }
