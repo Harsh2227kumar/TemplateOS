@@ -21,7 +21,7 @@ import re
 from datetime import datetime
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.template_field import FIELD_TYPES
 
@@ -104,34 +104,71 @@ class AiGenerationRead(BaseModel):
 
 # --- V1.5 Phase 1: basic AI writing actions on a single field ---
 
-AiTextAction = Literal["grammar", "tone", "concise", "formal"]
+AiTextAction = Literal["grammar", "tone", "concise", "formal", "expand"]
 AI_TEXT_ACTIONS: tuple[str, ...] = get_args(AiTextAction)
 
 # Cap the text sent to the model per call (token/cost control).
 MAX_IMPROVE_TEXT_CHARS = 5000
+# List fields: at most this many items per call, each at most this long.
+MAX_IMPROVE_ITEMS = 50
+MAX_IMPROVE_ITEM_CHARS = 1000
 
 
 class ImproveTextRequest(BaseModel):
     """
     POST /ai/improve-text body. document_id is optional: the user may run an
     action on a new form before the draft has been saved for the first time.
+
+    Text and paragraph fields send original_text; list fields send
+    original_items (one entry per item) so every item is rewritten on its
+    own and the list keeps its shape in the generated document.
     """
 
     template_id: int
     document_id: int | None = None
     field_name: str = Field(..., min_length=1, max_length=100)
-    original_text: str = Field(..., min_length=1, max_length=MAX_IMPROVE_TEXT_CHARS)
+    original_text: str | None = Field(default=None, max_length=MAX_IMPROVE_TEXT_CHARS)
+    original_items: list[str] | None = Field(default=None, max_length=MAX_IMPROVE_ITEMS)
     action_type: AiTextAction
 
     @field_validator("original_text")
     @classmethod
-    def validate_original_text(cls, value: str) -> str:
-        if not value.strip():
+    def validate_original_text(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
             raise ValueError("original_text must not be blank")
         return value
 
+    @field_validator("original_items")
+    @classmethod
+    def validate_original_items(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        items = [item.strip() for item in value if item.strip()]
+        if not items:
+            raise ValueError("original_items must contain at least one non-blank item")
+        if any(len(item) > MAX_IMPROVE_ITEM_CHARS for item in items):
+            raise ValueError(
+                f"Each item must be at most {MAX_IMPROVE_ITEM_CHARS} characters"
+            )
+        if sum(len(item) for item in items) > MAX_IMPROVE_TEXT_CHARS:
+            raise ValueError(
+                f"The items must be at most {MAX_IMPROVE_TEXT_CHARS} characters in total"
+            )
+        return items
+
+    @model_validator(mode="after")
+    def validate_one_source(self) -> "ImproveTextRequest":
+        if (self.original_text is None) == (self.original_items is None):
+            raise ValueError("Send exactly one of original_text or original_items")
+        return self
+
 
 class ImproveTextResponse(BaseModel):
-    """The improved text that replaces the field's value in the form."""
+    """
+    The improved value that replaces the field's value in the form:
+    improved_text for text/paragraph fields; for list fields improved_items
+    (same number of items, same order) plus the items joined by newlines.
+    """
 
     improved_text: str
+    improved_items: list[str] | None = None

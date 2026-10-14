@@ -30,6 +30,7 @@ even when the AI dependencies are not installed.
 """
 
 import logging
+import re
 
 from pydantic import BaseModel, Field
 
@@ -326,7 +327,11 @@ def suggest_fields(
 _IMPROVE_SYSTEM_PROMPT = (
     "You are an expert editor. Improve the following text based on the "
     "user's instruction. Output ONLY the improved text, nothing else. Do not "
-    "add conversational filler."
+    "add conversational filler. The text is inserted as-is into a formatted "
+    "official document, so return plain text only: no Markdown, no bullet "
+    "symbols or numbering, no headings, no surrounding quotes. Keep the same "
+    "language and the same line/paragraph structure, and keep every name, "
+    "date and number exactly as written."
 )
 
 # Per-action instruction and the settings attribute holding its model id.
@@ -351,13 +356,58 @@ _TEXT_ACTIONS: dict[str, tuple[str, str]] = {
         "the meaning and all facts unchanged.",
         "bedrock_model_nova_lite",
     ),
+    "expand": (
+        "Expand the text into fuller, well-formed sentences suitable for an "
+        "official document. Elaborate only on what is already there: do not "
+        "invent new facts, names, dates, numbers or decisions.",
+        "bedrock_model_nova_lite",
+    ),
 }
+
+_ITEMS_INSTRUCTION = (
+    "The text is a numbered list of {count} separate items. Apply the "
+    "instruction to EACH item on its own and return exactly {count} items in "
+    "the same order: do not merge, split, drop, reorder or add items, and do "
+    "not number them."
+)
+
+# Markdown and list decoration models sometimes add despite the prompt.
+_MARKDOWN_EMPHASIS = re.compile(r"(\*\*|__|`)")
+_HEADING_PREFIX = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
+_ITEM_PREFIX = re.compile(r"^\s*(?:[-*\u2022]\s+|\d{1,3}[.)]\s+)")
+_WRAPPING_QUOTES = ("\"\"", "''", "\u201c\u201d", "\u2018\u2019")
+
+
+def to_plain_text(text: str) -> str:
+    """Strip Markdown emphasis/headings and wrapping quotes from model output."""
+    cleaned = _MARKDOWN_EMPHASIS.sub("", text).strip()
+    for opening, closing in _WRAPPING_QUOTES:
+        if len(cleaned) >= 2 and cleaned[0] == opening and cleaned[-1] == closing:
+            inner = cleaned[1:-1]
+            if opening not in inner and closing not in inner:
+                cleaned = inner.strip()
+            break
+    return _HEADING_PREFIX.sub("", cleaned).strip()
+
+
+def to_plain_item(text: str) -> str:
+    """One list item as plain single-line text (no bullet or number prefix)."""
+    single_line = " ".join(to_plain_text(text).split())
+    return _ITEM_PREFIX.sub("", single_line).strip()
 
 
 class TextImprovement(BaseModel):
     """instructor response_model for improve_text: the rewritten text only."""
 
     improved_text: str = Field(..., description="The improved text only")
+
+
+class ItemsImprovement(BaseModel):
+    """instructor response_model for improve_items: one entry per input item."""
+
+    items: list[str] = Field(
+        ..., description="The improved items, same count and order as the input"
+    )
 
 
 def model_for_action(action_type: str) -> str:
@@ -401,13 +451,8 @@ def _build_bedrock_client():
         raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
 
 
-def improve_text(action_type: str, original_text: str) -> str:
-    """
-    Rewrite one field's text with the action's Nova model and return ONLY
-    the improved text. Raises ValueError for an unknown action and
-    AiUnavailableError (endpoint -> 503) when AI is not configured, the
-    provider fails, or the model returns nothing.
-    """
+def _resolve_action(action_type: str) -> tuple[str, str, str]:
+    """(instruction, model id, env var name) for an action, or raise."""
     if action_type not in _TEXT_ACTIONS:
         raise ValueError(f"Unsupported AI text action: {action_type}")
     instruction, setting = _TEXT_ACTIONS[action_type]
@@ -419,20 +464,27 @@ def improve_text(action_type: str, original_text: str) -> str:
             f"AI is not configured: {env_name} is not set — set it in .env to "
             "the Nova model / inference-profile id from the Bedrock console"
         )
+    return instruction, model, env_name
 
+
+def _run_text_action(
+    action_type: str, user_content: str, response_model: type[BaseModel]
+) -> BaseModel:
+    """One Converse call for a text action; provider errors -> AiUnavailableError."""
+    instruction, model, env_name = _resolve_action(action_type)
     client = _build_bedrock_client()
     try:
-        result = client.chat.completions.create(
+        return client.chat.completions.create(
             model=model,
             max_tokens=settings.ai_max_output_tokens,
             messages=[
                 {"role": "system", "content": _IMPROVE_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": f"Instruction: {instruction}\n\nText:\n{original_text}",
+                    "content": f"Instruction: {instruction}\n\n{user_content}",
                 },
             ],
-            response_model=TextImprovement,
+            response_model=response_model,
         )
     except Exception as exc:
         reason = _classify_ai_error(exc, env_name)
@@ -443,12 +495,47 @@ def improve_text(action_type: str, original_text: str) -> str:
         logger.debug("[ai] traceback:", exc_info=True)
         raise AiUnavailableError(f"AI is currently unavailable: {reason}") from exc
 
-    improved = result.improved_text.strip()
+
+def improve_text(action_type: str, original_text: str) -> str:
+    """
+    Rewrite one field's text with the action's Nova model and return ONLY
+    the improved plain text. Raises ValueError for an unknown action and
+    AiUnavailableError (endpoint -> 503) when AI is not configured, the
+    provider fails, or the model returns nothing.
+    """
+    result = _run_text_action(action_type, f"Text:\n{original_text}", TextImprovement)
+    improved = to_plain_text(result.improved_text)
     if not improved:
         logger.error(
-            f"[ai] improve-text returned empty text (action={action_type}, model={model})"
+            f"[ai] improve-text returned empty text (action={action_type}, "
+            f"model={model_for_action(action_type)})"
         )
         raise AiUnavailableError(
             "AI is currently unavailable: the model returned an empty result — retry"
+        )
+    return improved
+
+
+def improve_items(action_type: str, items: list[str]) -> list[str]:
+    """
+    Rewrite each item of a list field separately and return the improved
+    items: same count, same order, plain single-line text. A result with a
+    different number of items (or a blank item) is rejected, so the list
+    keeps its shape in the generated document.
+    """
+    numbered = "\n".join(f"{index}. {item}" for index, item in enumerate(items, 1))
+    content = (
+        _ITEMS_INSTRUCTION.format(count=len(items)) + f"\n\nItems:\n{numbered}"
+    )
+    result = _run_text_action(action_type, content, ItemsImprovement)
+    improved = [to_plain_item(item) for item in result.items]
+    if len(improved) != len(items) or not all(improved):
+        logger.error(
+            f"[ai] improve-items returned {len(improved)} items for {len(items)} "
+            f"(action={action_type}, model={model_for_action(action_type)})"
+        )
+        raise AiUnavailableError(
+            "AI is currently unavailable: the model changed the number of list "
+            "items — retry"
         )
     return improved
