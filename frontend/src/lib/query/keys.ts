@@ -23,12 +23,12 @@ export interface TemplateLibraryKeyParams {
 }
 
 /** Drop empty filters so `{search: ""}` and `{}` share one cache entry. */
-function compactParams(params: TemplateLibraryKeyParams): TemplateLibraryKeyParams {
-  const out: Record<string, string | number> = {};
+function compactParams<T extends object>(params: T): T {
+  const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") out[key] = value;
   }
-  return out as TemplateLibraryKeyParams;
+  return out as T;
 }
 
 export const templateKeys = {
@@ -54,9 +54,40 @@ export const documentKeys = {
   detail: (id: number) => [...documentKeys.details(), id] as const,
 };
 
+export interface AdminUserListKeyParams {
+  search?: string;
+  role?: string;
+  organization_id?: number;
+  department_id?: number;
+  page?: number;
+  limit?: number;
+}
+
+/**
+ *   ["admin", "users"]                            every user-list page
+ *   ["admin", "users", {filters}]                 one page
+ *   ["admin", "organizations"]
+ *   ["admin", "departments"]                      every department list
+ *   ["admin", "departments", {organization_id}]
+ */
+export const adminKeys = {
+  all: ["admin"] as const,
+  users: () => [...adminKeys.all, "users"] as const,
+  userList: (params: AdminUserListKeyParams = {}) =>
+    [...adminKeys.users(), compactParams(params)] as const,
+  organizations: () => [...adminKeys.all, "organizations"] as const,
+  departmentLists: () => [...adminKeys.all, "departments"] as const,
+  departments: (organizationId?: number) =>
+    [
+      ...adminKeys.departmentLists(),
+      organizationId === undefined ? {} : { organization_id: organizationId },
+    ] as const,
+};
+
 export const queryKeys = {
   templates: templateKeys,
   documents: documentKeys,
+  admin: adminKeys,
 };
 
 /** True when `key` starts with `prefix` (how TanStack matches invalidations). */

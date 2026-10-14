@@ -13,6 +13,9 @@ import { TemplateCleaningPage } from "./pages/template-cleaning-page";
 import { FieldSetupPage } from "./pages/field-setup-page";
 import { CreateDocumentPage } from "./pages/create-document-page";
 import { EditDocumentPage } from "./pages/edit-document-page";
+import { AdminRoute } from "./features/admin/AdminRoute";
+import { AdminUsersPage } from "./pages/admin-users-page";
+import { AdminOrganizationsPage } from "./pages/admin-organizations-page";
 
 export function App() {
   return (
@@ -33,6 +36,12 @@ export function App() {
           <Route path="/templates/:id/fields" element={<FieldSetupPage />} />
           <Route path="/documents/create/:id" element={<CreateDocumentPage />} />
           <Route path="/documents/:id/edit" element={<EditDocumentPage />} />
+          {/* super_admin / org_admin / department_admin only */}
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/organizations" element={<AdminOrganizationsPage />} />
+          </Route>
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

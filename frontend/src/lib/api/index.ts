@@ -2,6 +2,7 @@
 export * from "./types";
 export { API_BASE_URL, ApiError } from "./client";
 export { authApi } from "./auth";
+export { adminApi } from "./admin";
 export {
   templateAccessApi,
   templateCatalogApi,
