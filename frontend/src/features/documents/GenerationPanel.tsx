@@ -172,10 +172,26 @@ export function GenerationPanel({
               </div>
             )}
             {generated.pdf_status === "not_configured" && (
-              <p className="flex items-center gap-1.5 text-xs text-slate-500">
-                <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                {pdfStatusLabel("not_configured")}; only the DOCX is available.
-              </p>
+              <div className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="flex items-start gap-1.5 text-xs text-slate-600">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    PDF conversion was not set up when this was generated; the DOCX is ready. If the server now has a
+                    PDF converter, create the PDF without regenerating.
+                  </span>
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onRetryPdf}
+                  disabled={busy || disabled}
+                  className="w-full shrink-0 sm:w-auto"
+                >
+                  {retryingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Create PDF
+                </Button>
+              </div>
             )}
           </div>
         )}

@@ -2,6 +2,7 @@ import type { FormEventHandler, ReactNode, RefObject } from "react";
 import { FormProvider, type UseFormReturn } from "react-hook-form";
 import { AlertCircle } from "lucide-react";
 
+import { AiRewriteAllBar } from "@/components/fields/AiRewriteAllBar";
 import { DocumentFormSections, FormProgress } from "@/components/forms/DocumentFormSections";
 import type { AiFieldContext } from "@/components/forms/DynamicField";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,6 +70,12 @@ export function DraftFormShell({
                 <CardDescription className="mt-1.5">{description}</CardDescription>
               </div>
               <FormProgress fields={fields} />
+              <AiRewriteAllBar
+                fields={fields}
+                templateId={aiContext.templateId}
+                documentId={aiContext.documentId}
+                disabled={disabled}
+              />
             </CardHeader>
             <CardContent>
               <fieldset disabled={disabled} className="min-w-0">

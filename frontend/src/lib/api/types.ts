@@ -445,17 +445,24 @@ export interface DocumentValuesResponse {
 
 // --- V1.5 Phase 1: basic AI writing actions on a single field ---
 
-export type AiTextAction = "grammar" | "tone" | "concise" | "formal";
+export type AiTextAction = "grammar" | "tone" | "concise" | "formal" | "expand";
 
+/**
+ * Text and paragraph fields send original_text; list fields send
+ * original_items (one entry per item, rewritten one by one).
+ */
 export interface ImproveTextRequest {
   template_id: number;
   document_id?: number | null;
   field_name: string;
-  original_text: string;
+  original_text?: string;
+  original_items?: string[];
   action_type: AiTextAction;
 }
 
 export interface ImproveTextResponse {
   improved_text: string;
+  /** List fields only: the rewritten items, same count and order. */
+  improved_items?: string[];
 }
 
