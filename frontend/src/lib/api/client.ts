@@ -103,6 +103,27 @@ export function request<T>(path: string, options: RequestInit = {}): Promise<T> 
   return execute<T>(path, options, "Something went wrong. Please try again.");
 }
 
+export interface FileDownload {
+  blob: Blob;
+  /** Raw Content-Disposition header (null when CORS hides it). */
+  contentDisposition: string | null;
+}
+
+/**
+ * GET a file as a Blob with the session cookies (and the same 401 refresh),
+ * so httpOnly-cookie auth works and errors (404/409 JSON) become ApiError.
+ */
+export async function requestFile(path: string): Promise<FileDownload> {
+  const response = await sendWithRefresh({
+    path,
+    send: () => send(path),
+    refresh: refreshSession,
+    onSessionExpired: notifySessionExpired,
+  });
+  if (!response.ok) throw await toApiError(response, "Download failed. Please try again.");
+  return { blob: await response.blob(), contentDisposition: response.headers.get("Content-Disposition") };
+}
+
 /** POST a multipart form (file uploads), with the same cookie/refresh handling. */
 export function uploadForm<T>(path: string, formData: FormData): Promise<T> {
   return execute<T>(path, { method: "POST", body: formData }, "Upload failed. Please try again.");

@@ -1,18 +1,41 @@
 import { formatDistanceToNow } from "date-fns";
-import { FileText, FolderOpen, FileEdit, AlertCircle, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { FileText, FolderOpen, FileEdit, AlertCircle, ChevronRight, Download, Loader2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/auth-context";
 import { EmptyState } from "@/components/empty-state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { useMyDocuments, useMyTemplates } from "@/hooks/queries";
+import { toast } from "@/components/ui/toast";
+import { pdfStatusLabel } from "@/features/documents/generation";
+import { useDownloadGenerated, useMyDocuments, useMyTemplates } from "@/hooks/queries";
+import type { Document } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const firstName = user?.full_name?.split(" ")[0] || "User";
+  const downloadGenerated = useDownloadGenerated();
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+
+  /** Quick download: the PDF when it exists, else the DOCX. */
+  const handleQuickDownload = async (draft: Document) => {
+    const format = draft.generated?.pdf_status === "ok" ? "pdf" : "docx";
+    setDownloadingId(draft.id);
+    try {
+      await downloadGenerated.mutateAsync({ documentId: draft.id, format, name: draft.name });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Download failed",
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const { data: myTemplatesData, isPending: templatesLoading } = useMyTemplates();
   // A failed templates request shows the empty state, as before.
@@ -175,14 +198,19 @@ export function DashboardPage() {
           {displayDrafts.map((d) => {
             const title = d.name || `Draft ${d.id}`;
             const updated = describeUpdated(d.updated_at);
+            const generated = d.generated ?? null;
+            const quickFormat = generated?.pdf_status === "ok" ? "PDF" : "DOCX";
             return (
-              <li key={d.id}>
+              <li key={d.id} className="flex items-stretch gap-2">
                 <Link
                   to={`/documents/${d.id}/edit`}
-                  className="group flex items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
                   aria-label={`Continue editing ${title}`}
                 >
-                  <div className="h-2 w-2 shrink-0 rounded-full bg-yellow-400" aria-hidden="true" />
+                  <div
+                    className={`h-2 w-2 shrink-0 rounded-full ${generated ? "bg-green-500" : "bg-yellow-400"}`}
+                    aria-hidden="true"
+                  />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-slate-900" title={title}>
                       {title}
@@ -192,14 +220,46 @@ export function DashboardPage() {
                       <span title={updated.absolute}>edited {updated.relative}</span>
                     </p>
                   </div>
-                  <Badge variant="secondary" className={`hidden shrink-0 sm:inline-flex ${getDraftStatusColor(d.status)}`}>
-                    {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
-                  </Badge>
+                  {generated ? (
+                    <Badge
+                      variant="secondary"
+                      className={`shrink-0 ${generated.is_stale ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-700"}`}
+                      title={
+                        generated.is_stale
+                          ? "Values changed since the last generation"
+                          : pdfStatusLabel(generated.pdf_status)
+                      }
+                    >
+                      {generated.is_stale ? "Outdated" : "Generated"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className={`hidden shrink-0 sm:inline-flex ${getDraftStatusColor(d.status)}`}>
+                      {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
+                    </Badge>
+                  )}
                   <span className="flex shrink-0 items-center text-sm font-medium text-slate-600 group-hover:text-slate-900">
                     <span className="hidden sm:inline">Continue</span>
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />
                   </span>
                 </Link>
+                {generated && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto shrink-0 px-3"
+                    onClick={() => void handleQuickDownload(d)}
+                    disabled={downloadingId !== null}
+                    aria-label={`Download ${title} as ${quickFormat}`}
+                    title={`Download ${quickFormat}`}
+                  >
+                    {downloadingId === d.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    <span className="hidden text-xs sm:inline">{quickFormat}</span>
+                  </Button>
+                )}
               </li>
             );
           })}

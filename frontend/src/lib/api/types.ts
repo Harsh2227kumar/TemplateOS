@@ -402,6 +402,29 @@ export interface Document {
   updated_at: string;
   template_name?: string;
   values?: DocumentValue[];
+  /** V1.6: latest generated output; null until the first generation. */
+  generated?: GeneratedInfo | null;
+}
+
+// --- V1.6: Document generation ---
+
+export type PdfStatus = "ok" | "failed" | "not_configured";
+
+export interface GeneratedInfo {
+  generated_at: string;
+  pdf_status: PdfStatus;
+  pdf_error: string | null;
+  /** API path (with the /api/v1 prefix) of the DOCX download. */
+  docx_url: string;
+  pdf_url: string | null;
+  /** The draft's values were saved after this generation. */
+  is_stale: boolean;
+  template_version: number | null;
+}
+
+export interface GenerateDocumentResponse extends GeneratedInfo {
+  document_id: number;
+  document_status: string;
 }
 
 export type DocumentFormValues = Record<string, any>;
