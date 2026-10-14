@@ -35,7 +35,7 @@ from app.crud.refresh_token_crud import (
 )
 from app.models.user import User
 from app.schemas.auth import LoginRequest, SignupRequest, Token
-from app.schemas.user import UserProfileRead, UserRead
+from app.schemas.user import UserProfileRead, UserRead, UserSelfUpdate
 
 router = APIRouter()
 
@@ -158,4 +158,20 @@ def logout(request: Request, db: DbSession) -> Response:
 
 @router.get("/me", response_model=UserProfileRead)
 def my_profile(current_user: CurrentUser) -> User:
+    return current_user
+
+
+@router.patch("/me", response_model=UserProfileRead)
+def update_my_profile(
+    payload: UserSelfUpdate, current_user: CurrentUser, db: DbSession
+) -> User:
+    """
+    Self-service profile edit: full_name, phone and job_title only. Role,
+    organization and department are managed by administrators
+    (/admin/users); sending them (or any other field) is a 422.
+    """
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(current_user, field, value)
+    db.commit()
+    db.refresh(current_user)
     return current_user
