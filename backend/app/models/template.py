@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.template_field import TemplateField
     from app.models.document import Document
+    from app.models.organization import Department, Organization
 
 TEMPLATE_CATEGORIES = (
     "notice",
@@ -84,8 +85,22 @@ class Template(Base):
     organization_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     department_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Audience (see app/services/template_access.py). Free-text scope names
-    # matched trimmed + case-insensitively against User.organization/department.
+    # Audience (see app/services/template_access.py): matched by id against
+    # User.organization_id / department_id.
+    scope_organization_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    scope_department_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Legacy free-text copies of the linked names, kept in sync for rollback
+    # safety; never used for access decisions.
     scope_organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
     scope_department: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # JSON array of role strings; NULL / empty array = every role.
@@ -107,6 +122,22 @@ class Template(Base):
     )
 
     uploader: Mapped["User"] = relationship("User", back_populates="templates")
+    scope_organization_ref: Mapped["Organization | None"] = relationship(
+        "Organization", foreign_keys=[scope_organization_id], lazy="selectin"
+    )
+    scope_department_ref: Mapped["Department | None"] = relationship(
+        "Department", foreign_keys=[scope_department_id], lazy="selectin"
+    )
+
+    @property
+    def scope_organization_name(self) -> str | None:
+        ref = self.scope_organization_ref
+        return ref.name if ref else None
+
+    @property
+    def scope_department_name(self) -> str | None:
+        ref = self.scope_department_ref
+        return ref.name if ref else None
     fields: Mapped[list["TemplateField"]] = relationship(
         "TemplateField", back_populates="template", cascade="all, delete-orphan"
     )

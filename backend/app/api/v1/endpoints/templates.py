@@ -18,7 +18,7 @@ import zipfile
 from io import BytesIO
 
 from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import false, func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import require_manage
@@ -30,8 +30,6 @@ from app.services.template_access import (
     ROLE_LABELS,
     PublishRuleError,
     can_manage,
-    clean_scope,
-    normalize_scope,
     parse_roles_csv,
     resolve_publish_access,
     user_can_view_template,
@@ -52,9 +50,11 @@ from app.schemas.template import (
     TemplateLibraryResponse,
 )
 from app.schemas.template_field import TemplateFieldRead
+from app.models.organization import Department, Organization
 from app.models.template import Template
 from app.models.template_field import TemplateField
 from app.models.user import User
+from app.services.org_directory import set_template_scope
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -194,48 +194,43 @@ def get_access_options(
     Choices for the upload / manage-access audience pickers.
 
     - roles: every role a template can be restricted to (no super_admin).
-    - organizations / departments: distinct non-empty values from user
-      profiles. super_admin gets all of them; everyone else only sees their
-      own organization (they can never publish anywhere else).
+    - organizations / departments: rows of the organizations / departments
+      tables. super_admin gets all of them; everyone else only their own
+      organization and its departments (they can never publish elsewhere).
     - can_publish: which scoped visibilities the current user may use.
-    - defaults: the current user's own organization / department.
+    - defaults: the current user's own organization_id / department_id.
     """
-    rows = db.execute(select(User.organization, User.department).distinct()).all()
-    own_org = normalize_scope(current_user.organization)
     see_all = current_user.role == "super_admin"
-
-    organizations: dict[str, str] = {}
-    departments: dict[tuple[str, str], dict] = {}
-    for organization, department in rows:
-        org = clean_scope(organization)
-        dept = clean_scope(department)
-        if not see_all and normalize_scope(org) != own_org:
-            continue
-        if org is not None:
-            organizations.setdefault(normalize_scope(org), org)
-        if dept is not None:
-            departments.setdefault(
-                (normalize_scope(org), normalize_scope(dept)),
-                {"organization": org, "department": dept},
-            )
+    org_query = select(Organization).order_by(func.lower(Organization.name))
+    dept_query = select(Department).order_by(func.lower(Department.name))
+    if not see_all:
+        own_org = current_user.organization_id
+        if own_org is None:
+            org_query = org_query.where(false())
+            dept_query = dept_query.where(false())
+        else:
+            org_query = org_query.where(Organization.id == own_org)
+            dept_query = dept_query.where(Department.organization_id == own_org)
+    organizations = db.scalars(org_query).all()
+    departments = db.scalars(dept_query).all()
 
     return TemplateAccessOptions(
         roles=[
             {"value": role, "label": ROLE_LABELS.get(role, role)}
             for role in ASSIGNABLE_ROLES
         ],
-        organizations=sorted(organizations.values(), key=str.lower),
-        departments=sorted(
-            departments.values(),
-            key=lambda d: ((d["organization"] or "").lower(), d["department"].lower()),
-        ),
+        organizations=[{"id": org.id, "name": org.name} for org in organizations],
+        departments=[
+            {"id": dept.id, "organization_id": dept.organization_id, "name": dept.name}
+            for dept in departments
+        ],
         can_publish={
             "organization": current_user.role in ORG_PUBLISHERS,
             "department": current_user.role in DEPARTMENT_PUBLISHERS,
         },
         defaults={
-            "organization": clean_scope(current_user.organization),
-            "department": clean_scope(current_user.department),
+            "organization_id": current_user.organization_id,
+            "department_id": current_user.department_id,
         },
     )
 
@@ -276,24 +271,26 @@ def update_template_access(
 
     try:
         resolved = resolve_publish_access(
+            db,
             current_user,
             request.visibility,
-            request.scope_organization,
-            request.scope_department,
+            request.scope_organization_id,
+            request.scope_department_id,
             request.allowed_roles,
+            scope_organization_name=request.scope_organization,
+            scope_department_name=request.scope_department,
         )
     except PublishRuleError as exc:
         raise _publish_error(exc) from None
 
     template.visibility = resolved.visibility
-    template.scope_organization = resolved.scope_organization
-    template.scope_department = resolved.scope_department
+    set_template_scope(template, resolved.organization, resolved.department)
     template.allowed_roles = resolved.allowed_roles
     db.commit()
     db.refresh(template)
     logger.info(
         f"Access for template {template_id} set to {resolved.visibility} "
-        f"(org={resolved.scope_organization!r}, dept={resolved.scope_department!r}, "
+        f"(org={resolved.scope_organization_id}, dept={resolved.scope_department_id}, "
         f"roles={resolved.allowed_roles}) by user {current_user.id}"
     )
     return _template_response(template, current_user)
@@ -382,8 +379,14 @@ def upload_template(
     description: str | None = Form(default=None),
     category: str = Form(...),
     visibility: str = Form(...),
-    scope_organization: str | None = Form(default=None),
-    scope_department: str | None = Form(default=None),
+    scope_organization_id: int | None = Form(default=None),
+    scope_department_id: int | None = Form(default=None),
+    scope_organization: str | None = Form(
+        default=None, description="Fallback: organization name (ignored when the id is set)"
+    ),
+    scope_department: str | None = Form(
+        default=None, description="Fallback: department name (ignored when the id is set)"
+    ),
     allowed_roles: str | None = Form(
         default=None, description="Comma-separated roles; empty = everyone in scope"
     ),
@@ -431,11 +434,14 @@ def upload_template(
     # 6b. Audience / publish rules (checked before anything is written to disk)
     try:
         access = resolve_publish_access(
+            db,
             current_user,
             visibility,
-            scope_organization,
-            scope_department,
+            scope_organization_id,
+            scope_department_id,
             parse_roles_csv(allowed_roles),
+            scope_organization_name=scope_organization,
+            scope_department_name=scope_department,
         )
     except PublishRuleError as exc:
         raise _publish_error(exc) from None
@@ -462,8 +468,10 @@ def upload_template(
         file_size_bytes=stored.size_bytes,
         file_extension=".docx",
         uploaded_by=current_user.id,
-        scope_organization=access.scope_organization,
-        scope_department=access.scope_department,
+        scope_organization_id=access.scope_organization_id,
+        scope_department_id=access.scope_department_id,
+        scope_organization=access.organization.name if access.organization else None,
+        scope_department=access.department.name if access.department else None,
         allowed_roles=access.allowed_roles,
     )
 

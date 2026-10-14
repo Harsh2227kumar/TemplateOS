@@ -34,6 +34,8 @@ def create_application() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+        # Lets the frontend read the download filename of generated files.
+        expose_headers=["Content-Disposition"],
     )
 
     application.include_router(api_router, prefix=settings.api_v1_prefix)

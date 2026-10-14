@@ -120,6 +120,19 @@ class Settings(BaseSettings):
         default="", alias="BEDROCK_MODEL_NOVA_MICRO"
     )
     ai_max_output_tokens: int = Field(default=1024, alias="AI_MAX_OUTPUT_TOKENS")
+    # --- PDF conversion (V1.6 Phase 2), see app/services/pdf_service.py ---
+    # "auto": Gotenberg when GOTENBERG_URL is set, else a local LibreOffice
+    # (LIBREOFFICE_PATH or soffice/libreoffice on PATH), else off.
+    # "gotenberg" / "libreoffice" force one backend; "none" turns PDF off.
+    pdf_converter: str = Field(default="auto", alias="PDF_CONVERTER")
+    gotenberg_url: str | None = Field(default=None, alias="GOTENBERG_URL")
+    gotenberg_timeout_seconds: float = Field(
+        default=60, gt=0, alias="GOTENBERG_TIMEOUT_SECONDS"
+    )
+    libreoffice_path: str | None = Field(default=None, alias="LIBREOFFICE_PATH")
+    libreoffice_timeout_seconds: float = Field(
+        default=120, gt=0, alias="LIBREOFFICE_TIMEOUT_SECONDS"
+    )
 
     @property
     def ai_is_configured(self) -> bool:

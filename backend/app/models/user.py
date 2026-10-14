@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import JSON, String
+from sqlalchemy import JSON, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.base import Base
@@ -8,6 +8,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.template import Template
     from app.models.document import Document
+    from app.models.organization import Department, Organization
 
 USER_ROLES = (
     "super_admin",
@@ -29,8 +30,22 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), default="normal_user")
     # Nullable only to keep the migration safe for any users created before auth existed.
     hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Legacy free-text copies of the linked names (see app/models/organization.py).
+    # Access rules use organization_id / department_id only.
     department: Mapped[str | None] = mapped_column(String(255), nullable=True)
     organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    department_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("departments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
@@ -42,6 +57,21 @@ class User(Base):
         if role not in USER_ROLES:
             raise ValueError(f"Unsupported user role: {role}")
         return role
+
+    organization_ref: Mapped["Organization | None"] = relationship(
+        "Organization", foreign_keys=[organization_id], lazy="selectin"
+    )
+    department_ref: Mapped["Department | None"] = relationship(
+        "Department", foreign_keys=[department_id], lazy="selectin"
+    )
+
+    @property
+    def organization_name(self) -> str | None:
+        return self.organization_ref.name if self.organization_ref else None
+
+    @property
+    def department_name(self) -> str | None:
+        return self.department_ref.name if self.department_ref else None
 
     templates: Mapped[list["Template"]] = relationship(
         "Template", back_populates="uploader"
