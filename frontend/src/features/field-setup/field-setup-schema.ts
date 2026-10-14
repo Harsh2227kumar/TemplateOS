@@ -1,5 +1,6 @@
 import * as z from "zod";
 
+import { AI_FIELD_TYPES } from "@/components/fields/ai-style-state";
 import type { TemplateField, TemplateFieldUpsert } from "@/lib/api";
 import {
   FIELD_TYPE_VALUES,
@@ -127,6 +128,7 @@ export function toFieldUpsert(field: FieldFormValue): TemplateFieldUpsert {
     example_value: field.example_value.trim() || undefined,
     validation_rule: normalizeValidationRule(field.validation_rule) || undefined,
     section: field.section.trim() || undefined,
-    ai_enabled: field.ai_enabled,
+    // AI has no effect on other types; never save a dead toggle.
+    ai_enabled: field.ai_enabled && AI_FIELD_TYPES.includes(field.field_type),
   };
 }

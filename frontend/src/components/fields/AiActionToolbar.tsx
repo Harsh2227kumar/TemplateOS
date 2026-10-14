@@ -1,16 +1,17 @@
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Briefcase, Loader2, RotateCcw, Scissors, Sparkles, SpellCheck } from "lucide-react";
+import { Briefcase, Expand, Loader2, RotateCcw, Scissors, Sparkles, SpellCheck } from "lucide-react";
 
 import { MAX_AI_TEXT_CHARS } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { type AiStyle } from "./ai-style-state";
+import { styleAppliesTo, type AiFieldKind, type AiStyle } from "./ai-style-state";
 import { AI_STYLE_LABELS, type AiStyleSwitcher } from "./use-ai-style-switcher";
 
-const STYLES: { style: AiStyle; icon: ReactNode; hint: string }[] = [
+export const AI_STYLES: { style: AiStyle; icon: ReactNode; hint: string }[] = [
   { style: "grammar", icon: <SpellCheck className="h-3.5 w-3.5" />, hint: "Fix spelling and grammar only" },
   { style: "tone", icon: <Briefcase className="h-3.5 w-3.5" />, hint: "Rewrite in a professional tone" },
   { style: "concise", icon: <Scissors className="h-3.5 w-3.5" />, hint: "Shorten while keeping the meaning" },
   { style: "formal", icon: <Sparkles className="h-3.5 w-3.5" />, hint: "Rewrite in formal language" },
+  { style: "expand", icon: <Expand className="h-3.5 w-3.5" />, hint: "Expand into fuller sentences (no new facts)" },
 ];
 
 interface AiActionToolbarProps {
@@ -19,6 +20,8 @@ interface AiActionToolbarProps {
   controlsId: string;
   /** Whole form disabled (e.g. saving). */
   disabled?: boolean;
+  /** The field's AI kind: lists are rewritten item by item; one-line inputs have no Expand. */
+  kind?: AiFieldKind;
 }
 
 /**
@@ -28,8 +31,10 @@ interface AiActionToolbarProps {
  * toolbar, arrow keys / Home / End move between options, Enter or Space
  * applies one.
  */
-export function AiActionToolbar({ switcher, controlsId, disabled = false }: AiActionToolbarProps) {
+export function AiActionToolbar({ switcher, controlsId, disabled = false, kind = "multiline" }: AiActionToolbarProps) {
   const { state, isPending, sourceLength, announcement } = switcher;
+  const STYLES = AI_STYLES.filter(({ style }) => styleAppliesTo(style, kind));
+  const isList = kind === "list";
   const [focusIndex, setFocusIndex] = useState(0);
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -92,7 +97,9 @@ export function AiActionToolbar({ switcher, controlsId, disabled = false }: AiAc
       </>
     );
   } else if (isEmpty) {
-    status = "Type some text, then pick a style.";
+    status = isList ? "Add some items, then pick a style." : "Type some text, then pick a style.";
+  } else if (isList) {
+    status = "Pick a style to rewrite each item. The number of items stays the same, and you can go back to the original.";
   } else {
     status = "Pick a style to rewrite your text. You can always go back to the original.";
   }
@@ -166,7 +173,9 @@ export function AiActionToolbar({ switcher, controlsId, disabled = false }: AiAc
           const pressed = appliedStyle === style;
           const unavailable = disabled || isPending || isEmpty || isTooLong;
           const title = isEmpty
-            ? "Type some text first"
+            ? isList
+              ? "Add an item first"
+              : "Type some text first"
             : isTooLong
               ? `Text is over ${MAX_AI_TEXT_CHARS.toLocaleString()} characters`
               : pressed

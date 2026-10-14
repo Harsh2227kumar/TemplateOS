@@ -178,7 +178,14 @@ export function EditDocumentPage() {
       toast(
         result.pdf_status === "ok"
           ? { title: "PDF ready", duration: 2500 }
-          : { variant: "destructive", title: "PDF still unavailable", description: result.pdf_error ?? undefined },
+          : result.pdf_status === "not_configured"
+            ? {
+                variant: "destructive",
+                title: "PDF conversion is not set up on the server",
+                description:
+                  "Set GOTENBERG_URL in the backend .env (or install LibreOffice) and restart the backend, then try again.",
+              }
+            : { variant: "destructive", title: "PDF still unavailable", description: result.pdf_error ?? undefined },
       );
     } catch (err) {
       toast({
