@@ -11,12 +11,45 @@ Used by the document endpoints (app/api/v1/endpoints/documents.py):
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # Request-size bounds for PUT /documents/{id}/values (no prior limit existed).
 MAX_DOCUMENT_VALUE_LENGTH = 50_000
 MAX_VALUES_PER_REQUEST = 500
+
+PdfStatus = Literal["ok", "failed", "not_configured"]
+
+
+# --- Generation (V1.6) ---
+
+
+class GeneratedInfo(BaseModel):
+    """
+    Latest generated output of a document (null in DocumentRead / list items
+    until the first POST /documents/{id}/generate).
+
+    - pdf_status: ok (PDF available), failed (conversion failed, see
+      pdf_error; retry with POST /generate-pdf), not_configured (no PDF
+      converter on the server)
+    - is_stale: the draft's values were saved after this generation
+    """
+
+    generated_at: datetime
+    pdf_status: PdfStatus
+    pdf_error: str | None = None
+    docx_url: str
+    pdf_url: str | None = None
+    is_stale: bool = False
+    template_version: int | None = None
+
+
+class GenerateDocumentResponse(GeneratedInfo):
+    """Response for POST /documents/{id}/generate and /generate-pdf."""
+
+    document_id: int
+    document_status: str
 
 
 # --- Document Schemas ---
@@ -73,6 +106,8 @@ class DocumentRead(BaseModel):
 
     # Optional: eagerly loaded values (when include_values=true)
     values: list["DocumentValueRead"] = Field(default_factory=list)
+    # V1.6: latest generated output, null until generated
+    generated: GeneratedInfo | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -208,6 +243,7 @@ class DocumentListItem(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    generated: GeneratedInfo | None = None  # V1.6
 
     model_config = ConfigDict(from_attributes=True)
 
