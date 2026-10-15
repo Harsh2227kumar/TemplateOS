@@ -408,14 +408,24 @@ export interface Document {
 
 // --- V1.6: Document generation ---
 
-export type PdfStatus = "ok" | "failed" | "not_configured";
+/** pending: conversion did not finish · converted · failed (see pdf_error). */
+export type PdfStatus = "pending" | "converted" | "failed";
 
 export interface GeneratedInfo {
   generated_at: string;
   pdf_status: PdfStatus;
+  /** User-readable reason of the last failed conversion. */
   pdf_error: string | null;
+  /** Stored PDF file name (no path); null without a PDF. */
+  pdf_filename: string | null;
+  pdf_converted_at: string | null;
+  /** Conversions tried for the current DOCX (initial + retries). */
+  pdf_attempts: number;
+  /** A PDF file exists; can be true while pdf_status is "failed" (an earlier PDF). */
+  has_pdf: boolean;
   /** API path (with the /api/v1 prefix) of the DOCX download. */
   docx_url: string;
+  /** API path of the PDF download (/download/pdf); null without a PDF. */
   pdf_url: string | null;
   /** The draft's values were saved after this generation. */
   is_stale: boolean;
