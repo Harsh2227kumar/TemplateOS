@@ -3043,3 +3043,117 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Verified: backend 553 passed + live Gotenberg test passed; frontend tsc, 93/93 tests, build; `verify_gotenberg.py --live` converted a DOCX in 1.09 s; browser end-to-end with real Gotenberg 8.37: "PDF ready" in 3.3 s, the downloaded PDF (93 KB) contains every value including both items of each list.
 - After merge: `alembic upgrade head` (applies `e3c9a7b5d1f2`), set `GOTENBERG_URL=http://localhost:3000` and `PDF_CONVERTER=auto` in `.env`, run Gotenberg via `docker compose up -d gotenberg` or an existing container on port 3000.
 - Not done by decision: V1.6 P1 versioning (`version`, `generated_by`, history) and placeholder warnings instead of 422. V1.7 (preview, edit, versioned files, download history, audit logs) will need versioning, so revisit that decision when starting V1.7.
+
+### Checkpoint 0061
+
+- Date: 2026-10-15
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v17-p1-preview-data-layer` (from `backend`, PR #173 into `backend`); tracker on `docs/project-change-tracker-v17-p1` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0060 -> 2026-10-15
+
+#### Summary
+
+- V1.7 Phase 1 (Preview Page) data layer: one efficient query, the `DocumentPreview` response schemas, and pure helpers for section grouping and completeness. No migration.
+
+#### Completed Tasks
+
+- `get_document_for_preview(db, id)`: document + template + generated file, values, fields in 3 SQL statements (asserted), no lazy loads afterwards; template scope relations deferred.
+- `app/schemas/document_preview.py`: `DocumentPreview`, `PreviewDocument`, `PreviewTemplate`, `PreviewCompleteness`, `PreviewSection`, `PreviewField`, `PreviewGeneration`, `PreviewPermissions` (exported).
+- `app/services/document_preview.py`: `build_sections` (formatter injected), `compute_completeness`, `field_is_empty`, `list_items`, `saved_values`, `field_label`, `section_name`, `ordered_fields`; parsing reused from the validator and generator.
+- `scripts/seed_preview_demo.py`: demo template/draft with every field type; refuses non-SQLite URLs without `--yes`.
+
+#### Code Changes
+
+- `backend/app/crud/document_crud.py`, `backend/app/schemas/document_preview.py` (new), `backend/app/schemas/__init__.py`, `backend/app/services/document_preview.py` (new), `backend/tests/test_document_preview_data.py` (new), `backend/scripts/seed_preview_demo.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: preview query, schemas and helpers.
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviations from the spec, matching existing behaviour: never-saved fields ignore `default_value` (generation renders them blank and fails the required check), and the label fallback is the raw `field_name` (as the edit form does).
+- Tests: 60 new (query count, ordering/sections, list parsing, 23 validator parity cases, schemas, seed guard); full suite 613 passed, 1 skipped.
+- Member 2 (endpoint) and Member 1 (preview page) are being built in parallel; an integration check across all three follows before their PRs.
+
+### Checkpoint 0062
+
+- Date: 2026-10-15
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v17-p1-preview-endpoint` (stacked on `feature/backend-v17-p1-preview-data-layer`, PR #174; retarget to `backend` after #173 merges)
+- Push status: before push
+- Range covered: after Checkpoint 0061 -> 2026-10-15
+
+#### Summary
+
+- V1.7 Phase 1 endpoint: `GET /api/v1/documents/{id}/preview`, built in parallel with Member 3 and merged onto its real data layer.
+
+#### Completed Tasks
+
+- Preview endpoint returning document, template, completeness, sections/fields (M3 helpers), generation status and permissions.
+- Shared `format_field_value` in `generation_service` (also used by `build_context`), so preview text equals the generated DOCX text.
+- `document_permissions.py` (`document_permissions`, `require_document_viewer`; owner-only, the single place V1.8 extends).
+- `is_stale(document, record)` extracted and shared.
+- File availability checked on disk; URLs via `download_url`; `pdf_filename` basename only; no storage paths in responses.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/documents.py`, `backend/app/services/generation_service.py`, `backend/app/services/document_generation.py`, `backend/app/services/document_permissions.py` (new), `backend/tests/test_document_preview_api.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: preview endpoint, permission helper.
+- Updated: generation formatting and staleness moved into shared helpers (output unchanged).
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- 25 new tests; full suite 638 passed. The temporary stand-in used during parallel work was removed from history (branch rebuilt; final tree identical to the tested one).
+
+### Checkpoint 0063
+
+- Date: 2026-10-15
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v17-p1-preview-page` (from `frontend`, PR #175 into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0062 -> 2026-10-15
+
+#### Summary
+
+- V1.7 Phase 1 preview page at `/documents/:id/preview`, plus entry points from the dashboard and the edit page.
+
+#### Completed Tasks
+
+- Preview API types, `useDocumentPreview` (refreshed by existing save/generate/retry invalidations), pure helpers with unit tests.
+- Header, completeness card with missing-field links, read-only section/field rows, generated document card reusing the V1.6 DOCX/PDF rows, inline PDF preview (blob URL, revoked on hide/unmount).
+- Entry points: dashboard "View", edit page "Preview" (unsaved-changes guard), "Open preview" after Generate, `#field-<name>` deep links focusing the field.
+
+#### Code Changes
+
+- `frontend/src/lib/api/types.ts`, `documents.ts`, `frontend/src/lib/query/keys.ts`, `frontend/src/hooks/queries/documents.ts`, `frontend/src/features/document-preview/*` (new), `frontend/src/features/documents/GenerationPanel.tsx` (row extraction), `generation.ts`, `use-focus-field-from-hash.ts` (new), `frontend/src/pages/document-preview-page.tsx` (new), `App.tsx`, `dashboard-page.tsx`, `edit-document-page.tsx`, `frontend/tests/preview-model.test.ts` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: preview page and route, inline PDF preview, deep links.
+- Updated: dashboard draft rows (View + Continue); generate success shows an "Open preview" link.
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Integration check across M1/M2/M3 (built in parallel): frontend types vs backend schemas match field by field including nullability; backend 638 passed; frontend tsc, 113/113 tests, build; browser end-to-end with real Gotenberg verified every preview state, deep links, generate from preview, PDF preview + blob revocation, downloads and the stale warning.
+- Merge order: #173 -> `backend`, retarget #174 to `backend` and merge, #175 -> `frontend`, then integrate into `dev`. No migration in Phase 1.
