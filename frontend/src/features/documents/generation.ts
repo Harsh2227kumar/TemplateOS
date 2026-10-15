@@ -1,23 +1,170 @@
 /**
- * Pure helpers for V1.6 document generation (labels, filenames).
+ * Pure helpers for V1.6 document generation (labels, PDF row state,
+ * filenames, the slow-conversion hint timer).
  * Kept free of runtime imports so they can be unit tested with `node --test`.
  */
 
-export type PdfStatus = "ok" | "failed" | "not_configured";
+/** Mirrors the backend: generated_files.pdf_status. */
+export type PdfStatus = "pending" | "converted" | "failed";
 export type DownloadFormat = "docx" | "pdf";
 
 /** Short label for the PDF state of a generated document. */
 export function pdfStatusLabel(status: PdfStatus | null | undefined): string {
   switch (status) {
-    case "ok":
+    case "converted":
       return "PDF ready";
     case "failed":
-      return "PDF conversion failed";
-    case "not_configured":
-      return "PDF conversion is not set up on the server";
+      return "PDF not available";
+    case "pending":
+      return "PDF conversion did not finish.";
     default:
       return "Not generated yet";
   }
+}
+
+/** The PDF fields of a generated document that the PDF row needs. */
+export interface PdfState {
+  pdf_status: PdfStatus;
+  pdf_error: string | null;
+  pdf_filename?: string | null;
+  has_pdf?: boolean;
+}
+
+export type PdfRowKind = "converting" | "retrying" | "converted" | "failed" | "pending" | "none";
+
+export interface PdfRowView {
+  kind: PdfRowKind;
+  /** Status text (announced through aria-live). */
+  text: string;
+  /** The failure reason (failed only). */
+  detail: string | null;
+  /** File name shown next to "PDF ready". */
+  filename: string | null;
+  showDownload: boolean;
+  showRetry: boolean;
+  /** Failed, but an earlier PDF of this document can still be downloaded. */
+  earlierPdf: boolean;
+  /** Amber notice (failed / pending). PDF problems are never red. */
+  warn: boolean;
+}
+
+export const EARLIER_PDF_NOTE = "An earlier PDF of this document is available.";
+
+/** What the PDF row of the generation panel shows. Running actions win. */
+export function pdfRowView(
+  pdf: PdfState | null | undefined,
+  { generating, retrying }: { generating: boolean; retrying: boolean },
+): PdfRowView {
+  const base: PdfRowView = {
+    kind: "none",
+    text: "",
+    detail: null,
+    filename: null,
+    showDownload: false,
+    showRetry: false,
+    earlierPdf: false,
+    warn: false,
+  };
+  if (generating) return { ...base, kind: "converting", text: "Converting to PDF…" };
+  if (retrying) return { ...base, kind: "retrying", text: "Retrying PDF conversion…" };
+  if (!pdf) return base;
+  const hasPdf = Boolean(pdf.has_pdf);
+  switch (pdf.pdf_status) {
+    case "converted":
+      return {
+        ...base,
+        kind: "converted",
+        text: pdfStatusLabel("converted"),
+        filename: pdf.pdf_filename ?? null,
+        showDownload: true,
+      };
+    case "failed":
+      return {
+        ...base,
+        kind: "failed",
+        text: pdfStatusLabel("failed"),
+        detail: pdf.pdf_error || null,
+        showRetry: true,
+        showDownload: hasPdf,
+        earlierPdf: hasPdf,
+        warn: true,
+      };
+    default:
+      return {
+        ...base,
+        kind: "pending",
+        text: pdfStatusLabel("pending"),
+        showRetry: true,
+        showDownload: hasPdf,
+        warn: true,
+      };
+  }
+}
+
+/** Success message after Generate, by the PDF outcome. */
+export function generateSuccessMessage(status: PdfStatus): string {
+  switch (status) {
+    case "converted":
+      return "Document generated. DOCX and PDF are ready.";
+    case "failed":
+      return "Document generated. DOCX is ready; PDF failed (see below).";
+    default:
+      return "Document generated. DOCX is ready; PDF conversion did not finish (see below).";
+  }
+}
+
+/** Dashboard quick download: the PDF when it is converted, else the DOCX. */
+export function quickDownloadFormat(pdf: Pick<PdfState, "pdf_status"> | null | undefined): DownloadFormat {
+  return pdf?.pdf_status === "converted" ? "pdf" : "docx";
+}
+
+export const RETRY_DOCX_MISSING_MESSAGE = "The generated DOCX is missing on the server. Click Regenerate.";
+export const PDF_FILE_MISSING_MESSAGE = "The PDF file is missing on the server. Click Retry PDF.";
+
+/** The local PDF state after a failed retry / download (the server already recorded it). */
+export function markPdfFailed<T extends PdfState & { pdf_attempts?: number; pdf_url?: string | null }>(
+  current: T,
+  reason: string,
+  { fileMissing = false, attempted = false }: { fileMissing?: boolean; attempted?: boolean } = {},
+): T {
+  return {
+    ...current,
+    pdf_status: "failed",
+    pdf_error: reason,
+    ...(fileMissing ? { has_pdf: false, pdf_url: null, pdf_filename: null } : {}),
+    ...(attempted && typeof current.pdf_attempts === "number" ? { pdf_attempts: current.pdf_attempts + 1 } : {}),
+  } as T;
+}
+
+export const SLOW_PDF_HINT_MS = 8000;
+export const SLOW_PDF_HINT = "Converting to PDF can take up to a minute on first use.";
+
+/**
+ * Call onSlow once `delayMs` after starting, unless the returned cancel
+ * function runs first (generation finished or the component unmounted).
+ */
+export function startSlowHintTimer(
+  onSlow: () => void,
+  delayMs: number = SLOW_PDF_HINT_MS,
+  timers: {
+    set: (callback: () => void, ms: number) => unknown;
+    clear: (handle: unknown) => void;
+  } = {
+    set: (callback, ms) => setTimeout(callback, ms),
+    clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  },
+): () => void {
+  let done = false;
+  const handle = timers.set(() => {
+    if (done) return;
+    done = true;
+    onSlow();
+  }, delayMs);
+  return () => {
+    if (done) return;
+    done = true;
+    timers.clear(handle);
+  };
 }
 
 /** Mirrors the backend's filename rule, used when the header is unreadable. */

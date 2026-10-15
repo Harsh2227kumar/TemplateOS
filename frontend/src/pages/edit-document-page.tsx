@@ -11,7 +11,13 @@ import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { latestTimestamp } from "@/features/documents/draft-timestamps";
 import { GenerationPanel } from "@/features/documents/GenerationPanel";
-import type { DownloadFormat } from "@/features/documents/generation";
+import {
+  generateSuccessMessage,
+  markPdfFailed,
+  PDF_FILE_MISSING_MESSAGE,
+  RETRY_DOCX_MISSING_MESSAGE,
+  type DownloadFormat,
+} from "@/features/documents/generation";
 import { useDraftForm, useNow } from "@/features/documents/use-draft-form";
 import {
   combineQueries,
@@ -24,7 +30,7 @@ import {
   useTemplateFields,
 } from "@/hooks/queries";
 import { useSeedOnce } from "@/hooks/use-seed-once";
-import type { ApiError, DocumentFormValues, GeneratedInfo, TemplateField } from "@/lib/api";
+import { ApiError, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
 
@@ -140,16 +146,8 @@ export function EditDocumentPage() {
     try {
       const result = await generateDocument.mutateAsync(documentId);
       setLatestGenerated(result);
-      toast({
-        title: "Document generated",
-        description:
-          result.pdf_status === "ok"
-            ? "DOCX and PDF are ready to download."
-            : result.pdf_status === "failed"
-              ? "The DOCX is ready; the PDF conversion failed."
-              : "The DOCX is ready to download.",
-        duration: 3500,
-      });
+      // A PDF failure is not a generation failure: the panel shows it in amber.
+      toast({ title: generateSuccessMessage(result.pdf_status), duration: 3500 });
     } catch (err) {
       // 422 with field errors maps onto the inputs like a failed save.
       setGenerateError(
@@ -171,28 +169,26 @@ export function EditDocumentPage() {
     }, handleInvalid)();
   };
 
+  /** The PDF state shown in the panel right now (latest result or the draft's). */
+  const currentGenerated = (): GeneratedInfo | null => latestGenerated ?? document?.generated ?? null;
+
   const handleRetryPdf = async () => {
+    if (saving || generateDocument.isPending || retryPdf.isPending) return;
+    setGenerateError(null);
     try {
       const result = await retryPdf.mutateAsync(documentId);
       setLatestGenerated(result);
-      toast(
-        result.pdf_status === "ok"
-          ? { title: "PDF ready", duration: 2500 }
-          : result.pdf_status === "not_configured"
-            ? {
-                variant: "destructive",
-                title: "PDF conversion is not set up on the server",
-                description:
-                  "Set GOTENBERG_URL in the backend .env (or install LibreOffice) and restart the backend, then try again.",
-              }
-            : { variant: "destructive", title: "PDF still unavailable", description: result.pdf_error ?? undefined },
-      );
+      toast({ title: "PDF ready", duration: 2500 });
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Couldn't retry the PDF",
-        description: err instanceof Error ? err.message : undefined,
-      });
+      const current = currentGenerated();
+      if (err instanceof ApiError && err.status === 503) {
+        // The server recorded the failure; show its reason in the amber PDF row.
+        if (current) setLatestGenerated(markPdfFailed(current, err.message, { attempted: true }));
+      } else if (err instanceof ApiError && err.status === 410) {
+        setGenerateError(RETRY_DOCX_MISSING_MESSAGE);
+      } else {
+        setGenerateError(err instanceof Error && err.message ? err.message : "Retry failed. Please try again.");
+      }
     }
   };
 
@@ -201,14 +197,23 @@ export function EditDocumentPage() {
     try {
       await downloadGenerated.mutateAsync({ documentId, format, name: document?.name });
     } catch (err) {
-      const status = (err as ApiError | undefined)?.status;
+      const status = err instanceof ApiError ? err.status : undefined;
+      if (format === "pdf" && status === 410) {
+        // The stored PDF is gone: the amber PDF row now offers Retry PDF.
+        const current = currentGenerated();
+        if (current) setLatestGenerated(markPdfFailed(current, PDF_FILE_MISSING_MESSAGE, { fileMissing: true }));
+        return;
+      }
       toast({
         variant: "destructive",
         title: status === 409 && format === "pdf" ? "PDF not available" : "Download failed",
         description: err instanceof Error ? err.message : undefined,
       });
       // The server state may differ from what we show (e.g. file removed).
-      if (status === 404 || status === 409) void documentQuery.refetch();
+      if (status === 404 || status === 409) {
+        setLatestGenerated(null);
+        void documentQuery.refetch();
+      }
     } finally {
       setDownloading(null);
     }

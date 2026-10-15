@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/toast";
-import { pdfStatusLabel } from "@/features/documents/generation";
+import { pdfStatusLabel, quickDownloadFormat } from "@/features/documents/generation";
 import { useDownloadGenerated, useMyDocuments, useMyTemplates } from "@/hooks/queries";
 import type { Document } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
@@ -20,9 +20,9 @@ export function DashboardPage() {
   const downloadGenerated = useDownloadGenerated();
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  /** Quick download: the PDF when it exists, else the DOCX. */
+  /** Quick download: the PDF when it is converted, else the DOCX. */
   const handleQuickDownload = async (draft: Document) => {
-    const format = draft.generated?.pdf_status === "ok" ? "pdf" : "docx";
+    const format = quickDownloadFormat(draft.generated);
     setDownloadingId(draft.id);
     try {
       await downloadGenerated.mutateAsync({ documentId: draft.id, format, name: draft.name });
@@ -199,7 +199,8 @@ export function DashboardPage() {
             const title = d.name || `Draft ${d.id}`;
             const updated = describeUpdated(d.updated_at);
             const generated = d.generated ?? null;
-            const quickFormat = generated?.pdf_status === "ok" ? "PDF" : "DOCX";
+            const quickFormat = quickDownloadFormat(generated) === "pdf" ? "PDF" : "DOCX";
+            const pdfReady = generated?.pdf_status === "converted";
             return (
               <li key={d.id} className="flex items-stretch gap-2">
                 <Link
@@ -236,6 +237,14 @@ export function DashboardPage() {
                     <Badge variant="secondary" className={`hidden shrink-0 sm:inline-flex ${getDraftStatusColor(d.status)}`}>
                       {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
                     </Badge>
+                  )}
+                  {pdfReady && (
+                    <span
+                      className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600"
+                      title={pdfStatusLabel("converted")}
+                    >
+                      PDF
+                    </span>
                   )}
                   <span className="flex shrink-0 items-center text-sm font-medium text-slate-600 group-hover:text-slate-900">
                     <span className="hidden sm:inline">Continue</span>
