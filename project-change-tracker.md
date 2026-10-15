@@ -3043,3 +3043,42 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Verified: backend 553 passed + live Gotenberg test passed; frontend tsc, 93/93 tests, build; `verify_gotenberg.py --live` converted a DOCX in 1.09 s; browser end-to-end with real Gotenberg 8.37: "PDF ready" in 3.3 s, the downloaded PDF (93 KB) contains every value including both items of each list.
 - After merge: `alembic upgrade head` (applies `e3c9a7b5d1f2`), set `GOTENBERG_URL=http://localhost:3000` and `PDF_CONVERTER=auto` in `.env`, run Gotenberg via `docker compose up -d gotenberg` or an existing container on port 3000.
 - Not done by decision: V1.6 P1 versioning (`version`, `generated_by`, history) and placeholder warnings instead of 422. V1.7 (preview, edit, versioned files, download history, audit logs) will need versioning, so revisit that decision when starting V1.7.
+
+### Checkpoint 0061
+
+- Date: 2026-10-15
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v17-p1-preview-data-layer` (from `backend`, PR #173 into `backend`); tracker on `docs/project-change-tracker-v17-p1` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0060 -> 2026-10-15
+
+#### Summary
+
+- V1.7 Phase 1 (Preview Page) data layer: one efficient query, the `DocumentPreview` response schemas, and pure helpers for section grouping and completeness. No migration.
+
+#### Completed Tasks
+
+- `get_document_for_preview(db, id)`: document + template + generated file, values, fields in 3 SQL statements (asserted), no lazy loads afterwards; template scope relations deferred.
+- `app/schemas/document_preview.py`: `DocumentPreview`, `PreviewDocument`, `PreviewTemplate`, `PreviewCompleteness`, `PreviewSection`, `PreviewField`, `PreviewGeneration`, `PreviewPermissions` (exported).
+- `app/services/document_preview.py`: `build_sections` (formatter injected), `compute_completeness`, `field_is_empty`, `list_items`, `saved_values`, `field_label`, `section_name`, `ordered_fields`; parsing reused from the validator and generator.
+- `scripts/seed_preview_demo.py`: demo template/draft with every field type; refuses non-SQLite URLs without `--yes`.
+
+#### Code Changes
+
+- `backend/app/crud/document_crud.py`, `backend/app/schemas/document_preview.py` (new), `backend/app/schemas/__init__.py`, `backend/app/services/document_preview.py` (new), `backend/tests/test_document_preview_data.py` (new), `backend/scripts/seed_preview_demo.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: preview query, schemas and helpers.
+- Updated: None
+- Removed: None
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Deviations from the spec, matching existing behaviour: never-saved fields ignore `default_value` (generation renders them blank and fails the required check), and the label fallback is the raw `field_name` (as the edit form does).
+- Tests: 60 new (query count, ordering/sections, list parsing, 23 validator parity cases, schemas, seed guard); full suite 613 passed, 1 skipped.
+- Member 2 (endpoint) and Member 1 (preview page) are being built in parallel; an integration check across all three follows before their PRs.
