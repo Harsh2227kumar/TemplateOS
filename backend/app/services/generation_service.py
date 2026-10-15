@@ -18,6 +18,10 @@ Context rules (build_context):
   "\t" into a tab); other control characters are removed because they are
   invalid in XML or would inject paragraph/page breaks.
 
+These rules live in context_value(); format_field_value() is the same rule
+as display text, used by the preview page (V1.7) so it shows each value
+exactly as the generated document does.
+
 Rendering uses autoescape (so "&" and "<" are safe) and StrictUndefined: a
 placeholder that is not one of the template's fields is a template problem
 and is reported (TemplateRenderError -> HTTP 422) instead of silently
@@ -100,6 +104,31 @@ def parse_list_value(value: str) -> list[str]:
     return result
 
 
+def context_value(field: "TemplateField", raw: str | None) -> "str | ListValue":
+    """
+    One field's docxtpl context value. The single formatting rule shared by
+    generation (build_context) and the preview page (format_field_value).
+    """
+    raw = "" if raw is None else str(raw)
+    if field.field_type == "list":
+        return ListValue(parse_list_value(raw))
+    if field.field_type == "date":
+        return clean_text(format_date_value(raw))
+    return clean_text(raw)
+
+
+def format_field_value(field: "TemplateField", raw: str | None) -> str:
+    """
+    A field's value as display text, exactly as `{{ field_name }}` renders
+    in the generated DOCX: ISO date -> DD-MM-YYYY (invalid dates unchanged),
+    numbers / text unchanged, list -> non-blank items joined by a newline.
+    None or blank -> "".
+    """
+    if raw is None or not str(raw).strip():
+        return ""
+    return str(context_value(field, raw))
+
+
 def build_context(
     fields: list["TemplateField"], values: dict[str, str | None]
 ) -> dict[str, Any]:
@@ -108,17 +137,10 @@ def build_context(
 
     `values` maps field_name -> stored value (missing / None = not filled).
     """
-    context: dict[str, Any] = {}
-    for field in fields:
-        raw = values.get(field.field_name)
-        raw = "" if raw is None else str(raw)
-        if field.field_type == "list":
-            context[field.field_name] = ListValue(parse_list_value(raw))
-        elif field.field_type == "date":
-            context[field.field_name] = clean_text(format_date_value(raw))
-        else:
-            context[field.field_name] = clean_text(raw)
-    return context
+    return {
+        field.field_name: context_value(field, values.get(field.field_name))
+        for field in fields
+    }
 
 
 def _describe_error(exc: Exception) -> str:
