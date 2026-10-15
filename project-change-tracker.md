@@ -3002,3 +3002,44 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Merge order: #164 -> `backend`, then #165 -> `frontend`, then integrate into `dev`. No migration.
 - Local setup: put `GOTENBERG_URL=http://localhost:3000` in the repository-root `.env` and restart the backend. Check the startup log or `GET /api/v1/system/pdf-check`, then click "Create PDF" on an existing draft.
 - AI calls need a valid Bedrock key (`AWS_BEARER_TOKEN_BEDROCK`); the current local key was rejected by AWS (403) and must be regenerated.
+
+### Checkpoint 0060
+
+- Date: 2026-10-15
+- Member: AI Assistant (V1.6 Phase 2: Member 1, 2 and 3 alignment)
+- Branch: `feature/backend-v16-p2-pdf-status` (from `backend`, PR #170 into `backend`) and `feature/frontend-v16-p2-pdf-panel` (from `frontend`, PR #171 into `frontend`); this entry on `docs/project-change-tracker-v16-p2-pdf` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0059 -> 2026-10-15
+
+#### Summary
+
+- Audited V1.6 against the per-member prompt files. By team decision the Phase 1 design (one `generated_files` row per document, strict unknown-placeholder 422, current DOCX download) stays as is. Implemented `V1.6 P2 M3` fully and closed the gaps in `V1.6 P2 M2` and `V1.6 P2 M1`.
+
+#### Completed Tasks
+
+- P2 M3: stored PDF state on `generated_files` (`pdf_status` pending/converted/failed, `pdf_converted_at`, `pdf_attempts`) with backfill migration `e3c9a7b5d1f2`; CRUD `mark_pdf_converted` / `mark_pdf_failed` (a failed retry keeps an existing PDF); repo-root `docker-compose.yml` for Gotenberg; `backend/scripts/verify_gotenberg.py` (`--live`); `.env.example`; README section; integration tests with Gotenberg mocked plus one opt-in live test.
+- P2 M2: `PDF_CONVERSION_ENABLED` setting; Gotenberg error messages per spec (unreachable, timeout, HTTP status, non-PDF body, `Gotenberg-Trace` logged); retry returns 503 with the reason and 410 when the DOCX is missing; new `GET /documents/{id}/download/pdf` (404/409/410); generate never fails because of the PDF.
+- P2 M1: PDF row states (converting, retrying, ready, not available with reason and Retry, did not finish), slow-conversion hint after 8 s, 503/410 handling, distinct success messages, aria-live, dashboard "PDF" chip and PDF-first quick download.
+
+#### Code Changes
+
+- Backend: `app/models/generated_file.py`, `app/crud/generated_file_crud.py`, `app/services/pdf_service.py`, `app/services/document_generation.py`, `app/api/v1/endpoints/documents.py`, `app/api/v1/endpoints/system.py`, `app/core/config.py`, schemas, migration `e3c9a7b5d1f2_generated_files_pdf_status.py`, `scripts/verify_gotenberg.py`, `tests/test_pdf_conversion.py`, `tests/test_document_generation.py`, `backend/README.md`, `.env.example`, `docker-compose.yml`.
+- Frontend: `src/lib/api/documents.ts` and types, `src/features/documents/GenerationPanel.tsx`, `generation.ts`, `src/hooks/queries/documents.ts`, `src/pages/edit-document-page.tsx`, `src/pages/dashboard-page.tsx`, unit tests.
+
+#### Features Added / Updated / Removed
+
+- Added: persisted PDF status and attempts; `/download/pdf`; Gotenberg Docker Compose service and verification script; slow-conversion hint; PDF chip.
+- Updated: `pdf_status` values are now `pending` / `converted` / `failed` (previously derived `ok` / `failed` / `not_configured`); retry errors 503/410; PDF missing-file status 410.
+- Removed: None
+
+#### Issues Fixed
+
+- PDF state was derived, not stored, so attempts and conversion time were unknown.
+- No one-command way to run or verify Gotenberg.
+- Earlier "Add item does nothing" report on list fields was a test-harness mistake (only the first row's input has the field id); confirmed with real clicks that two items save and render into the DOCX and PDF.
+
+#### Notes For Next Push
+
+- Verified: backend 553 passed + live Gotenberg test passed; frontend tsc, 93/93 tests, build; `verify_gotenberg.py --live` converted a DOCX in 1.09 s; browser end-to-end with real Gotenberg 8.37: "PDF ready" in 3.3 s, the downloaded PDF (93 KB) contains every value including both items of each list.
+- After merge: `alembic upgrade head` (applies `e3c9a7b5d1f2`), set `GOTENBERG_URL=http://localhost:3000` and `PDF_CONVERTER=auto` in `.env`, run Gotenberg via `docker compose up -d gotenberg` or an existing container on port 3000.
+- Not done by decision: V1.6 P1 versioning (`version`, `generated_by`, history) and placeholder warnings instead of 422. V1.7 (preview, edit, versioned files, download history, audit logs) will need versioning, so revisit that decision when starting V1.7.
