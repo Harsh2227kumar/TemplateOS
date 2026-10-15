@@ -12,6 +12,7 @@ import {
   pdfRowView,
   SLOW_PDF_HINT,
   type DownloadFormat,
+  type PdfState,
 } from "./generation";
 import { useSlowHint } from "./use-slow-hint";
 
@@ -128,23 +129,11 @@ export function GenerationPanel({
         {(generated || generating) && (
           <ul className="space-y-2" aria-label="Generated files">
             {generated && !generating && (
-              <li className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
-                  <FileText className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
-                  Word document (DOCX)
-                </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => onDownload("docx")}
-                  disabled={downloading !== null}
-                  className="w-full shrink-0 sm:w-auto"
-                >
-                  {downloading === "docx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Download DOCX
-                </Button>
-              </li>
+              <DocxRow
+                downloading={downloading === "docx"}
+                downloadDisabled={downloading !== null}
+                onDownload={() => onDownload("docx")}
+              />
             )}
             <PdfRow
               generated={generated}
@@ -163,8 +152,38 @@ export function GenerationPanel({
   );
 }
 
-interface PdfRowProps {
-  generated: GeneratedInfo | null;
+export interface DocxRowProps {
+  downloading: boolean;
+  downloadDisabled: boolean;
+  onDownload: () => void;
+}
+
+/** The generated Word file row (shared with the V1.7 preview page). Render inside a <ul>. */
+export function DocxRow({ downloading, downloadDisabled, onDownload }: DocxRowProps) {
+  return (
+    <li className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+        <FileText className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+        Word document (DOCX)
+      </span>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={onDownload}
+        disabled={downloadDisabled}
+        className="w-full shrink-0 sm:w-auto"
+      >
+        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        Download DOCX
+      </Button>
+    </li>
+  );
+}
+
+export interface PdfRowProps {
+  /** The PDF fields of the generated document (GeneratedInfo, or the preview's mapped state). */
+  generated: PdfState | null;
   generating: boolean;
   retrying: boolean;
   downloading: boolean;
@@ -174,8 +193,8 @@ interface PdfRowProps {
   onRetry: () => void;
 }
 
-/** The PDF file row: its own status, independent of the DOCX. */
-function PdfRow({
+/** The PDF file row: its own status, independent of the DOCX (shared with the preview page). */
+export function PdfRow({
   generated,
   generating,
   retrying,

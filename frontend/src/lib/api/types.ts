@@ -437,6 +437,85 @@ export interface GenerateDocumentResponse extends GeneratedInfo {
   document_status: string;
 }
 
+// --- V1.7 Phase 1: read-only document preview (GET /documents/{id}/preview) ---
+
+export interface PreviewDocumentInfo {
+  id: number;
+  name: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreviewTemplateInfo {
+  id: number;
+  name: string;
+  category: string;
+  version: number;
+  has_processed_file: boolean;
+}
+
+export interface PreviewCompleteness {
+  required_total: number;
+  required_filled: number;
+  /** Field names (not labels) of required fields without a value. */
+  missing_required: string[];
+}
+
+export interface PreviewField {
+  field_name: string;
+  label: string;
+  field_type: string;
+  is_required: boolean;
+  ai_enabled: boolean;
+  display_order: number;
+  /** Raw saved value; null when never saved. */
+  value: string | null;
+  /** Exactly as generation renders it (e.g. ISO date -> DD-MM-YYYY). */
+  display_value: string;
+  /** List fields only. */
+  items: string[] | null;
+  is_empty: boolean;
+  missing_required: boolean;
+}
+
+export interface PreviewSection {
+  /** A field without a section is grouped under "General" by the API. */
+  name: string;
+  fields: PreviewField[];
+}
+
+export interface PreviewGeneration {
+  generated_at: string;
+  is_stale: boolean;
+  template_version: number | null;
+  /** The generated DOCX exists on disk. */
+  docx_available: boolean;
+  docx_url: string;
+  pdf_status: PdfStatus;
+  pdf_error: string | null;
+  /** A PDF file exists on disk. */
+  pdf_available: boolean;
+  pdf_url: string | null;
+  pdf_filename: string | null;
+}
+
+export interface PreviewPermissions {
+  can_edit: boolean;
+  can_generate: boolean;
+  can_download: boolean;
+}
+
+export interface DocumentPreview {
+  document: PreviewDocumentInfo;
+  template: PreviewTemplateInfo;
+  completeness: PreviewCompleteness;
+  sections: PreviewSection[];
+  /** null when the draft was never generated. */
+  generation: PreviewGeneration | null;
+  permissions: PreviewPermissions;
+}
+
 export type DocumentFormValues = Record<string, any>;
 
 export interface DocumentCreate {

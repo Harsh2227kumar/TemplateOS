@@ -2,6 +2,7 @@ import { request, requestFile, type FileDownload } from "./client";
 import type {
   Document,
   DocumentCreate,
+  DocumentPreview,
   DocumentValuesResponse,
   DocumentValuesSave,
   GenerateDocumentResponse,
@@ -22,6 +23,11 @@ export const documentsApi = {
 
   getDocument: async (id: number): Promise<Document> => {
     return request<Document>(`/documents/${id}`);
+  },
+
+  /** V1.7: read-only preview (display values, completeness, generated files). 403/404 = not found. */
+  getPreview: async (id: number): Promise<DocumentPreview> => {
+    return request<DocumentPreview>(`/documents/${id}/preview`);
   },
 
   /**

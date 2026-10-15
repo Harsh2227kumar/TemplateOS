@@ -204,9 +204,9 @@ export function DashboardPage() {
             return (
               <li key={d.id} className="flex items-stretch gap-2">
                 <Link
-                  to={`/documents/${d.id}/edit`}
+                  to={`/documents/${d.id}/preview`}
                   className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                  aria-label={`Continue editing ${title}`}
+                  aria-label={`View ${title}`}
                 >
                   <div
                     className={`h-2 w-2 shrink-0 rounded-full ${generated ? "bg-green-500" : "bg-yellow-400"}`}
@@ -247,10 +247,20 @@ export function DashboardPage() {
                     </span>
                   )}
                   <span className="flex shrink-0 items-center text-sm font-medium text-slate-600 group-hover:text-slate-900">
-                    <span className="hidden sm:inline">Continue</span>
+                    <span className="hidden sm:inline">View</span>
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />
                   </span>
                 </Link>
+                <Button asChild variant="outline" className="h-auto shrink-0 px-3">
+                  <Link
+                    to={`/documents/${d.id}/edit`}
+                    aria-label={`Continue editing ${title}`}
+                    title="Continue editing"
+                  >
+                    <FileEdit className="h-4 w-4" aria-hidden="true" />
+                    <span className="hidden text-xs sm:inline">Continue</span>
+                  </Link>
+                </Button>
                 {generated && (
                   <Button
                     type="button"

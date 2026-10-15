@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle, ChevronLeft, Loader2, RotateCcw, Save } from "lucide-react";
+import { CheckCircle, CheckCircle2, ChevronLeft, Eye, Loader2, RotateCcw, Save } from "lucide-react";
 
 import { buildInitialValues, normalizeSavedFormValues, serializeValues } from "@/components/forms/form-values";
 import { useSaveShortcut, useUnsavedChangesWarning } from "@/components/forms/use-form-guards";
@@ -19,6 +19,7 @@ import {
   type DownloadFormat,
 } from "@/features/documents/generation";
 import { useDraftForm, useNow } from "@/features/documents/use-draft-form";
+import { useFocusFieldFromHash } from "@/features/documents/use-focus-field-from-hash";
 import {
   combineQueries,
   useDocument,
@@ -56,6 +57,8 @@ export function EditDocumentPage() {
   const [latestGenerated, setLatestGenerated] = useState<GeneratedInfo | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
+  // Success message of the last Generate (with an "Open preview" link).
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
 
   // Fields as of seeding: the schema and inputs never change under the user.
   const [fields, setFields] = useState<TemplateField[]>([]);
@@ -101,6 +104,8 @@ export function EditDocumentPage() {
   );
 
   useUnsavedChangesWarning(isDirty);
+  // #field-<name> deep links from the preview page.
+  useFocusFieldFromHash(isSeeded && fields.length > 0);
   useSaveShortcut(requestSubmit, isSeeded && !saving && !generateDocument.isPending);
 
   /** Save the form; true on success. */
@@ -109,6 +114,7 @@ export function EditDocumentPage() {
 
     setSaving(true);
     setSaveError(null);
+    setGenerateSuccess(null);
 
     try {
       const saved = await saveValues.mutateAsync({
@@ -143,11 +149,13 @@ export function EditDocumentPage() {
 
   const runGenerate = async () => {
     setGenerateError(null);
+    setGenerateSuccess(null);
     try {
       const result = await generateDocument.mutateAsync(documentId);
       setLatestGenerated(result);
       // A PDF failure is not a generation failure: the panel shows it in amber.
-      toast({ title: generateSuccessMessage(result.pdf_status), duration: 3500 });
+      // Shown inline above the panel with an "Open preview" link.
+      setGenerateSuccess(generateSuccessMessage(result.pdf_status));
     } catch (err) {
       // 422 with field errors maps onto the inputs like a failed save.
       setGenerateError(
@@ -273,18 +281,37 @@ export function EditDocumentPage() {
       disabled={saving || generateDocument.isPending}
       saveError={saveError}
       notice={
-        <GenerationPanel
-          generated={latestGenerated ?? document.generated ?? null}
-          isDirty={isDirty}
-          generating={generateDocument.isPending}
-          retryingPdf={retryPdf.isPending}
-          downloading={downloading}
-          disabled={saving}
-          error={generateError}
-          onGenerate={handleGenerate}
-          onRetryPdf={() => void handleRetryPdf()}
-          onDownload={(format) => void handleDownload(format)}
-        />
+        <>
+          {generateSuccess && !generateDocument.isPending && (
+            <div
+              className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+              role="status"
+            >
+              <p className="flex items-start gap-2 text-sm text-emerald-800">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+                {generateSuccess}
+              </p>
+              <Link
+                to={`/documents/${document.id}/preview`}
+                className="shrink-0 text-sm font-medium text-emerald-800 underline underline-offset-2 hover:text-emerald-900"
+              >
+                Open preview
+              </Link>
+            </div>
+          )}
+          <GenerationPanel
+            generated={latestGenerated ?? document.generated ?? null}
+            isDirty={isDirty}
+            generating={generateDocument.isPending}
+            retryingPdf={retryPdf.isPending}
+            downloading={downloading}
+            disabled={saving}
+            error={generateError}
+            onGenerate={handleGenerate}
+            onRetryPdf={() => void handleRetryPdf()}
+            onDownload={(format) => void handleDownload(format)}
+          />
+        </>
       }
       title="Edit draft"
       description={
@@ -311,6 +338,16 @@ export function EditDocumentPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/documents/${document.id}/preview`)}
+                title={isDirty ? "Unsaved changes are not shown in the preview" : "Read-only preview"}
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                Preview
+              </Button>
               <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                 {template.category}
               </span>
