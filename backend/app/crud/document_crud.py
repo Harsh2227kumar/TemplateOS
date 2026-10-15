@@ -7,15 +7,17 @@ Member 2's endpoints call these:
 - get_documents_by_user    -> GET /documents (user's drafts)
 - update_document_status   -> status transitions
 - delete_document          -> DELETE /documents/{id}
+- get_document_for_preview -> GET /documents/{id}/preview (V1.7)
 """
 
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, lazyload, selectinload
 
 from app.core.clock import utc_now_naive
 from app.models.document import Document, DOCUMENT_STATUSES
+from app.models.template import Template
 
 if TYPE_CHECKING:
     from app.models.document_value import DocumentValue
@@ -99,3 +101,32 @@ def delete_document(db: Session, document_id: int) -> bool:
         db.commit()
         return True
     return False
+
+
+def get_document_for_preview(db: Session, document_id: int) -> Document | None:
+    """
+    Load everything GET /documents/{id}/preview needs in one round trip
+    (V1.7 Phase 1): the document, its template, the template's fields, the
+    saved values and the generated-file row.
+
+    Statements: 1 (document + template + generated_file, joined) + 1 (values)
+    + 1 (fields) = 3. The template's audience refs (scope organization /
+    department, lazy="selectin" on the model) are deferred to lazy loading:
+    the preview never reads them, and loading them eagerly would add up to
+    two more statements.
+
+    Fields come back unordered; build_sections() sorts them by
+    (display_order, id). No owner filter here: the endpoint checks access.
+    """
+    query = (
+        select(Document)
+        .where(Document.id == document_id)
+        .options(
+            selectinload(Document.values),
+            joinedload(Document.template).selectinload(Template.fields),
+            joinedload(Document.template).lazyload(Template.scope_organization_ref),
+            joinedload(Document.template).lazyload(Template.scope_department_ref),
+            joinedload(Document.generated_file),
+        )
+    )
+    return db.execute(query).unique().scalar_one_or_none()
