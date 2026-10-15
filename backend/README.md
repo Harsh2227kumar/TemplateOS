@@ -95,3 +95,60 @@ in `app/services/template_access.py` compares ids.
 - `/api/v1/admin/organizations` and `/api/v1/admin/departments` manage the
   directory (writes: super_admin; departments also org_admin in their own
   organization).
+
+## PDF conversion (Gotenberg)
+
+Generating a document (`POST /api/v1/documents/{id}/generate`) renders the
+DOCX and then converts it to PDF inside the same request. A PDF failure never
+fails generation: the DOCX is delivered and the document's `generated` info
+says `pdf_status: "failed"` with a readable `pdf_error`; the user can then
+click **Retry PDF** (`POST /api/v1/documents/{id}/generate-pdf`).
+
+Start Gotenberg (Docker) from the repository root:
+
+```bash
+docker compose up -d gotenberg              # repo-root docker-compose.yml, port 3000
+python backend/scripts/verify_gotenberg.py --live
+docker compose logs -f gotenberg
+```
+
+If a Gotenberg container is already running on port 3000 (for example one
+started with `docker run -d -p 3000:3000 gotenberg/gotenberg:8`), reuse it:
+do not start the compose service as well, the ports would clash.
+
+Settings (repository-root `.env`, restart the backend after a change):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `PDF_CONVERSION_ENABLED` | `true` | Kill switch. `false` skips conversion and records "PDF conversion is disabled on this server" |
+| `GOTENBERG_URL` | unset | e.g. `http://localhost:3000`. Unset: a local LibreOffice is used if found |
+| `GOTENBERG_TIMEOUT_SECONDS` | `60` | Total conversion timeout (connect timeout 5 s) |
+| `PDF_CONVERTER` | `auto` | `auto` / `gotenberg` / `libreoffice` / `none` (`none` = disabled) |
+| `LIBREOFFICE_PATH`, `LIBREOFFICE_TIMEOUT_SECONDS` | unset, `120` | Local LibreOffice fallback |
+
+Checks:
+
+- `python scripts/verify_gotenberg.py` (from `backend/`): `GET /health`;
+  `--live` also converts a tiny DOCX and prints the PDF size and latency.
+  The URL comes from `--url`, `GOTENBERG_URL` in the environment, the
+  repo `.env` (only that key is read), then `http://localhost:3000`.
+  Exit code 0 = OK, 1 = failed.
+- `GET /api/v1/system/pdf-check`: which converter the running backend uses
+  and whether it answers.
+
+PDF state on `generated` (detail, list and generate responses): `pdf_status`
+(`pending` | `converted` | `failed`), `pdf_error`, `pdf_filename`,
+`pdf_converted_at`, `pdf_attempts`, `has_pdf`, `pdf_url`. Download the PDF
+with `GET /api/v1/documents/{id}/download/pdf` (or `download?format=pdf`):
+404 not generated, 409 no PDF, 410 the file is missing on disk.
+
+Troubleshooting:
+
+- Port 3000 busy: change the left side of the compose port mapping
+  (`"3001:3000"`) and set `GOTENBERG_URL=http://localhost:3001`.
+- The first conversion after the container starts is slower (LibreOffice
+  warm-up).
+- Fonts that are not installed in the container fall back to similar fonts
+  (known V1 limitation).
+- Tests never call a real Gotenberg (it is mocked with `httpx.MockTransport`).
+  The one live test runs only with `GOTENBERG_LIVE_URL=http://localhost:3000`.

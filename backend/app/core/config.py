@@ -124,6 +124,9 @@ class Settings(BaseSettings):
     # "auto": Gotenberg when GOTENBERG_URL is set, else a local LibreOffice
     # (LIBREOFFICE_PATH or soffice/libreoffice on PATH), else off.
     # "gotenberg" / "libreoffice" force one backend; "none" turns PDF off.
+    # PDF_CONVERSION_ENABLED=false is the kill switch (same effect as "none"):
+    # generation still delivers the DOCX and records the PDF as failed.
+    pdf_conversion_enabled: bool = Field(default=True, alias="PDF_CONVERSION_ENABLED")
     pdf_converter: str = Field(default="auto", alias="PDF_CONVERTER")
     gotenberg_url: str | None = Field(default=None, alias="GOTENBERG_URL")
     gotenberg_timeout_seconds: float = Field(
@@ -187,6 +190,15 @@ class Settings(BaseSettings):
             for origin in self.backend_cors_origins.split(",")
             if origin.strip()
         ]
+
+    @field_validator("gotenberg_url", mode="before")
+    @classmethod
+    def normalize_gotenberg_url(cls, value: str | None) -> str | None:
+        """Blank -> None (not set); trailing slashes removed."""
+        if value is None:
+            return None
+        value = str(value).strip().rstrip("/")
+        return value or None
 
     @field_validator("database_url", mode="before")
     @classmethod
