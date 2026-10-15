@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 MAX_DOCUMENT_VALUE_LENGTH = 50_000
 MAX_VALUES_PER_REQUEST = 500
 
-PdfStatus = Literal["ok", "failed", "not_configured"]
+PdfStatus = Literal["pending", "converted", "failed"]
 
 
 # --- Generation (V1.6) ---
@@ -30,15 +30,25 @@ class GeneratedInfo(BaseModel):
     Latest generated output of a document (null in DocumentRead / list items
     until the first POST /documents/{id}/generate).
 
-    - pdf_status: ok (PDF available), failed (conversion failed, see
-      pdf_error; retry with POST /generate-pdf), not_configured (no PDF
-      converter on the server)
+    - pdf_status: converted (PDF ready), failed (see pdf_error; retry with
+      POST /generate-pdf), pending (conversion did not finish; retry)
+    - pdf_error: user-readable reason of the last failed conversion
+    - pdf_filename: stored PDF file name (no path); null without a PDF
+    - pdf_converted_at / pdf_attempts: when the current PDF was produced and
+      how many conversions were tried for the current DOCX
+    - has_pdf: a PDF file exists (can be true while pdf_status is "failed":
+      a failed retry keeps the earlier PDF of the same DOCX)
+    - pdf_url: GET /documents/{id}/download/pdf, null when has_pdf is false
     - is_stale: the draft's values were saved after this generation
     """
 
     generated_at: datetime
     pdf_status: PdfStatus
     pdf_error: str | None = None
+    pdf_filename: str | None = None
+    pdf_converted_at: datetime | None = None
+    pdf_attempts: int = 0
+    has_pdf: bool = False
     docx_url: str
     pdf_url: str | None = None
     is_stale: bool = False

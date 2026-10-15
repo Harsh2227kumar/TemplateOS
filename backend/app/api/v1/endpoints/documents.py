@@ -9,9 +9,10 @@ Endpoints:
 - GET /documents/{document_id}/values
 
 V1.6 generation (owner only):
-- POST /documents/{document_id}/generate      render DOCX (+ PDF if configured)
+- POST /documents/{document_id}/generate      render DOCX, then convert to PDF
 - POST /documents/{document_id}/generate-pdf  retry the PDF conversion only
 - GET  /documents/{document_id}/download?format=docx|pdf
+- GET  /documents/{document_id}/download/pdf  (same as ?format=pdf)
 """
 
 import logging
@@ -49,7 +50,11 @@ from app.schemas.document import (
 )
 from app.services import document_generation
 from app.services.document_validator import validate_document_values
-from app.services.storage_service import StorageError, storage_service
+from app.services.storage_service import (
+    StorageError,
+    StoredFileNotFoundError,
+    storage_service,
+)
 from app.services.template_access import user_can_view_template
 
 router = APIRouter()
@@ -384,7 +389,7 @@ def get_document_values(
     "/{document_id}/generate",
     response_model=GenerateDocumentResponse,
     responses={422: {"model": DocumentValidationErrorResponse}},
-    summary="Generate the DOCX (and PDF when configured) from the saved values",
+    summary="Generate the DOCX and PDF from the saved values",
 )
 def generate_document_endpoint(
     db: DbSession,
@@ -400,7 +405,8 @@ def generate_document_endpoint(
       when the template itself cannot be rendered
     - 409 when the template file is missing
     - Regenerating replaces the previous DOCX/PDF
-    - A PDF failure never fails this call: see pdf_status / pdf_error
+    - Then converts the DOCX to PDF; a PDF failure never fails this call
+      (pdf_status "converted" or "failed" with pdf_error)
     - Sets the document status to "generated"
     """
     document = _get_owned_document(db, document_id, current_user, include_values=True)
@@ -416,6 +422,11 @@ def generate_document_endpoint(
 @router.post(
     "/{document_id}/generate-pdf",
     response_model=GenerateDocumentResponse,
+    responses={
+        404: {"description": "Not generated yet"},
+        410: {"description": "The generated DOCX is missing on the server"},
+        503: {"description": "PDF conversion failed; detail is the reason"},
+    },
     summary="Retry the PDF conversion of the generated DOCX",
 )
 def retry_pdf_endpoint(
@@ -424,13 +435,86 @@ def retry_pdf_endpoint(
     document_id: int,
 ):
     """
-    Convert the last generated DOCX to PDF again (owner only). 404 when the
-    document has not been generated. Always 200 otherwise: the outcome is
-    in pdf_status (ok / failed / not_configured).
+    Convert the last generated DOCX to PDF again (owner only).
+
+    - 200 with the generation info when the PDF is converted (also when it
+      already was and the file exists: no new conversion)
+    - 503 {detail: reason} when the conversion fails; the failure is recorded
+      (pdf_status "failed", pdf_attempts + 1) and an earlier PDF is kept
+    - 404 when the document has not been generated; 410 when the stored DOCX
+      is missing on disk
     """
     document = _get_owned_document(db, document_id, current_user)
     record = document_generation.retry_pdf(db, document)
     return document_generation.generation_response(document, record)
+
+
+def _send_generated_file(db, current_user: User, document_id: int, file_format: str):
+    document = _get_owned_document(db, document_id, current_user)
+    record = get_generated_file(db, document.id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document has not been generated yet",
+        )
+    if file_format == "docx":
+        try:
+            path = storage_service.file_path(record.docx_path)
+        except StorageError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The generated file is missing; generate the document again",
+            ) from None
+    else:
+        if not record.pdf_path:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The PDF is not available for this document. Use Retry PDF.",
+            )
+        try:
+            path = storage_service.file_path(record.pdf_path)
+        except StoredFileNotFoundError:
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="The PDF file is missing on the server. Use Retry PDF.",
+            ) from None
+        except StorageError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The PDF is not available for this document. Use Retry PDF.",
+            ) from None
+    filename = document_generation.download_filename(document, file_format)
+    return FileResponse(
+        path,
+        media_type=MEDIA_TYPES[file_format],
+        headers={
+            "Content-Disposition": document_generation.content_disposition(filename),
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get(
+    "/{document_id}/download/pdf",
+    response_class=FileResponse,
+    responses={
+        404: {"description": "Not generated yet"},
+        409: {"description": "No PDF for this document"},
+        410: {"description": "The PDF file is missing on the server"},
+    },
+    summary="Download the generated PDF",
+)
+def download_pdf(
+    db: DbSession,
+    current_user: CurrentUser,
+    document_id: int,
+):
+    """
+    Stream the generated PDF as an attachment named after the draft (owner
+    only). 404 when not generated; 409 when there is no PDF (see pdf_status /
+    pdf_error, use Retry PDF); 410 when the stored PDF is missing on disk.
+    """
+    return _send_generated_file(db, current_user, document_id, "pdf")
 
 
 @router.get(
@@ -446,35 +530,8 @@ def download_document(
 ):
     """
     Stream the generated file as an attachment named after the draft.
-    404 when the document has not been generated; 409 when the PDF is not
-    available (failed / not configured) or the stored file is missing.
+    404 when the document has not been generated. DOCX: 409 when the stored
+    file is missing. PDF (same as /download/pdf): 409 when there is no PDF,
+    410 when the stored PDF is missing on disk.
     """
-    document = _get_owned_document(db, document_id, current_user)
-    record = get_generated_file(db, document.id)
-    if record is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The document has not been generated yet",
-        )
-    relative_path = record.docx_path if format == "docx" else record.pdf_path
-    if not relative_path:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The PDF is not available for this document",
-        )
-    try:
-        path = storage_service.file_path(relative_path)
-    except StorageError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The generated file is missing; generate the document again",
-        ) from None
-    filename = document_generation.download_filename(document, format)
-    return FileResponse(
-        path,
-        media_type=MEDIA_TYPES[format],
-        headers={
-            "Content-Disposition": document_generation.content_disposition(filename),
-            "Cache-Control": "no-store",
-        },
-    )
+    return _send_generated_file(db, current_user, document_id, format)

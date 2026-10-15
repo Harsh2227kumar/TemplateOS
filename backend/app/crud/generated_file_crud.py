@@ -2,12 +2,14 @@
 CRUD helpers for generated_files (V1.6).
 
 - get_generated_file          -> lookup by document
-- upsert_generated_file       -> POST /documents/{id}/generate (replace on regenerate)
-- update_pdf_result           -> POST /documents/{id}/generate-pdf (retry)
+- upsert_generated_file       -> POST /documents/{id}/generate (replace on
+                                 regenerate, PDF state reset to "pending");
+                                 not committed: the caller commits it with
+                                 the document status change, then removes
+                                 the superseded files it returns
+- mark_pdf_converted / mark_pdf_failed -> record a conversion outcome
+                                 (generate and POST /generate-pdf); commit
 - get_generated_files_for_documents -> list view enrichment
-
-The write helpers do NOT commit; the caller commits once together with the
-document status change, then removes the superseded files they return.
 """
 
 from datetime import datetime
@@ -15,6 +17,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now_naive
 from app.models.generated_file import PDF_ERROR_MAX_LENGTH, GeneratedFile
 
 
@@ -49,8 +52,6 @@ def upsert_generated_file(
     document_id: int,
     *,
     docx_path: str,
-    pdf_path: str | None,
-    pdf_error: str | None,
     generated_at: datetime,
     template_version: int | None = None,
     template_source_path: str | None = None,
@@ -58,8 +59,9 @@ def upsert_generated_file(
     """
     Create or replace the document's generated_files row (not committed).
 
-    Returns (row, superseded paths): the previous DOCX/PDF paths that are no
-    longer referenced, for the caller to delete from storage after commit.
+    The PDF state is reset for the new DOCX: pdf_status "pending", no PDF,
+    no error, pdf_attempts 0. Returns (row, superseded paths): the previous
+    DOCX/PDF paths, for the caller to delete from storage after commit.
     """
     record = get_generated_file(db, document_id)
     superseded: list[str] = []
@@ -68,11 +70,14 @@ def upsert_generated_file(
         db.add(record)
     else:
         for old in (record.docx_path, record.pdf_path):
-            if old and old not in (docx_path, pdf_path):
+            if old and old != docx_path:
                 superseded.append(old)
     record.docx_path = docx_path
-    record.pdf_path = pdf_path
-    record.pdf_error = None if pdf_path else _clip_error(pdf_error)
+    record.pdf_path = None
+    record.pdf_error = None
+    record.pdf_status = "pending"
+    record.pdf_converted_at = None
+    record.pdf_attempts = 0
     record.generated_at = generated_at
     record.template_version = template_version
     record.template_source_path = template_source_path
@@ -80,28 +85,33 @@ def upsert_generated_file(
     return record, superseded
 
 
-def update_pdf_result(
-    db: Session,
-    record: GeneratedFile,
-    *,
-    pdf_path: str | None,
-    pdf_error: str | None,
-) -> list[str]:
+def mark_pdf_converted(
+    db: Session, generated_file: GeneratedFile, pdf_path: str
+) -> GeneratedFile:
     """
-    Record a PDF (re)conversion outcome on an existing row (not committed).
+    Record a successful conversion (commits). The caller removes a replaced
+    earlier PDF from storage.
+    """
+    generated_file.pdf_path = pdf_path
+    generated_file.pdf_status = "converted"
+    generated_file.pdf_error = None
+    generated_file.pdf_converted_at = utc_now_naive()
+    generated_file.pdf_attempts = (generated_file.pdf_attempts or 0) + 1
+    db.commit()
+    db.refresh(generated_file)
+    return generated_file
 
-    A successful conversion replaces any previous PDF. On failure (or "not
-    configured", pdf_error None) an existing PDF is kept: it was converted
-    from this same DOCX, so it is still a valid copy. Returns the superseded
-    paths to delete after commit.
+
+def mark_pdf_failed(
+    db: Session, generated_file: GeneratedFile, error: str
+) -> GeneratedFile:
     """
-    superseded: list[str] = []
-    if pdf_path:
-        if record.pdf_path and record.pdf_path != pdf_path:
-            superseded.append(record.pdf_path)
-        record.pdf_path = pdf_path
-        record.pdf_error = None
-    else:
-        record.pdf_error = _clip_error(pdf_error)
-    db.flush()
-    return superseded
+    Record a failed conversion (commits). An existing pdf_path is KEPT: it was
+    converted from this same DOCX, so a failed retry must not hide it.
+    """
+    generated_file.pdf_status = "failed"
+    generated_file.pdf_error = _clip_error(error) or "PDF conversion failed"
+    generated_file.pdf_attempts = (generated_file.pdf_attempts or 0) + 1
+    db.commit()
+    db.refresh(generated_file)
+    return generated_file
