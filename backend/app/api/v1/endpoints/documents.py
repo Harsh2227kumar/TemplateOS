@@ -8,6 +8,9 @@ Endpoints:
 - GET /documents/{document_id}
 - GET /documents/{document_id}/values
 
+V1.7 preview (owner only, read-only):
+- GET /documents/{document_id}/preview
+
 V1.6 generation (owner only):
 - POST /documents/{document_id}/generate      render DOCX, then convert to PDF
 - POST /documents/{document_id}/generate-pdf  retry the PDF conversion only
@@ -17,6 +20,7 @@ V1.6 generation (owner only):
 
 import logging
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -27,6 +31,7 @@ from app.api.deps import CurrentUser, DbSession
 from app.crud.document_crud import (
     create_document,
     get_document_by_id,
+    get_document_for_preview,
     get_documents_by_user,
 )
 from app.crud.document_value_crud import get_values_by_document, upsert_values
@@ -37,6 +42,7 @@ from app.crud.generated_file_crud import (
 from app.crud.template_crud import get_template_by_id
 from app.crud.template_field_crud import get_fields_by_template
 from app.models.document import Document
+from app.models.generated_file import GeneratedFile
 from app.models.template import Template
 from app.models.user import User
 from app.schemas.document import (
@@ -48,8 +54,20 @@ from app.schemas.document import (
     DocumentValuesBulkUpsert,
     GenerateDocumentResponse,
 )
+from app.schemas.document_preview import (
+    DocumentPreview,
+    PreviewDocument,
+    PreviewGeneration,
+    PreviewTemplate,
+)
 from app.services import document_generation
+from app.services.document_permissions import (
+    document_permissions,
+    require_document_viewer,
+)
+from app.services.document_preview import build_sections, compute_completeness
 from app.services.document_validator import validate_document_values
+from app.services.generation_service import format_field_value
 from app.services.storage_service import (
     StorageError,
     StoredFileNotFoundError,
@@ -330,6 +348,105 @@ def get_document(
             }
             for v in document.values
         ],
+    )
+
+
+# ── V1.7 preview ─────────────────────────────────────────────────
+
+
+def _stored_file_exists(document_id: int, relative_path: str | None, kind: str) -> bool:
+    """
+    True when the stored file is on disk. A stale DB row (missing file,
+    path outside storage) is reported as unavailable, never as a 500. The
+    warning names the document, never the path.
+    """
+    if not relative_path:
+        return False
+    try:
+        storage_service.file_path(relative_path)
+    except StorageError:  # StoredFileNotFoundError / InvalidStoragePathError
+        logger.warning(
+            "Preview: generated %s of document %s is missing on disk", kind, document_id
+        )
+        return False
+    return True
+
+
+def _preview_generation(
+    document: Document, record: GeneratedFile | None
+) -> PreviewGeneration | None:
+    """Latest generated output, with availability checked against the disk."""
+    if record is None:
+        return None
+    pdf_available = _stored_file_exists(document.id, record.pdf_path, "PDF")
+    return PreviewGeneration(
+        generated_at=record.generated_at,
+        is_stale=document_generation.is_stale(document, record),
+        template_version=record.template_version,
+        docx_available=_stored_file_exists(document.id, record.docx_path, "DOCX"),
+        docx_url=document_generation.download_url(document.id, "docx"),
+        pdf_status=record.pdf_status,
+        pdf_error=record.pdf_error,
+        pdf_available=pdf_available,
+        pdf_url=document_generation.download_url(document.id, "pdf") if pdf_available else None,
+        pdf_filename=PurePosixPath(record.pdf_path).name if record.pdf_path else None,
+    )
+
+
+@router.get(
+    "/{document_id}/preview",
+    response_model=DocumentPreview,
+    responses={
+        403: {"description": "Not the owner"},
+        404: {"description": "Document or template not found"},
+    },
+    summary="Preview a document: formatted values, completeness, generated files",
+)
+def get_document_preview(
+    db: DbSession,
+    current_user: CurrentUser,
+    document_id: int,
+) -> DocumentPreview:
+    """
+    Everything the preview page needs in one read-only call (owner only).
+
+    - sections: every template field, grouped like the edit form, with
+      display_value formatted exactly like the generated document
+      (generation_service.format_field_value)
+    - completeness: required fields filled vs missing
+    - generation: null until generated; docx/pdf availability is checked on
+      disk; URLs are API-relative, never storage paths
+    - permissions: what the user may do next (document_permissions)
+
+    Never triggers generation or PDF conversion.
+    """
+    document = get_document_for_preview(db, document_id)
+    if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found"
+        )
+    require_document_viewer(current_user, document)
+    template = document.template
+    if template is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Template not found"
+        )
+
+    fields = list(template.fields)
+    values_by_name = {value.field_name: value.value for value in document.values}
+    return DocumentPreview(
+        document=PreviewDocument.model_validate(document),
+        template=PreviewTemplate(
+            id=template.id,
+            name=template.name,
+            category=template.category,
+            version=template.version or 1,
+            has_processed_file=bool(template.processed_file_path),
+        ),
+        completeness=compute_completeness(fields, values_by_name),
+        sections=build_sections(fields, values_by_name, format_value=format_field_value),
+        generation=_preview_generation(document, document.generated_file),
+        permissions=document_permissions(current_user, document),
     )
 
 

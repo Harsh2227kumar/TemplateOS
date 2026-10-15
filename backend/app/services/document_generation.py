@@ -100,9 +100,14 @@ def generated_info(document: Document, record: GeneratedFile | None) -> Generate
         has_pdf=record.pdf_path is not None,
         docx_url=download_url(document.id, "docx"),
         pdf_url=download_url(document.id, "pdf") if record.pdf_path else None,
-        is_stale=document.updated_at > record.generated_at,
+        is_stale=is_stale(document, record),
         template_version=record.template_version,
     )
+
+
+def is_stale(document: Document, record: GeneratedFile) -> bool:
+    """Values were saved after the last generation (saving bumps document.updated_at)."""
+    return document.updated_at > record.generated_at
 
 
 def generation_response(document: Document, record: GeneratedFile) -> GenerateDocumentResponse:
