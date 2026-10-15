@@ -209,6 +209,39 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[/\\]/g, "_").trim();
 }
 
+// --- V1.7 preview page: one-line summary of the generated files ---
+
+export const NOT_GENERATED_DETAIL = "Generate the document to create the Word file and its PDF.";
+export const DOCX_MISSING_PREVIEW_MESSAGE = "The generated file is missing on the server. Regenerate to recreate it.";
+export const STALE_PREVIEW_TITLE = "Values changed since the last generation";
+export const STALE_PREVIEW_DETAIL = "Regenerate to include your latest values.";
+export const UP_TO_DATE_TITLE = "Generated document is up to date";
+
+export type GenerationTone = "ok" | "warn" | "muted";
+
+export interface GenerationSummary {
+  tone: GenerationTone;
+  title: string;
+  detail: string;
+}
+
+/**
+ * What the preview page says about the generated files. Lives here (not in
+ * the preview feature) so it reuses these labels without a runtime import.
+ * A missing DOCX wins over "stale": regenerating fixes both.
+ */
+export function generationSummary(
+  generation: { docx_available: boolean; pdf_status: PdfStatus } | null | undefined,
+  isStale: boolean,
+): GenerationSummary {
+  if (!generation) return { tone: "muted", title: pdfStatusLabel(null), detail: NOT_GENERATED_DETAIL };
+  if (!generation.docx_available) {
+    return { tone: "warn", title: "Generated file missing", detail: DOCX_MISSING_PREVIEW_MESSAGE };
+  }
+  if (isStale) return { tone: "warn", title: STALE_PREVIEW_TITLE, detail: STALE_PREVIEW_DETAIL };
+  return { tone: "ok", title: UP_TO_DATE_TITLE, detail: pdfStatusLabel(generation.pdf_status) };
+}
+
 /** "Generate document", or "Regenerate" once a generated copy exists. */
 export function generateActionLabel(generated: boolean, stale: boolean): string {
   if (!generated) return "Generate document";

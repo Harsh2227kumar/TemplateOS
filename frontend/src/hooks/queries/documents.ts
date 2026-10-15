@@ -5,6 +5,7 @@ import {
   type ApiError,
   type Document,
   type DocumentCreate,
+  type DocumentPreview,
   type DocumentValuesSave,
   type GenerateDocumentResponse,
 } from "@/lib/api";
@@ -40,6 +41,21 @@ export function useDocument(id: number) {
   });
 }
 
+/**
+ * V1.7 read-only preview. Always refetched on mount (staleTime 0) so it is
+ * fresh after edits or generation. Its key sits under documentKeys.detail(id),
+ * so the save / generate / retry-PDF invalidations below refresh it too.
+ */
+export function useDocumentPreview(id: number) {
+  return useQuery<DocumentPreview, ApiError>({
+    queryKey: documentKeys.preview(id),
+    queryFn: () => documentsApi.getPreview(id),
+    enabled: isValidId(id),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+}
+
 export function useCreateDocument() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -56,13 +72,16 @@ export function useSaveDocumentValues() {
     mutationFn: ({ documentId, body }: { documentId: number; body: DocumentValuesSave }) =>
       documentsApi.saveValues(documentId, body),
     onSuccess: () => {
-      // The dashboard list ("edited x ago") and the draft itself changed.
+      // The dashboard list ("edited x ago"), the draft and its preview changed.
       void queryClient.invalidateQueries({ queryKey: documentKeys.all });
     },
   });
 }
 
-/** Generating changes the draft (status, generated info) and the dashboard list. */
+/**
+ * Generating changes the draft (status, generated info), its preview
+ * (documentKeys.preview(id) is under detail(id)) and the dashboard list.
+ */
 function useInvalidateDocument() {
   const queryClient = useQueryClient();
   return (documentId: number) => {
