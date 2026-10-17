@@ -1,12 +1,20 @@
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, CheckCircle2, Download, FileOutput, Info, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Download, FileOutput, FileText, Info, Loader2, RefreshCw, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { GeneratedInfo } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 
-import { generateActionLabel, pdfStatusLabel, type DownloadFormat } from "./generation";
+import {
+  EARLIER_PDF_NOTE,
+  generateActionLabel,
+  pdfRowView,
+  SLOW_PDF_HINT,
+  type DownloadFormat,
+  type PdfState,
+} from "./generation";
+import { useSlowHint } from "./use-slow-hint";
 
 interface GenerationPanelProps {
   generated: GeneratedInfo | null;
@@ -16,7 +24,7 @@ interface GenerationPanelProps {
   retryingPdf: boolean;
   /** Format currently downloading, if any. */
   downloading: DownloadFormat | null;
-  /** Saving or another action that should block generation. */
+  /** Saving or another action that should block generation and Retry PDF. */
   disabled: boolean;
   error: string | null;
   onGenerate: () => void;
@@ -26,7 +34,8 @@ interface GenerationPanelProps {
 
 /**
  * Edit-draft panel for V1.6 generation: the Generate / Regenerate action,
- * progress, and the result (DOCX download, PDF download / retry / notice).
+ * progress, and the result as two file rows: the DOCX (download) and the
+ * PDF with its own status (ready / not available + reason / retry).
  */
 export function GenerationPanel({
   generated,
@@ -43,10 +52,10 @@ export function GenerationPanel({
   const generatedDate = parseServerDate(generated?.generated_at);
   const stale = Boolean(generated && (generated.is_stale || isDirty));
   const label = generateActionLabel(Boolean(generated), stale);
-  const busy = generating || retryingPdf;
+  const slowHint = useSlowHint(generating);
 
   return (
-    <Card aria-live="polite">
+    <Card>
       <CardContent className="space-y-4 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 space-y-1">
@@ -64,21 +73,21 @@ export function GenerationPanel({
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                Create the final Word document (and a PDF when available) from your saved values.
+                Create the final Word document and its PDF from your saved values.
               </p>
             )}
           </div>
           <Button
             type="button"
             onClick={onGenerate}
-            disabled={disabled || busy}
+            disabled={disabled || generating || retryingPdf}
             variant={generated && !stale ? "outline" : "default"}
             className="w-full shrink-0 sm:w-auto"
           >
             {generating ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Generating…
+                Generating DOCX and PDF…
               </>
             ) : (
               <>
@@ -94,9 +103,8 @@ export function GenerationPanel({
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
               <div className="h-full w-1/3 animate-pulse rounded-full bg-slate-400" />
             </div>
-            <p className="text-xs text-slate-500">
-              Filling the template with your values. PDF conversion can take a few more seconds.
-            </p>
+            <p className="text-xs text-slate-500">Filling the template with your values, then converting it to PDF.</p>
+            {slowHint && <p className="text-xs text-slate-500">{SLOW_PDF_HINT}</p>}
           </div>
         )}
 
@@ -107,95 +115,160 @@ export function GenerationPanel({
           </div>
         )}
 
-        {generated && !generating && (
-          <div className="space-y-3">
-            {stale && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-                <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
-                <p className="text-sm text-amber-800">
-                  {isDirty
-                    ? "You have unsaved changes. The generated file does not include them yet."
-                    : "Values changed after the last generation. Regenerate to include them."}
-                </p>
-              </div>
-            )}
-            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => onDownload("docx")}
-                disabled={downloading !== null}
-                className="w-full sm:w-auto"
-              >
-                {downloading === "docx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Download DOCX
-              </Button>
-              {generated.pdf_status === "ok" && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => onDownload("pdf")}
-                  disabled={downloading !== null}
-                  className="w-full sm:w-auto"
-                >
-                  {downloading === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  Download PDF
-                </Button>
-              )}
-              {generated.pdf_status === "ok" && (
-                <span className="flex items-center gap-1 text-xs text-green-700">
-                  <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  {pdfStatusLabel("ok")}
-                </span>
-              )}
-            </div>
-            {generated.pdf_status === "failed" && (
-              <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
-                  <p className="text-sm text-amber-800">
-                    {pdfStatusLabel("failed")}
-                    {generated.pdf_error ? `: ${generated.pdf_error}` : ""}. The DOCX is ready.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onRetryPdf}
-                  disabled={busy || disabled}
-                  className="w-full shrink-0 sm:w-auto"
-                >
-                  {retryingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Retry PDF
-                </Button>
-              </div>
-            )}
-            {generated.pdf_status === "not_configured" && (
-              <div className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="flex items-start gap-1.5 text-xs text-slate-600">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span>
-                    PDF conversion was not set up when this was generated; the DOCX is ready. If the server now has a
-                    PDF converter, create the PDF without regenerating.
-                  </span>
-                </p>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onRetryPdf}
-                  disabled={busy || disabled}
-                  className="w-full shrink-0 sm:w-auto"
-                >
-                  {retryingPdf ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                  Create PDF
-                </Button>
-              </div>
-            )}
+        {generated && !generating && stale && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
+            <p className="text-sm text-amber-800">
+              {isDirty
+                ? "You have unsaved changes. The generated file does not include them yet."
+                : "Values changed after the last generation. Regenerate to include them."}
+            </p>
           </div>
+        )}
+
+        {(generated || generating) && (
+          <ul className="space-y-2" aria-label="Generated files">
+            {generated && !generating && (
+              <DocxRow
+                downloading={downloading === "docx"}
+                downloadDisabled={downloading !== null}
+                onDownload={() => onDownload("docx")}
+              />
+            )}
+            <PdfRow
+              generated={generated}
+              generating={generating}
+              retrying={retryingPdf}
+              downloading={downloading === "pdf"}
+              downloadDisabled={downloading !== null}
+              retryDisabled={disabled || generating || retryingPdf}
+              onDownload={() => onDownload("pdf")}
+              onRetry={onRetryPdf}
+            />
+          </ul>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+export interface DocxRowProps {
+  downloading: boolean;
+  downloadDisabled: boolean;
+  onDownload: () => void;
+}
+
+/** The generated Word file row (shared with the V1.7 preview page). Render inside a <ul>. */
+export function DocxRow({ downloading, downloadDisabled, onDownload }: DocxRowProps) {
+  return (
+    <li className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
+      <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+        <FileText className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
+        Word document (DOCX)
+      </span>
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={onDownload}
+        disabled={downloadDisabled}
+        className="w-full shrink-0 sm:w-auto"
+      >
+        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        Download DOCX
+      </Button>
+    </li>
+  );
+}
+
+export interface PdfRowProps {
+  /** The PDF fields of the generated document (GeneratedInfo, or the preview's mapped state). */
+  generated: PdfState | null;
+  generating: boolean;
+  retrying: boolean;
+  downloading: boolean;
+  downloadDisabled: boolean;
+  retryDisabled: boolean;
+  onDownload: () => void;
+  onRetry: () => void;
+}
+
+/** The PDF file row: its own status, independent of the DOCX (shared with the preview page). */
+export function PdfRow({
+  generated,
+  generating,
+  retrying,
+  downloading,
+  downloadDisabled,
+  retryDisabled,
+  onDownload,
+  onRetry,
+}: PdfRowProps) {
+  const view = pdfRowView(generated, { generating, retrying });
+  if (view.kind === "none") return null;
+  const busy = view.kind === "converting" || view.kind === "retrying";
+
+  return (
+    <li
+      className={`flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between ${
+        view.warn ? "border-amber-200 bg-amber-50" : "border-slate-200"
+      }`}
+    >
+      <div className="min-w-0 space-y-1">
+        <div aria-live="polite" className="space-y-1">
+          <p
+            className={`flex items-center gap-2 text-sm ${
+              view.warn ? "font-medium text-amber-800" : view.kind === "converted" ? "text-emerald-700" : "text-slate-700"
+            }`}
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" aria-hidden="true" />
+            ) : view.warn ? (
+              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700" aria-hidden="true" />
+            ) : (
+              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+            )}
+            {view.text}
+          </p>
+          {view.detail && <p className="break-words text-xs text-slate-600">{view.detail}</p>}
+        </div>
+        {view.filename && (
+          <p className="truncate text-xs text-slate-500" title={view.filename}>
+            {view.filename}
+          </p>
+        )}
+        {view.earlierPdf && <p className="text-xs text-slate-500">{EARLIER_PDF_NOTE}</p>}
+      </div>
+      {(view.showRetry || view.showDownload) && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+          {view.showRetry && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onRetry}
+              disabled={retryDisabled}
+              className="w-full sm:w-auto"
+            >
+              <RotateCw className="h-4 w-4" aria-hidden="true" />
+              Retry PDF
+            </Button>
+          )}
+          {view.showDownload && (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={onDownload}
+              disabled={downloadDisabled}
+              className="w-full sm:w-auto"
+            >
+              {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download PDF
+            </Button>
+          )}
+        </div>
+      )}
+    </li>
   );
 }

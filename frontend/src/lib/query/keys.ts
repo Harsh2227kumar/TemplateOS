@@ -52,6 +52,8 @@ export const documentKeys = {
   mine: () => [...documentKeys.lists(), "mine"] as const,
   details: () => [...documentKeys.all, "detail"] as const,
   detail: (id: number) => [...documentKeys.details(), id] as const,
+  /** Under detail(id), so every detail invalidation refreshes the preview too. */
+  preview: (id: number) => [...documentKeys.detail(id), "preview"] as const,
 };
 
 export interface AdminUserListKeyParams {

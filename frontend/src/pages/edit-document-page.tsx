@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle, ChevronLeft, Loader2, RotateCcw, Save } from "lucide-react";
+import { CheckCircle, CheckCircle2, ChevronLeft, Eye, Loader2, RotateCcw, Save } from "lucide-react";
 
 import { buildInitialValues, normalizeSavedFormValues, serializeValues } from "@/components/forms/form-values";
 import { useSaveShortcut, useUnsavedChangesWarning } from "@/components/forms/use-form-guards";
@@ -11,8 +11,15 @@ import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { latestTimestamp } from "@/features/documents/draft-timestamps";
 import { GenerationPanel } from "@/features/documents/GenerationPanel";
-import type { DownloadFormat } from "@/features/documents/generation";
+import {
+  generateSuccessMessage,
+  markPdfFailed,
+  PDF_FILE_MISSING_MESSAGE,
+  RETRY_DOCX_MISSING_MESSAGE,
+  type DownloadFormat,
+} from "@/features/documents/generation";
 import { useDraftForm, useNow } from "@/features/documents/use-draft-form";
+import { useFocusFieldFromHash } from "@/features/documents/use-focus-field-from-hash";
 import {
   combineQueries,
   useDocument,
@@ -24,7 +31,7 @@ import {
   useTemplateFields,
 } from "@/hooks/queries";
 import { useSeedOnce } from "@/hooks/use-seed-once";
-import type { ApiError, DocumentFormValues, GeneratedInfo, TemplateField } from "@/lib/api";
+import { ApiError, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
 
@@ -50,6 +57,8 @@ export function EditDocumentPage() {
   const [latestGenerated, setLatestGenerated] = useState<GeneratedInfo | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
+  // Success message of the last Generate (with an "Open preview" link).
+  const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
 
   // Fields as of seeding: the schema and inputs never change under the user.
   const [fields, setFields] = useState<TemplateField[]>([]);
@@ -95,6 +104,8 @@ export function EditDocumentPage() {
   );
 
   useUnsavedChangesWarning(isDirty);
+  // #field-<name> deep links from the preview page.
+  useFocusFieldFromHash(isSeeded && fields.length > 0);
   useSaveShortcut(requestSubmit, isSeeded && !saving && !generateDocument.isPending);
 
   /** Save the form; true on success. */
@@ -103,6 +114,7 @@ export function EditDocumentPage() {
 
     setSaving(true);
     setSaveError(null);
+    setGenerateSuccess(null);
 
     try {
       const saved = await saveValues.mutateAsync({
@@ -137,19 +149,13 @@ export function EditDocumentPage() {
 
   const runGenerate = async () => {
     setGenerateError(null);
+    setGenerateSuccess(null);
     try {
       const result = await generateDocument.mutateAsync(documentId);
       setLatestGenerated(result);
-      toast({
-        title: "Document generated",
-        description:
-          result.pdf_status === "ok"
-            ? "DOCX and PDF are ready to download."
-            : result.pdf_status === "failed"
-              ? "The DOCX is ready; the PDF conversion failed."
-              : "The DOCX is ready to download.",
-        duration: 3500,
-      });
+      // A PDF failure is not a generation failure: the panel shows it in amber.
+      // Shown inline above the panel with an "Open preview" link.
+      setGenerateSuccess(generateSuccessMessage(result.pdf_status));
     } catch (err) {
       // 422 with field errors maps onto the inputs like a failed save.
       setGenerateError(
@@ -171,28 +177,26 @@ export function EditDocumentPage() {
     }, handleInvalid)();
   };
 
+  /** The PDF state shown in the panel right now (latest result or the draft's). */
+  const currentGenerated = (): GeneratedInfo | null => latestGenerated ?? document?.generated ?? null;
+
   const handleRetryPdf = async () => {
+    if (saving || generateDocument.isPending || retryPdf.isPending) return;
+    setGenerateError(null);
     try {
       const result = await retryPdf.mutateAsync(documentId);
       setLatestGenerated(result);
-      toast(
-        result.pdf_status === "ok"
-          ? { title: "PDF ready", duration: 2500 }
-          : result.pdf_status === "not_configured"
-            ? {
-                variant: "destructive",
-                title: "PDF conversion is not set up on the server",
-                description:
-                  "Set GOTENBERG_URL in the backend .env (or install LibreOffice) and restart the backend, then try again.",
-              }
-            : { variant: "destructive", title: "PDF still unavailable", description: result.pdf_error ?? undefined },
-      );
+      toast({ title: "PDF ready", duration: 2500 });
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Couldn't retry the PDF",
-        description: err instanceof Error ? err.message : undefined,
-      });
+      const current = currentGenerated();
+      if (err instanceof ApiError && err.status === 503) {
+        // The server recorded the failure; show its reason in the amber PDF row.
+        if (current) setLatestGenerated(markPdfFailed(current, err.message, { attempted: true }));
+      } else if (err instanceof ApiError && err.status === 410) {
+        setGenerateError(RETRY_DOCX_MISSING_MESSAGE);
+      } else {
+        setGenerateError(err instanceof Error && err.message ? err.message : "Retry failed. Please try again.");
+      }
     }
   };
 
@@ -201,14 +205,23 @@ export function EditDocumentPage() {
     try {
       await downloadGenerated.mutateAsync({ documentId, format, name: document?.name });
     } catch (err) {
-      const status = (err as ApiError | undefined)?.status;
+      const status = err instanceof ApiError ? err.status : undefined;
+      if (format === "pdf" && status === 410) {
+        // The stored PDF is gone: the amber PDF row now offers Retry PDF.
+        const current = currentGenerated();
+        if (current) setLatestGenerated(markPdfFailed(current, PDF_FILE_MISSING_MESSAGE, { fileMissing: true }));
+        return;
+      }
       toast({
         variant: "destructive",
         title: status === 409 && format === "pdf" ? "PDF not available" : "Download failed",
         description: err instanceof Error ? err.message : undefined,
       });
       // The server state may differ from what we show (e.g. file removed).
-      if (status === 404 || status === 409) void documentQuery.refetch();
+      if (status === 404 || status === 409) {
+        setLatestGenerated(null);
+        void documentQuery.refetch();
+      }
     } finally {
       setDownloading(null);
     }
@@ -268,18 +281,37 @@ export function EditDocumentPage() {
       disabled={saving || generateDocument.isPending}
       saveError={saveError}
       notice={
-        <GenerationPanel
-          generated={latestGenerated ?? document.generated ?? null}
-          isDirty={isDirty}
-          generating={generateDocument.isPending}
-          retryingPdf={retryPdf.isPending}
-          downloading={downloading}
-          disabled={saving}
-          error={generateError}
-          onGenerate={handleGenerate}
-          onRetryPdf={() => void handleRetryPdf()}
-          onDownload={(format) => void handleDownload(format)}
-        />
+        <>
+          {generateSuccess && !generateDocument.isPending && (
+            <div
+              className="flex flex-col gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+              role="status"
+            >
+              <p className="flex items-start gap-2 text-sm text-emerald-800">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+                {generateSuccess}
+              </p>
+              <Link
+                to={`/documents/${document.id}/preview`}
+                className="shrink-0 text-sm font-medium text-emerald-800 underline underline-offset-2 hover:text-emerald-900"
+              >
+                Open preview
+              </Link>
+            </div>
+          )}
+          <GenerationPanel
+            generated={latestGenerated ?? document.generated ?? null}
+            isDirty={isDirty}
+            generating={generateDocument.isPending}
+            retryingPdf={retryPdf.isPending}
+            downloading={downloading}
+            disabled={saving}
+            error={generateError}
+            onGenerate={handleGenerate}
+            onRetryPdf={() => void handleRetryPdf()}
+            onDownload={(format) => void handleDownload(format)}
+          />
+        </>
       }
       title="Edit draft"
       description={
@@ -306,6 +338,16 @@ export function EditDocumentPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => navigate(`/documents/${document.id}/preview`)}
+                title={isDirty ? "Unsaved changes are not shown in the preview" : "Read-only preview"}
+              >
+                <Eye className="h-4 w-4" aria-hidden="true" />
+                Preview
+              </Button>
               <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                 {template.category}
               </span>

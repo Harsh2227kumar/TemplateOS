@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { toast } from "@/components/ui/toast";
-import { pdfStatusLabel } from "@/features/documents/generation";
+import { pdfStatusLabel, quickDownloadFormat } from "@/features/documents/generation";
 import { useDownloadGenerated, useMyDocuments, useMyTemplates } from "@/hooks/queries";
 import type { Document } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
@@ -20,9 +20,9 @@ export function DashboardPage() {
   const downloadGenerated = useDownloadGenerated();
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
-  /** Quick download: the PDF when it exists, else the DOCX. */
+  /** Quick download: the PDF when it is converted, else the DOCX. */
   const handleQuickDownload = async (draft: Document) => {
-    const format = draft.generated?.pdf_status === "ok" ? "pdf" : "docx";
+    const format = quickDownloadFormat(draft.generated);
     setDownloadingId(draft.id);
     try {
       await downloadGenerated.mutateAsync({ documentId: draft.id, format, name: draft.name });
@@ -199,13 +199,14 @@ export function DashboardPage() {
             const title = d.name || `Draft ${d.id}`;
             const updated = describeUpdated(d.updated_at);
             const generated = d.generated ?? null;
-            const quickFormat = generated?.pdf_status === "ok" ? "PDF" : "DOCX";
+            const quickFormat = quickDownloadFormat(generated) === "pdf" ? "PDF" : "DOCX";
+            const pdfReady = generated?.pdf_status === "converted";
             return (
               <li key={d.id} className="flex items-stretch gap-2">
                 <Link
-                  to={`/documents/${d.id}/edit`}
+                  to={`/documents/${d.id}/preview`}
                   className="group flex min-w-0 flex-1 items-center gap-3 rounded-lg border border-slate-100 p-3 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
-                  aria-label={`Continue editing ${title}`}
+                  aria-label={`View ${title}`}
                 >
                   <div
                     className={`h-2 w-2 shrink-0 rounded-full ${generated ? "bg-green-500" : "bg-yellow-400"}`}
@@ -237,11 +238,29 @@ export function DashboardPage() {
                       {d.status.charAt(0).toUpperCase() + d.status.slice(1)}
                     </Badge>
                   )}
+                  {pdfReady && (
+                    <span
+                      className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600"
+                      title={pdfStatusLabel("converted")}
+                    >
+                      PDF
+                    </span>
+                  )}
                   <span className="flex shrink-0 items-center text-sm font-medium text-slate-600 group-hover:text-slate-900">
-                    <span className="hidden sm:inline">Continue</span>
+                    <span className="hidden sm:inline">View</span>
                     <ChevronRight className="h-4 w-4" aria-hidden="true" />
                   </span>
                 </Link>
+                <Button asChild variant="outline" className="h-auto shrink-0 px-3">
+                  <Link
+                    to={`/documents/${d.id}/edit`}
+                    aria-label={`Continue editing ${title}`}
+                    title="Continue editing"
+                  >
+                    <FileEdit className="h-4 w-4" aria-hidden="true" />
+                    <span className="hidden text-xs sm:inline">Continue</span>
+                  </Link>
+                </Button>
                 {generated && (
                   <Button
                     type="button"

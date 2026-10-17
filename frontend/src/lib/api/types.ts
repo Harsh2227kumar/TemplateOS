@@ -408,14 +408,24 @@ export interface Document {
 
 // --- V1.6: Document generation ---
 
-export type PdfStatus = "ok" | "failed" | "not_configured";
+/** pending: conversion did not finish · converted · failed (see pdf_error). */
+export type PdfStatus = "pending" | "converted" | "failed";
 
 export interface GeneratedInfo {
   generated_at: string;
   pdf_status: PdfStatus;
+  /** User-readable reason of the last failed conversion. */
   pdf_error: string | null;
+  /** Stored PDF file name (no path); null without a PDF. */
+  pdf_filename: string | null;
+  pdf_converted_at: string | null;
+  /** Conversions tried for the current DOCX (initial + retries). */
+  pdf_attempts: number;
+  /** A PDF file exists; can be true while pdf_status is "failed" (an earlier PDF). */
+  has_pdf: boolean;
   /** API path (with the /api/v1 prefix) of the DOCX download. */
   docx_url: string;
+  /** API path of the PDF download (/download/pdf); null without a PDF. */
   pdf_url: string | null;
   /** The draft's values were saved after this generation. */
   is_stale: boolean;
@@ -425,6 +435,85 @@ export interface GeneratedInfo {
 export interface GenerateDocumentResponse extends GeneratedInfo {
   document_id: number;
   document_status: string;
+}
+
+// --- V1.7 Phase 1: read-only document preview (GET /documents/{id}/preview) ---
+
+export interface PreviewDocumentInfo {
+  id: number;
+  name: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreviewTemplateInfo {
+  id: number;
+  name: string;
+  category: string;
+  version: number;
+  has_processed_file: boolean;
+}
+
+export interface PreviewCompleteness {
+  required_total: number;
+  required_filled: number;
+  /** Field names (not labels) of required fields without a value. */
+  missing_required: string[];
+}
+
+export interface PreviewField {
+  field_name: string;
+  label: string;
+  field_type: string;
+  is_required: boolean;
+  ai_enabled: boolean;
+  display_order: number;
+  /** Raw saved value; null when never saved. */
+  value: string | null;
+  /** Exactly as generation renders it (e.g. ISO date -> DD-MM-YYYY). */
+  display_value: string;
+  /** List fields only. */
+  items: string[] | null;
+  is_empty: boolean;
+  missing_required: boolean;
+}
+
+export interface PreviewSection {
+  /** A field without a section is grouped under "General" by the API. */
+  name: string;
+  fields: PreviewField[];
+}
+
+export interface PreviewGeneration {
+  generated_at: string;
+  is_stale: boolean;
+  template_version: number | null;
+  /** The generated DOCX exists on disk. */
+  docx_available: boolean;
+  docx_url: string;
+  pdf_status: PdfStatus;
+  pdf_error: string | null;
+  /** A PDF file exists on disk. */
+  pdf_available: boolean;
+  pdf_url: string | null;
+  pdf_filename: string | null;
+}
+
+export interface PreviewPermissions {
+  can_edit: boolean;
+  can_generate: boolean;
+  can_download: boolean;
+}
+
+export interface DocumentPreview {
+  document: PreviewDocumentInfo;
+  template: PreviewTemplateInfo;
+  completeness: PreviewCompleteness;
+  sections: PreviewSection[];
+  /** null when the draft was never generated. */
+  generation: PreviewGeneration | null;
+  permissions: PreviewPermissions;
 }
 
 export type DocumentFormValues = Record<string, any>;
