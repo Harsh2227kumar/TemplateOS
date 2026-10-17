@@ -13,6 +13,16 @@ from app.schemas.document import (
     DocumentValidationErrorResponse,
     DocumentListItem,
 )
+from app.schemas.document_preview import (
+    DocumentPreview,
+    PreviewCompleteness,
+    PreviewDocument,
+    PreviewField,
+    PreviewGeneration,
+    PreviewPermissions,
+    PreviewSection,
+    PreviewTemplate,
+)
 
 __all__ = [
     "LoginRequest",
@@ -30,4 +40,12 @@ __all__ = [
     "FieldValidationError",
     "DocumentValidationErrorResponse",
     "DocumentListItem",
+    "DocumentPreview",
+    "PreviewCompleteness",
+    "PreviewDocument",
+    "PreviewField",
+    "PreviewGeneration",
+    "PreviewPermissions",
+    "PreviewSection",
+    "PreviewTemplate",
 ]

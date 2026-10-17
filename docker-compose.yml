@@ -1,0 +1,23 @@
+# Local development services (V1.6 Phase 2).
+# Only Gotenberg (DOCX -> PDF) runs in Docker; the backend and frontend stay
+# local dev servers. Start it with:
+#   docker compose up -d gotenberg
+#   python backend/scripts/verify_gotenberg.py --live
+# Port 3000 busy? Change the left side of the port mapping and GOTENBERG_URL.
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: templateos-gotenberg
+    ports:
+      - "3000:3000"
+    command:
+      - "gotenberg"
+      - "--api-timeout=60s"
+      - "--libreoffice-restart-after=50"
+      - "--log-level=info"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -8,9 +8,10 @@ Coverage:
 - POST /generate: owner-only (403 / 404), required-field 422 with
   {field_name, error}, template error 422, status -> generated, generated
   info on GET /documents/{id} and the list, staleness after a later save.
-- PDF: mocked Gotenberg success / HTTP failure / timeout, not configured,
-  POST /generate-pdf retry, LibreOffice converter (mocked subprocess) and
-  converter selection.
+- PDF: mocked Gotenberg (httpx.MockTransport) success / HTTP failure /
+  timeout, disabled, POST /generate-pdf retry, LibreOffice converter (mocked
+  subprocess) and converter selection. The full PDF status / retry /
+  download matrix lives in tests/test_pdf_conversion.py.
 - GET /download: headers, filename from the draft name, 404 / 409 cases.
 - Regeneration replaces files; document / template delete removes rows and
   stored files.
@@ -384,9 +385,12 @@ def test_generate_renders_and_records(owner_token, ready_doc):
     body = response.json()
     assert body["document_id"] == ready_doc
     assert body["document_status"] == "generated"
-    assert body["pdf_status"] == "not_configured"
-    assert body["pdf_error"] is None
+    assert body["pdf_status"] == "failed"
+    assert body["pdf_error"] == "PDF conversion is disabled on this server"
     assert body["pdf_url"] is None
+    assert body["has_pdf"] is False
+    assert body["pdf_filename"] is None
+    assert body["pdf_attempts"] == 1
     assert body["docx_url"] == f"/api/v1/documents/{ready_doc}/download?format=docx"
     assert body["generated_at"]
     assert body["is_stale"] is False
@@ -404,7 +408,7 @@ def test_generate_renders_and_records(owner_token, ready_doc):
 
     detail = client.get(f"/api/v1/documents/{ready_doc}", headers=_auth(owner_token)).json()
     assert detail["status"] == "generated"
-    assert detail["generated"]["pdf_status"] == "not_configured"
+    assert detail["generated"]["pdf_status"] == "failed"
     assert detail["generated"]["is_stale"] is False
 
     listed = client.get("/api/v1/documents", headers=_auth(owner_token)).json()
@@ -531,34 +535,37 @@ def gotenberg(monkeypatch):
     class FakeGotenberg:
         response = httpx.Response(200, content=FAKE_PDF)
         error: Exception | None = None
-        calls: list[dict] = []
+        calls: list[httpx.Request] = []
 
     fake = FakeGotenberg()
     fake.calls = []
 
-    def fake_post(url, files=None, timeout=None):
-        fake.calls.append({"url": url, "files": files, "timeout": timeout})
+    def handler(request: httpx.Request) -> httpx.Response:
+        request.read()
+        fake.calls.append(request)
         if fake.error is not None:
             raise fake.error
         return fake.response
 
     monkeypatch.setattr(settings, "pdf_converter", "auto")
-    monkeypatch.setattr(settings, "gotenberg_url", "http://gotenberg.test:3000/")
+    monkeypatch.setattr(settings, "gotenberg_url", "http://gotenberg.test:3000")
     monkeypatch.setattr(settings, "gotenberg_timeout_seconds", 12)
-    monkeypatch.setattr(pdf_service.httpx, "post", fake_post)
+    monkeypatch.setattr(pdf_service, "gotenberg_transport", httpx.MockTransport(handler))
     return fake
 
 
 def test_generate_with_gotenberg_success(owner_token, ready_doc, gotenberg):
     body = _generate(owner_token, ready_doc).json()
-    assert body["pdf_status"] == "ok"
-    assert body["pdf_url"] == f"/api/v1/documents/{ready_doc}/download?format=pdf"
-    call = gotenberg.calls[0]
-    assert call["url"] == "http://gotenberg.test:3000/forms/libreoffice/convert"
-    assert call["timeout"] == 12
-    filename, content, media_type = call["files"]["files"]
-    assert filename.endswith(".docx") and media_type == DOCX_TYPE
-    assert content.startswith(b"PK")
+    assert body["pdf_status"] == "converted"
+    assert body["has_pdf"] is True
+    assert body["pdf_url"] == f"/api/v1/documents/{ready_doc}/download/pdf"
+    request = gotenberg.calls[0]
+    assert str(request.url) == "http://gotenberg.test:3000/forms/libreoffice/convert"
+    assert request.extensions["timeout"]["read"] == 12
+    assert request.extensions["timeout"]["connect"] == 5
+    assert b'name="files"; filename="Weekly MoM 13 10.docx"' in request.content
+    assert f"Content-Type: {DOCX_TYPE}".encode() in request.content
+    assert b"PK" in request.content
 
     record = _record(ready_doc)
     assert record.pdf_path.startswith("generated/pdf/")
@@ -578,7 +585,7 @@ def test_gotenberg_http_failure_keeps_docx(owner_token, ready_doc, gotenberg):
     body = response.json()
     assert body["document_status"] == "generated"
     assert body["pdf_status"] == "failed"
-    assert "503" in body["pdf_error"]
+    assert body["pdf_error"] == "PDF service is busy or timed out. Try again in a moment"
     assert body["pdf_url"] is None
     record = _record(ready_doc)
     assert record.pdf_path is None and record.pdf_error
@@ -596,8 +603,9 @@ def test_gotenberg_timeout_then_retry_succeeds(owner_token, ready_doc, gotenberg
         f"/api/v1/documents/{ready_doc}/generate-pdf", headers=_auth(owner_token)
     )
     assert retry.status_code == 200, retry.text
-    assert retry.json()["pdf_status"] == "ok"
+    assert retry.json()["pdf_status"] == "converted"
     assert retry.json()["pdf_error"] is None
+    assert retry.json()["pdf_attempts"] == 2
     record = _record(ready_doc)
     assert record.pdf_error is None and storage_service.exists(record.pdf_path)
 
@@ -613,15 +621,17 @@ def test_retry_failure_and_not_configured(owner_token, ready_doc, gotenberg, mon
     retry = client.post(
         f"/api/v1/documents/{ready_doc}/generate-pdf", headers=_auth(owner_token)
     )
-    assert retry.status_code == 200
-    assert retry.json()["pdf_status"] == "failed"
+    assert retry.status_code == 503
+    assert retry.json()["detail"] == "PDF service error (HTTP 500). Try again"
+    assert _record(ready_doc).pdf_status == "failed"
 
     monkeypatch.setattr(settings, "pdf_converter", "none")
     retry = client.post(
         f"/api/v1/documents/{ready_doc}/generate-pdf", headers=_auth(owner_token)
     )
-    assert retry.json()["pdf_status"] == "not_configured"
-    assert retry.json()["pdf_error"] is None
+    assert retry.status_code == 503
+    assert retry.json()["detail"] == "PDF conversion is disabled on this server"
+    assert _record(ready_doc).pdf_attempts == 3
 
 
 def test_retry_before_generation_404(owner_token, ready_doc):

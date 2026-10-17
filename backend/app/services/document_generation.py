@@ -1,6 +1,11 @@
 """
 Document generation orchestration (V1.6): validate -> render DOCX -> store ->
-convert PDF (optional) -> record -> remove superseded files.
+record (pdf_status "pending") -> remove superseded files -> convert PDF ->
+record converted / failed.
+
+A PDF problem never fails generation: the DOCX row is committed before the
+conversion starts, and every conversion outcome is recorded on the row
+(pdf_status, pdf_error, pdf_attempts, pdf_converted_at).
 
 Called from the plain `def` endpoints in app/api/v1/endpoints/documents.py,
 so this blocking work runs in FastAPI's threadpool.
@@ -8,6 +13,7 @@ so this blocking work runs in FastAPI's threadpool.
 
 import logging
 import re
+from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from fastapi import HTTPException, status
@@ -17,7 +23,8 @@ from app.core.clock import utc_now_naive
 from app.core.config import settings
 from app.crud.generated_file_crud import (
     get_generated_file,
-    update_pdf_result,
+    mark_pdf_converted,
+    mark_pdf_failed,
     upsert_generated_file,
 )
 from app.crud.template_field_crud import get_fields_by_template
@@ -33,7 +40,11 @@ from app.services.generation_service import (
     build_context,
     render_docx,
 )
-from app.services.pdf_service import PdfConversionError, get_pdf_converter
+from app.services.pdf_service import (
+    PdfConversionError,
+    get_pdf_converter,
+    unavailable_reason,
+)
 from app.services.storage_service import (
     StorageError,
     StoredFileNotFoundError,
@@ -70,7 +81,10 @@ def content_disposition(filename: str) -> str:
 
 
 def download_url(document_id: int, file_format: str) -> str:
-    return f"{settings.api_v1_prefix}/documents/{document_id}/download?format={file_format}"
+    base = f"{settings.api_v1_prefix}/documents/{document_id}/download"
+    if file_format == "pdf":
+        return f"{base}/pdf"
+    return f"{base}?format={file_format}"
 
 
 def generated_info(document: Document, record: GeneratedFile | None) -> GeneratedInfo | None:
@@ -80,11 +94,20 @@ def generated_info(document: Document, record: GeneratedFile | None) -> Generate
         generated_at=record.generated_at,
         pdf_status=record.pdf_status,
         pdf_error=record.pdf_error,
+        pdf_filename=PurePosixPath(record.pdf_path).name if record.pdf_path else None,
+        pdf_converted_at=record.pdf_converted_at,
+        pdf_attempts=record.pdf_attempts or 0,
+        has_pdf=record.pdf_path is not None,
         docx_url=download_url(document.id, "docx"),
         pdf_url=download_url(document.id, "pdf") if record.pdf_path else None,
-        is_stale=document.updated_at > record.generated_at,
+        is_stale=is_stale(document, record),
         template_version=record.template_version,
     )
+
+
+def is_stale(document: Document, record: GeneratedFile) -> bool:
+    """Values were saved after the last generation (saving bumps document.updated_at)."""
+    return document.updated_at > record.generated_at
 
 
 def generation_response(document: Document, record: GeneratedFile) -> GenerateDocumentResponse:
@@ -103,28 +126,60 @@ def _validate_required(fields, values: dict[str, str]) -> None:
     validate_document_values(fields, payload)
 
 
-def _convert_pdf(docx_bytes: bytes, filename: str) -> tuple[str | None, str | None]:
-    """(pdf_path, pdf_error); both None when no converter is configured."""
+def convert_and_record(
+    db: Session, record: GeneratedFile, docx_bytes: bytes, filename: str
+) -> GeneratedFile:
+    """
+    Convert the DOCX to PDF and record the outcome on the row (commits).
+
+    Success stores the PDF, marks the row converted and removes an earlier
+    PDF it replaces. Any failure (no converter, disabled, conversion error,
+    storage error) marks it failed with a user-readable reason and keeps an
+    existing PDF. Only database errors propagate.
+    """
     converter = get_pdf_converter()
     if converter is None:
-        return None, None
+        return mark_pdf_failed(db, record, unavailable_reason())
     try:
         pdf_bytes = converter.convert(docx_bytes, filename)
     except PdfConversionError as exc:
-        return None, str(exc)
+        logger.warning("PDF conversion failed for document %s: %s", record.document_id, exc)
+        return mark_pdf_failed(db, record, str(exc))
     except Exception:  # never let PDF problems break generation
         logger.exception("Unexpected PDF conversion failure")
-        return None, "PDF conversion failed unexpectedly"
+        return mark_pdf_failed(db, record, "PDF conversion failed unexpectedly")
     try:
-        stored = storage_service.save_bytes("generated_pdf", filename, pdf_bytes)
+        stored = storage_service.save_bytes(
+            "generated_pdf", f"{filename.removesuffix('.docx')}.pdf", pdf_bytes
+        )
     except StorageError:
         logger.exception("Could not store generated PDF")
-        return None, "The PDF could not be saved"
-    return stored.path, None
+        return mark_pdf_failed(db, record, "The PDF could not be saved")
+
+    old_pdf = record.pdf_path
+    try:
+        record = mark_pdf_converted(db, record, stored.path)
+    except Exception:
+        db.rollback()
+        delete_stored_files([stored.path])
+        raise
+    if old_pdf and old_pdf != stored.path:
+        delete_stored_files([old_pdf])
+    logger.info(
+        "PDF converted for document %s (%s bytes, attempt %s)",
+        record.document_id,
+        len(pdf_bytes),
+        record.pdf_attempts,
+    )
+    return record
 
 
 def generate_document(db: Session, document: Document, template: Template) -> GeneratedFile:
-    """Render, store and record the document's DOCX (+ PDF when configured)."""
+    """
+    Render, store and record the document's DOCX, then convert it to PDF.
+    The returned row's pdf_status is converted or failed (pending only when
+    recording the PDF outcome itself failed).
+    """
     fields = get_fields_by_template(db, template.id)
     values = {value.field_name: value.value for value in document.values}
     _validate_required(fields, values)
@@ -160,16 +215,12 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
             status_code=500, detail="Could not save the generated document"
         ) from None
 
-    pdf_path, pdf_error = _convert_pdf(docx_bytes, f"{filename_stem}.docx")
-
     now = utc_now_naive()
     try:
         record, superseded = upsert_generated_file(
             db,
             document.id,
             docx_path=stored_docx.path,
-            pdf_path=pdf_path,
-            pdf_error=pdf_error,
             generated_at=now,
             template_version=template.version,
             template_source_path=source_path,
@@ -180,11 +231,19 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
         db.commit()
     except Exception:
         db.rollback()
-        delete_stored_files([stored_docx.path, pdf_path])
+        delete_stored_files([stored_docx.path])
         raise
     db.refresh(record)
     db.refresh(document)
     delete_stored_files(superseded)
+
+    try:
+        record = convert_and_record(db, record, docx_bytes, f"{filename_stem}.docx")
+    except Exception:  # the DOCX is committed; leave the PDF "pending"
+        logger.exception("Could not record the PDF result for document %s", document.id)
+        db.rollback()
+        db.refresh(record)
+    db.refresh(document)
     logger.info(
         "Generated document %s (pdf=%s) from template %s v%s",
         document.id,
@@ -196,31 +255,40 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
 
 
 def retry_pdf(db: Session, document: Document) -> GeneratedFile:
-    """Convert the stored DOCX to PDF again and record the outcome."""
+    """
+    Convert the stored DOCX to PDF again and record the outcome.
+
+    - 404 when the document has not been generated
+    - already converted and the PDF is on disk -> returned unchanged
+      (idempotent, no conversion)
+    - 410 when the stored DOCX is missing
+    - 503 with the reason when the conversion fails (the failure is recorded
+      first; an earlier PDF is kept)
+    """
     record = get_generated_file(db, document.id)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The document has not been generated yet",
         )
+    if (
+        record.pdf_status == "converted"
+        and record.pdf_path
+        and storage_service.exists(record.pdf_path)
+    ):
+        return record
     try:
         docx_bytes = storage_service.read_bytes(record.docx_path)
     except StoredFileNotFoundError:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The generated DOCX is missing; generate the document again",
+            status_code=status.HTTP_410_GONE,
+            detail="The generated DOCX is missing on the server. Generate the document again.",
         ) from None
 
-    pdf_path, pdf_error = _convert_pdf(
-        docx_bytes, download_filename(document, "docx")
-    )
-    try:
-        superseded = update_pdf_result(db, record, pdf_path=pdf_path, pdf_error=pdf_error)
-        db.commit()
-    except Exception:
-        db.rollback()
-        delete_stored_files([pdf_path])
-        raise
-    db.refresh(record)
-    delete_stored_files(superseded)
+    record = convert_and_record(db, record, docx_bytes, download_filename(document, "docx"))
+    if record.pdf_status != "converted":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=record.pdf_error or "PDF conversion failed",
+        )
     return record
