@@ -10,16 +10,20 @@ Used by the document endpoints (app/api/v1/endpoints/documents.py):
 - GET /documents/{id}/values
 """
 
+import json
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Request-size bounds for PUT /documents/{id}/values (no prior limit existed).
 MAX_DOCUMENT_VALUE_LENGTH = 50_000
 MAX_VALUES_PER_REQUEST = 500
 
 PdfStatus = Literal["pending", "converted", "failed"]
+# V1.7 Phase 2: how a value is stored, and which AI action produced it.
+ValueFormat = Literal["plain", "rich"]
+AiAction = Literal["grammar", "tone", "concise", "formal", "expand"]
 
 
 # --- Generation (V1.6) ---
@@ -143,8 +147,25 @@ class DocumentValueCreate(BaseModel):
         description=(
             "Value as string. For list fields, use JSON array string "
             "(e.g., '[\"item1\", \"item2\"]'). For date, use ISO format "
-            "(e.g., '2026-09-13'). For number, use string representation (e.g., '42')."
+            "(e.g., '2026-09-13'). For number, use string representation (e.g., '42'). "
+            "Ignored for value_format 'rich' (derived from rich_content)."
         ),
+    )
+    # V1.7 Phase 2 (all optional; plain-only clients send none of them)
+    value_format: ValueFormat = Field(
+        default="plain",
+        description="'rich' only for textarea fields: rich_content holds Tiptap JSON",
+    )
+    rich_content: dict[str, Any] | None = Field(
+        default=None,
+        description="Tiptap JSON (whitelisted nodes/marks), required for value_format 'rich'",
+    )
+    ai_modified: bool = Field(
+        default=False,
+        description="The value is an AI result the user did not edit afterwards",
+    )
+    ai_action: AiAction | None = Field(
+        default=None, description="The AI action that produced the value (when ai_modified)"
     )
 
 
@@ -172,8 +193,25 @@ class DocumentValueRead(BaseModel):
     value: str
     created_at: datetime
     updated_at: datetime
+    # V1.7 Phase 2: value is the plain-text projection of a rich value.
+    value_format: ValueFormat = "plain"
+    rich_content: dict[str, Any] | None = None
+    ai_modified: bool = False
+    ai_action: AiAction | None = None
+    ai_modified_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("rich_content", mode="before")
+    @classmethod
+    def parse_rich_content(cls, value: Any) -> Any:
+        """The column stores JSON text; expose it as an object."""
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                return None
+        return value if isinstance(value, dict) else None
 
 
 # --- Bulk Operations ---
