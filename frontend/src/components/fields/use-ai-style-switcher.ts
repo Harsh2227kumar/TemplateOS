@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useFormContext, useWatch } from "react-hook-form";
 
+import { AI_FLAGS_KEY, readAiFlags, withAiFlag, withoutAiFlag } from "@/components/forms/ai-flags";
 import { toast } from "@/components/ui/toast";
+import {
+  aiBlocks,
+  applyAiBlocks,
+  docToPlain,
+  normalizeDoc,
+  richValue,
+  type RichDoc,
+} from "@/features/rich-text/rich-model";
 import { useImproveText } from "@/hooks/queries";
 import { ApiError, MAX_AI_TEXT_CHARS } from "@/lib/api";
 import {
@@ -9,13 +18,83 @@ import {
   aiTextOf,
   aiTextToList,
   initialAiStyleState,
+  measurePlainText,
   normalizeAiResultFor,
   planAiAction,
   sourceTextFor,
   type AiFieldKind,
   type AiStyle,
   type AiStyleState,
+  type AiTextMeasure,
 } from "./ai-style-state";
+
+// Backend limits for original_items (app/schemas/ai.py).
+export const MAX_AI_BLOCKS = 50;
+export const MAX_AI_BLOCK_CHARS = 1000;
+
+/** A rich field's switcher text (doc JSON) as its doc. */
+export function aiTextToDoc(text: string): RichDoc {
+  return normalizeDoc(text ? JSON.parse(text) : null);
+}
+
+/** Rich fields: blank / length by the plain text the document shows. */
+export const measureRichText: AiTextMeasure = (text) => {
+  const plain = text ? docToPlain(aiTextToDoc(text)) : "";
+  return { empty: !plain.trim(), length: plain.length };
+};
+
+export function measureFor(kind: AiFieldKind): AiTextMeasure {
+  return kind === "rich" ? measureRichText : measurePlainText;
+}
+
+/** Why a rich text cannot be sent block by block, or null. */
+export function richBlocksProblem(text: string): string | null {
+  const { items } = aiBlocks(aiTextToDoc(text));
+  if (items.length > MAX_AI_BLOCKS) {
+    return `AI styles work on up to ${MAX_AI_BLOCKS} paragraphs and list items. This text has ${items.length}.`;
+  }
+  if (items.some((item) => item.length > MAX_AI_BLOCK_CHARS)) {
+    return `AI styles work on paragraphs of up to ${MAX_AI_BLOCK_CHARS.toLocaleString()} characters. Split the longest paragraph first.`;
+  }
+  return null;
+}
+
+/** The form value a switcher text stands for. */
+export function aiTextToFormValue(kind: AiFieldKind, text: string): unknown {
+  if (kind === "list") return aiTextToList(text);
+  if (kind === "rich") return richValue(aiTextToDoc(text));
+  return text;
+}
+
+/**
+ * The request body part for a field: list items, rich paragraphs (non-empty
+ * blocks, rewritten one by one so the structure is kept), or plain text.
+ */
+export function aiSource(kind: AiFieldKind, source: string): { original_items: string[] } | { original_text: string } {
+  if (kind === "list") return { original_items: aiTextToList(source) };
+  if (kind === "rich") return { original_items: aiBlocks(aiTextToDoc(source)).items };
+  return { original_text: source };
+}
+
+/** The switcher text of an AI response for the source it was asked about. */
+export function aiResultText(
+  kind: AiFieldKind,
+  source: string,
+  response: { improved_text?: string; improved_items?: string[] } | undefined,
+): string {
+  if (kind === "rich") {
+    const doc = aiTextToDoc(source);
+    const { indexes } = aiBlocks(doc);
+    return JSON.stringify(normalizeDoc(applyAiBlocks(doc, indexes, response?.improved_items ?? [])));
+  }
+  const raw = kind === "list" && response?.improved_items ? response.improved_items.join("\n") : response?.improved_text ?? "";
+  return normalizeAiResultFor(kind, raw);
+}
+
+/** Has the text any content (rich: plain projection)? */
+function hasContent(kind: AiFieldKind, text: string): boolean {
+  return !measureFor(kind)(text).empty;
+}
 
 export const AI_STYLE_LABELS: Record<AiStyle, string> = {
   grammar: "Fix grammar",
@@ -29,8 +108,10 @@ export interface AiStyleSwitcherOptions {
   fieldName: string;
   fieldLabel: string;
   /**
-   * "multiline" keeps line breaks, "text" (one-line input) does not, and
-   * "list" works on the items (one per line) and rewrites each on its own.
+   * "multiline" keeps line breaks, "text" (one-line input) does not, "list"
+   * works on the items (one per line) and rewrites each on its own, and
+   * "rich" rewrites the paragraphs and list items of a rich text field one
+   * by one, keeping its structure ("Original" restores the exact doc).
    */
   kind: AiFieldKind;
   templateId: number;
@@ -44,6 +125,8 @@ export interface AiStyleSwitcher {
   fieldText: string;
   /** Length of the text the next action would be based on. */
   sourceLength: number;
+  /** The field has no text (rich: no text in its paragraphs). */
+  isEmpty: boolean;
   isPending: boolean;
   /** Polite screen-reader announcement for the last change. */
   announcement: string;
@@ -113,12 +196,23 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
     return aiTextOf(optionsRef.current.kind, getValues(optionsRef.current.fieldName));
   }, [getValues]);
 
+  /**
+   * Write switcher text into the field. `aiAction` records that AI wrote it
+   * (the field's "AI" flag); null means the user's own text is back.
+   */
   const writeFieldText = useCallback(
-    (text: string) => {
+    (text: string, aiAction: AiStyle | null) => {
       const { fieldName, kind } = optionsRef.current;
-      setValue(fieldName, kind === "list" ? aiTextToList(text) : text, { shouldDirty: true, shouldValidate: true });
+      const value = aiTextToFormValue(kind, text);
+      setValue(fieldName, value, { shouldDirty: true, shouldValidate: true });
+      const flags = readAiFlags(getValues());
+      setValue(
+        AI_FLAGS_KEY,
+        aiAction ? withAiFlag(flags, fieldName, aiAction, value) : withoutAiFlag(flags, fieldName),
+        { shouldDirty: true },
+      );
     },
-    [setValue],
+    [getValues, setValue],
   );
 
   const runStyle = useCallback(
@@ -126,8 +220,15 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
       if (inFlightRef.current) return;
       const opts = optionsRef.current;
       const currentText = readFieldText();
-      const plan = planAiAction(stateRef.current, style, currentText, MAX_AI_TEXT_CHARS);
+      const plan = planAiAction(stateRef.current, style, currentText, MAX_AI_TEXT_CHARS, measureFor(opts.kind));
       const label = AI_STYLE_LABELS[style];
+      if (opts.kind === "rich" && plan.kind === "fetch") {
+        const problem = richBlocksProblem(plan.source);
+        if (problem) {
+          toast({ variant: "destructive", title: "Text is too long for AI", description: problem });
+          return;
+        }
+      }
 
       switch (plan.kind) {
         case "busy":
@@ -142,7 +243,7 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
           return;
         case "cached":
           dispatch({ type: "applyCached", style, source: plan.source, text: plan.text });
-          writeFieldText(plan.text);
+          writeFieldText(plan.text, style);
           setAnnouncement(`${label} style applied to ${opts.fieldLabel}.`);
           return;
         case "fetch":
@@ -162,20 +263,15 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
             template_id: opts.templateId,
             document_id: opts.documentId ?? null,
             field_name: opts.fieldName,
-            ...(opts.kind === "list"
-              ? { original_items: aiTextToList(plan.source) }
-              : { original_text: plan.source }),
+            ...aiSource(opts.kind, plan.source),
             action_type: style,
           },
           signal: controller.signal,
         });
         if (controller.signal.aborted || requestSeqRef.current !== requestId) return;
 
-        const raw = opts.kind === "list" && response?.improved_items
-          ? response.improved_items.join("\n")
-          : response?.improved_text ?? "";
-        const text = normalizeAiResultFor(opts.kind, raw);
-        if (!text.trim()) {
+        const text = aiResultText(opts.kind, plan.source, response);
+        if (!hasContent(opts.kind, text)) {
           throw new Error("The AI returned an empty result.");
         }
         // Belt and braces: the field is read-only while a request runs, but if
@@ -186,7 +282,7 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
         }
 
         dispatch({ type: "success", requestId, text });
-        writeFieldText(text);
+        writeFieldText(text, style);
         if (text === plan.source) {
           toast({
             title: "No changes suggested",
@@ -224,14 +320,15 @@ export function useAiStyleSwitcher(options: AiStyleSwitcherOptions): AiStyleSwit
     const current = stateRef.current;
     if (current.pending || current.base === null) return;
     dispatch({ type: "revert" });
-    writeFieldText(current.base);
+    writeFieldText(current.base, null);
     setAnnouncement(`Restored your original text in ${optionsRef.current.fieldLabel}.`);
   }, [writeFieldText]);
 
   return {
     state,
     fieldText,
-    sourceLength: sourceTextFor(state, fieldText).length,
+    sourceLength: measureFor(options.kind)(sourceTextFor(state, fieldText)).length,
+    isEmpty: !hasContent(options.kind, fieldText),
     isPending: state.pending !== null,
     announcement,
     runStyle: (style: AiStyle) => {

@@ -10,6 +10,7 @@ import type {
   PreviewCompleteness,
   PreviewField,
   PreviewGeneration,
+  RichTextDoc,
 } from "../../lib/api/types";
 
 /** 0..100, rounded down so "almost done" never shows 100%. No required fields = 100. */
@@ -29,19 +30,21 @@ export function completenessLabel(c: PreviewCompleteness): string {
   return `${Math.max(0, c.required_filled)} of ${c.required_total} required fields filled`;
 }
 
-export type FieldDisplayKind = "text" | "multiline" | "list" | "empty";
+export type FieldDisplayKind = "text" | "multiline" | "rich" | "list" | "empty";
 
 export interface FieldDisplay {
   kind: FieldDisplayKind;
-  /** text / multiline: the backend's display_value, unchanged. */
+  /** text / multiline / rich: the backend's display_value, unchanged. */
   text?: string;
   /** list: the backend's items, unchanged. */
   items?: string[];
+  /** rich: the saved Tiptap JSON (rendered read-only; text is its plain form). */
+  doc?: RichTextDoc;
 }
 
 /**
  * How one preview row renders. Never re-formats: text is `display_value`,
- * list items are `items`. Phase 2 (rich text) adds a kind here.
+ * list items are `items`, rich text (V1.7 P2) is the saved doc.
  */
 export function fieldDisplay(field: PreviewField): FieldDisplay {
   if (field.is_empty) return { kind: "empty" };
@@ -51,6 +54,7 @@ export function fieldDisplay(field: PreviewField): FieldDisplay {
   }
   const text = field.display_value ?? "";
   if (text.trim() === "") return { kind: "empty" };
+  if (field.value_format === "rich" && field.rich_content) return { kind: "rich", text, doc: field.rich_content };
   if (field.field_type === "textarea" || text.includes("\n")) return { kind: "multiline", text };
   return { kind: "text", text };
 }
