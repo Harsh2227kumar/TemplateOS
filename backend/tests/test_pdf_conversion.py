@@ -40,12 +40,15 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
 
+from app.crud.generated_file_crud import latest_generated_file
 from app.core.config import Settings, settings
+from app.crud.document_version_crud import create_version
 from app.crud.generated_file_crud import (
+    create_generated_file,
     mark_pdf_converted,
     mark_pdf_failed,
-    upsert_generated_file,
 )
+from app.models.document import Document
 from app.crud.template_field_crud import create_field
 from app.db.base import Base
 from app.db.session import get_db
@@ -222,10 +225,9 @@ def _download_pdf(token: str, document_id: int, query: bool = False) -> httpx.Re
 
 
 def _record(document_id: int) -> GeneratedFile:
+    """The latest version's row (V1.7 P2: one row per version)."""
     with TestSession() as session:
-        return session.execute(
-            select(GeneratedFile).where(GeneratedFile.document_id == document_id)
-        ).scalar_one()
+        return latest_generated_file(session, document_id)
 
 
 def _set_row(document_id: int, **values) -> None:
@@ -340,17 +342,17 @@ def test_unavailable_reasons(monkeypatch):
 # ── 2. CRUD helpers ───────────────────────────────────────────────
 
 
+def _new_version_row(session, document_id: int, docx_path: str, generated_at: datetime):
+    document = session.get(Document, document_id)
+    version = create_version(session, document, created_by=document.created_by, template_version=1)
+    return create_generated_file(session, version, docx_path=docx_path, generated_at=generated_at)
+
+
 def test_crud_pdf_state_helpers(ready_doc):
     with TestSession() as session:
         assert GeneratedFile(document_id=ready_doc, docx_path="generated/docx/a.docx").pdf_status == "pending"
-        record, superseded = upsert_generated_file(
-            session,
-            ready_doc,
-            docx_path="generated/docx/a.docx",
-            generated_at=datetime(2026, 10, 15),
-        )
+        record = _new_version_row(session, ready_doc, "generated/docx/a.docx", datetime(2026, 10, 15))
         session.commit()
-        assert superseded == []
         assert (record.pdf_status, record.pdf_attempts) == ("pending", 0)
         assert record.pdf_converted_at is None and record.has_pdf is False
 
@@ -370,18 +372,16 @@ def test_crud_pdf_state_helpers(ready_doc):
         assert record.pdf_attempts == 2
         assert record.pdf_converted_at == converted_at
 
-        # A new DOCX resets the PDF state and hands back the old files.
-        record, superseded = upsert_generated_file(
-            session,
-            ready_doc,
-            docx_path="generated/docx/b.docx",
-            generated_at=converted_at,
-        )
+        # A new version starts with its own pending PDF state; the earlier
+        # row keeps its PDF (V1.7 P2: generation no longer overwrites).
+        newer = _new_version_row(session, ready_doc, "generated/docx/b.docx", converted_at)
         session.commit()
-        assert superseded == ["generated/docx/a.docx", "generated/pdf/a.pdf"]
-        assert (record.pdf_status, record.pdf_attempts) == ("pending", 0)
-        assert record.pdf_path is None and record.pdf_error is None
-        assert record.pdf_converted_at is None
+        assert newer.id != record.id
+        assert (newer.pdf_status, newer.pdf_attempts) == ("pending", 0)
+        assert newer.pdf_path is None and newer.pdf_error is None
+        assert newer.pdf_converted_at is None
+        session.refresh(record)
+        assert record.pdf_path == "generated/pdf/a.pdf"
 
 
 def test_pdf_status_validator():
@@ -476,7 +476,7 @@ def test_generate_without_a_converter(owner_token, ready_doc, monkeypatch):
     )
 
 
-def test_regenerate_resets_pdf_state_and_removes_old_files(owner_token, ready_doc, gotenberg):
+def test_regenerate_starts_a_new_pdf_state_and_keeps_old_files(owner_token, ready_doc, gotenberg):
     assert _generate(owner_token, ready_doc).json()["pdf_status"] == "converted"
     first = _record(ready_doc)
 
@@ -486,10 +486,11 @@ def test_regenerate_resets_pdf_state_and_removes_old_files(owner_token, ready_do
     assert body["pdf_attempts"] == 1  # counted for the new DOCX only
     assert body["has_pdf"] is False  # the old PDF belonged to the old DOCX
     second = _record(ready_doc)
-    assert second.id == first.id
+    assert second.id != first.id  # V1.7 P2: a new version, its own row
     assert second.pdf_path is None and second.pdf_converted_at is None
-    assert not storage_service.exists(first.docx_path)
-    assert not storage_service.exists(first.pdf_path)
+    # The previous version keeps its DOCX and PDF.
+    assert storage_service.exists(first.docx_path)
+    assert storage_service.exists(first.pdf_path)
     assert storage_service.exists(second.docx_path)
 
 

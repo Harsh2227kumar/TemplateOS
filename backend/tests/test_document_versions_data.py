@@ -15,7 +15,6 @@ Coverage:
 - prune_old_version_files: keeps the newest N, returns paths, idempotent.
 - Cascades: document delete removes versions, rows and stored files;
   version creator delete -> created_by NULL.
-- upsert_generated_file (V1.6 path kept until the versioned generate lands).
 - Schemas: DocumentValueRead parses rich_content, version schemas.
 
 Database: in-memory SQLite with PRAGMA foreign_keys=ON.
@@ -42,7 +41,6 @@ from app.crud.generated_file_crud import (  # noqa: E402
     create_generated_file,
     get_generated_files_for_documents,
     latest_generated_file,
-    upsert_generated_file,
 )
 from app.db.base import Base  # noqa: E402
 from app.models.document import Document  # noqa: E402
@@ -421,28 +419,6 @@ def test_creator_delete_sets_version_created_by_null(db, document):
     db.commit()
     db.expire_all()
     assert db.get(DocumentVersion, version.id).created_by is None
-
-
-# ── V1.6 upsert path (until the versioned generate lands) ─────────
-
-
-def test_upsert_generated_file_creates_then_overwrites_version_one(db, document):
-    _save(db, document, {"field_name": "title", "value": "first"})
-    record, superseded = upsert_generated_file(db, document.id, docx_path="u1.docx",
-                                               generated_at=datetime(2026, 10, 18), template_version=2)
-    db.commit()
-    assert superseded == []
-    assert (record.version.version, record.version.template_version) == (1, 2)
-    assert json.loads(record.version.values_snapshot)[0]["value"] == "first"
-
-    _save(db, document, {"field_name": "title", "value": "second"})
-    record2, superseded = upsert_generated_file(db, document.id, docx_path="u2.docx",
-                                                generated_at=datetime(2026, 10, 19), template_version=3)
-    db.commit()
-    assert record2.id == record.id and superseded == ["u1.docx"]
-    assert versions_crud.count_versions(db, document.id) == 1
-    assert json.loads(record2.version.values_snapshot)[0]["value"] == "second"
-    assert record2.version.template_version == 3
 
 
 # ── Schemas ───────────────────────────────────────────────────────

@@ -170,6 +170,13 @@ def get_version(db: Session, document_id: int, version: int) -> DocumentVersion 
     ).scalar_one_or_none()
 
 
+def latest_version_number(db: Session, document_id: int) -> int | None:
+    """The highest version number, None before the first generate."""
+    return db.execute(
+        select(func.max(DocumentVersion.version)).where(DocumentVersion.document_id == document_id)
+    ).scalar_one()
+
+
 def count_versions(db: Session, document_id: int) -> int:
     return db.execute(
         select(func.count()).select_from(DocumentVersion).where(DocumentVersion.document_id == document_id)

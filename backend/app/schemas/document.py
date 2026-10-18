@@ -44,8 +44,10 @@ class GeneratedInfo(BaseModel):
       a failed retry keeps the earlier PDF of the same DOCX)
     - pdf_url: GET /documents/{id}/download/pdf, null when has_pdf is false
     - is_stale: the draft's values were saved after this generation
+    - version (V1.7 P2): the version number of this output
     """
 
+    version: int | None = None
     generated_at: datetime
     pdf_status: PdfStatus
     pdf_error: str | None = None
@@ -60,10 +62,15 @@ class GeneratedInfo(BaseModel):
 
 
 class GenerateDocumentResponse(GeneratedInfo):
-    """Response for POST /documents/{id}/generate and /generate-pdf."""
+    """
+    Response for POST /documents/{id}/generate and /generate-pdf. Generate
+    creates a new version: `version` is its number, versions_count how many
+    versions the document has now.
+    """
 
     document_id: int
     document_status: str
+    versions_count: int = 0
 
 
 # --- Document Schemas ---
