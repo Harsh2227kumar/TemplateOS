@@ -62,17 +62,28 @@ export type AiActionPlan =
   | { kind: "cached"; source: string; text: string }
   | { kind: "fetch"; source: string };
 
+/**
+ * How the switcher measures a field text: is it blank, and how long is it
+ * for the AI limit. Plain kinds measure the text itself; rich fields (whose
+ * switcher text is the doc as JSON) pass a measure of the plain projection.
+ */
+export type AiTextMeasure = (text: string) => { empty: boolean; length: number };
+
+export const measurePlainText: AiTextMeasure = (text) => ({ empty: !text.trim(), length: text.length });
+
 /** Decides what clicking `style` should do. Pure: the caller performs it. */
 export function planAiAction(
   state: AiStyleState,
   style: AiStyle,
   fieldText: string,
   maxChars: number,
+  measure: AiTextMeasure = measurePlainText,
 ): AiActionPlan {
   if (state.pending) return { kind: "busy" };
   const source = sourceTextFor(state, fieldText);
-  if (!source.trim()) return { kind: "empty" };
-  if (source.length > maxChars) return { kind: "tooLong", length: source.length };
+  const size = measure(source);
+  if (size.empty) return { kind: "empty" };
+  if (size.length > maxChars) return { kind: "tooLong", length: size.length };
   // Clicking the style that is already applied asks for a fresh variation.
   const isActive = state.applied?.style === style && fieldText === state.applied.text;
   const cached = state.cacheFor === source ? state.cache[style] : undefined;
@@ -152,13 +163,17 @@ export function normalizeAiResult(text: string, multiline: boolean): string {
 
 // ── Which fields AI applies to, and list fields as text ──────────────────
 
-/** How AI treats a field type: one line, paragraphs, or one item per line. */
-export type AiFieldKind = "text" | "multiline" | "list";
+/**
+ * How AI treats a field type: one line, plain paragraphs, one item per line,
+ * or rich text (V1.7 P2 textarea fields: rewritten paragraph by paragraph,
+ * the switcher text is the doc as JSON).
+ */
+export type AiFieldKind = "text" | "multiline" | "list" | "rich";
 
 /** The AI kind for a field type, or null when AI does not apply to it. */
 export function aiFieldKind(fieldType: string): AiFieldKind | null {
   if (fieldType === "text") return "text";
-  if (fieldType === "textarea") return "multiline";
+  if (fieldType === "textarea") return "rich";
   if (fieldType === "list") return "list";
   return null;
 }
@@ -183,15 +198,23 @@ export function aiTextToList(text: string): string[] {
     .filter((item) => item.length > 0);
 }
 
+/** A rich form value ({ format: "rich", doc }) as switcher text: its doc as JSON. */
+export function richToAiText(value: unknown): string {
+  const doc = value !== null && typeof value === "object" ? (value as { doc?: unknown }).doc : undefined;
+  return doc ? JSON.stringify(doc) : "";
+}
+
 /** The value of any AI field as switcher text. */
 export function aiTextOf(kind: AiFieldKind, value: unknown): string {
   if (kind === "list") return listToAiText(value);
+  if (kind === "rich") return richToAiText(value);
   return typeof value === "string" ? value : value == null ? "" : String(value);
 }
 
-/** Cleans an AI result for a field kind (lists: one trimmed item per line). */
+/** Cleans an AI result for a field kind (lists: one trimmed item per line; rich: as built). */
 export function normalizeAiResultFor(kind: AiFieldKind, text: string): string {
   if (kind === "list") return aiTextToList(text).join("\n");
+  if (kind === "rich") return text;
   return normalizeAiResult(text, kind === "multiline");
 }
 
@@ -229,6 +252,7 @@ export function planRewriteAll(
   values: Record<string, unknown>,
   style: AiStyle,
   maxChars: number,
+  measureFor: (kind: AiFieldKind) => AiTextMeasure = () => measurePlainText,
 ): RewriteAllPlan {
   const plan: RewriteAllPlan = { targets: [], skipped: [] };
   for (const field of fields) {
@@ -236,11 +260,12 @@ export function planRewriteAll(
     if (!field.ai_enabled || kind === null) continue;
     const value = values[field.field_name];
     const text = aiTextOf(kind, value);
+    const size = measureFor(kind)(text);
     if (!styleAppliesTo(style, kind)) {
       plan.skipped.push({ fieldName: field.field_name, reason: "notApplicable" });
-    } else if (!text.trim()) {
+    } else if (size.empty) {
       plan.skipped.push({ fieldName: field.field_name, reason: "empty" });
-    } else if (text.length > maxChars) {
+    } else if (size.length > maxChars) {
       plan.skipped.push({ fieldName: field.field_name, reason: "tooLong" });
     } else {
       plan.targets.push({ fieldName: field.field_name, kind, value, text });
@@ -249,10 +274,13 @@ export function planRewriteAll(
   return plan;
 }
 
-/** True when two form values are the same (strings, or lists item by item). */
+/** True when two form values are the same (strings, lists item by item, rich docs by content). */
 export function sameFieldValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) || Array.isArray(b)) {
     return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => item === b[i]);
+  }
+  if ((a !== null && typeof a === "object") || (b !== null && typeof b === "object")) {
+    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   }
   return (a ?? "") === (b ?? "");
 }

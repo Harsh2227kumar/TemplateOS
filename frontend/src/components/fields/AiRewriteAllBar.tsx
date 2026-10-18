@@ -2,21 +2,27 @@ import { useEffect, useRef, useState } from "react";
 import { useFormContext } from "react-hook-form";
 import { Loader2, Sparkles, Undo2 } from "lucide-react";
 
+import { AI_FLAGS_KEY, readAiFlags, withAiFlag, withoutAiFlag } from "@/components/forms/ai-flags";
 import { toast } from "@/components/ui/toast";
 import { useImproveText } from "@/hooks/queries";
 import { ApiError, MAX_AI_TEXT_CHARS, type TemplateField } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
   aiFieldKind,
-  aiTextToList,
-  normalizeAiResultFor,
   planRewriteAll,
   sameFieldValue,
   type AiStyle,
   type RewriteAllTarget,
 } from "./ai-style-state";
 import { AI_STYLES } from "./AiActionToolbar";
-import { AI_STYLE_LABELS } from "./use-ai-style-switcher";
+import {
+  AI_STYLE_LABELS,
+  aiResultText,
+  aiSource,
+  aiTextToFormValue,
+  measureFor,
+  richBlocksProblem,
+} from "./use-ai-style-switcher";
 
 // Requests in flight at once: fast enough, gentle on the Bedrock quota.
 const CONCURRENCY = 3;
@@ -57,30 +63,37 @@ export function AiRewriteAllBar({ fields, templateId, documentId, disabled = fal
     fields.find((f) => f.field_name === fieldName)?.field_label?.trim() || fieldName;
 
   const rewrite = async (target: RewriteAllTarget, style: AiStyle, signal: AbortSignal): Promise<unknown> => {
+    if (target.kind === "rich") {
+      const problem = richBlocksProblem(target.text);
+      if (problem) throw new Error(problem);
+    }
     const response = await improveText({
       payload: {
         template_id: templateId,
         document_id: documentId ?? null,
         field_name: target.fieldName,
-        ...(target.kind === "list"
-          ? { original_items: aiTextToList(target.text) }
-          : { original_text: target.text }),
+        ...aiSource(target.kind, target.text),
         action_type: style,
       },
       signal,
     });
-    const raw =
-      target.kind === "list" && response?.improved_items
-        ? response.improved_items.join("\n")
-        : response?.improved_text ?? "";
-    const text = normalizeAiResultFor(target.kind, raw);
-    if (!text.trim()) throw new Error("The AI returned an empty result.");
-    return target.kind === "list" ? aiTextToList(text) : text;
+    const text = aiResultText(target.kind, target.text, response);
+    if (measureFor(target.kind)(text).empty) throw new Error("The AI returned an empty result.");
+    return aiTextToFormValue(target.kind, text);
+  };
+
+  /** Mark (or unmark) fields as AI-written after values changed. */
+  const updateFlags = (changes: { fieldName: string; value: unknown; action: AiStyle | null }[]) => {
+    let flags = readAiFlags(getValues());
+    for (const { fieldName, value, action } of changes) {
+      flags = action ? withAiFlag(flags, fieldName, action, value) : withoutAiFlag(flags, fieldName);
+    }
+    setValue(AI_FLAGS_KEY, flags, { shouldDirty: true });
   };
 
   const run = async (style: AiStyle) => {
     if (running || disabled) return;
-    const plan = planRewriteAll(fields, getValues(), style, MAX_AI_TEXT_CHARS);
+    const plan = planRewriteAll(fields, getValues(), style, MAX_AI_TEXT_CHARS, measureFor);
     if (plan.targets.length === 0) {
       toast({
         title: "Nothing to rewrite",
@@ -124,6 +137,7 @@ export function AiRewriteAllBar({ fields, templateId, documentId, disabled = fal
 
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, plan.targets.length) }, worker));
     if (controller.signal.aborted) return;
+    updateFlags(changes.map((change) => ({ fieldName: change.fieldName, value: change.after, action: style })));
     abortRef.current = null;
     setRunning(null);
     setLastRun(changes.length > 0 ? { style, changes } : null);
@@ -155,13 +169,16 @@ export function AiRewriteAllBar({ fields, templateId, documentId, disabled = fal
   const undo = () => {
     if (!lastRun || running) return;
     let restored = 0;
+    const undone: { fieldName: string; value: unknown; action: null }[] = [];
     for (const change of lastRun.changes) {
       // Only undo fields still showing the AI result.
       if (sameFieldValue(getValues(change.fieldName), change.after)) {
         setValue(change.fieldName, change.before, { shouldDirty: true, shouldValidate: true });
+        undone.push({ fieldName: change.fieldName, value: change.before, action: null });
         restored += 1;
       }
     }
+    if (undone.length) updateFlags(undone);
     setLastRun(null);
     toast({
       title: restored > 0 ? "AI changes undone" : "Nothing to undo",
@@ -218,7 +235,7 @@ export function AiRewriteAllBar({ fields, templateId, documentId, disabled = fal
           ? `Rewriting ${running.done} of ${running.total} fields as ${AI_STYLE_LABELS[running.style]}…`
           : lastRun
             ? `${AI_STYLE_LABELS[lastRun.style]} applied to ${lastRun.changes.length === 1 ? "1 field" : `${lastRun.changes.length} fields`}. Review, then save, or undo.`
-            : `Rewrites all ${aiFieldCount === 1 ? "AI-enabled field" : `${aiFieldCount} AI-enabled fields`} at once (lists item by item). The document keeps the template's formatting.`}
+            : `Rewrites all ${aiFieldCount === 1 ? "AI-enabled field" : `${aiFieldCount} AI-enabled fields`} at once (lists item by item, paragraphs one by one). The document keeps the template's formatting.`}
       </p>
     </div>
   );

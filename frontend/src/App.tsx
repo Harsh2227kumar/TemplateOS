@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute, PublicOnlyRoute } from "./components/protected-route";
 import { DashboardLayout } from "./layouts/dashboard-layout";
@@ -15,8 +16,14 @@ import { CreateDocumentPage } from "./pages/create-document-page";
 import { EditDocumentPage } from "./pages/edit-document-page";
 import { DocumentPreviewPage } from "./pages/document-preview-page";
 import { AdminRoute } from "./features/admin/AdminRoute";
+import { DraftLoadingSkeleton } from "./features/documents/DraftLoadStates";
 import { AdminUsersPage } from "./pages/admin-users-page";
 import { AdminOrganizationsPage } from "./pages/admin-organizations-page";
+
+// V1.7 P2: the version view loads on demand.
+const DocumentVersionPage = lazy(() =>
+  import("./pages/document-version-page").then((module) => ({ default: module.DocumentVersionPage })),
+);
 
 export function App() {
   return (
@@ -38,6 +45,14 @@ export function App() {
           <Route path="/documents/create/:id" element={<CreateDocumentPage />} />
           <Route path="/documents/:id/edit" element={<EditDocumentPage />} />
           <Route path="/documents/:id/preview" element={<DocumentPreviewPage />} />
+          <Route
+            path="/documents/:id/versions/:version"
+            element={
+              <Suspense fallback={<DraftLoadingSkeleton />}>
+                <DocumentVersionPage />
+              </Suspense>
+            }
+          />
           {/* super_admin / org_admin / department_admin only */}
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />

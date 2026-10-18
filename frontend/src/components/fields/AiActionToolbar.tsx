@@ -38,7 +38,7 @@ export function AiActionToolbar({ switcher, controlsId, disabled = false, kind =
   const [focusIndex, setFocusIndex] = useState(0);
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
-  const isEmpty = switcher.fieldText.trim().length === 0;
+  const isEmpty = switcher.isEmpty;
   const isTooLong = sourceLength > MAX_AI_TEXT_CHARS;
   const hasApplied = state.applied !== null;
   const appliedStyle = state.applied?.style ?? null;
@@ -100,6 +100,9 @@ export function AiActionToolbar({ switcher, controlsId, disabled = false, kind =
     status = isList ? "Add some items, then pick a style." : "Type some text, then pick a style.";
   } else if (isList) {
     status = "Pick a style to rewrite each item. The number of items stays the same, and you can go back to the original.";
+  } else if (kind === "rich") {
+    status =
+      "Pick a style to rewrite each paragraph and list item. Lists keep their shape (rewritten text loses its bold/links); Original brings everything back.";
   } else {
     status = "Pick a style to rewrite your text. You can always go back to the original.";
   }

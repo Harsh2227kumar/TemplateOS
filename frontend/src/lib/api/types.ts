@@ -383,13 +383,39 @@ export interface SuggestFieldsResponse {
 
 // --- V1.4 Phase 2: Document Drafts ---
 
+// V1.7 Phase 2: textarea values may be rich text (Tiptap JSON, whitelisted
+// by the backend: paragraphs, hard breaks, bullet / numbered lists; bold,
+// italic, underline, strike, highlight, http(s) / mailto links).
+export interface RichTextNode {
+  type: string;
+  text?: string;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+  attrs?: Record<string, unknown>;
+  content?: RichTextNode[];
+}
+
+export interface RichTextDoc extends RichTextNode {
+  type: "doc";
+  content: RichTextNode[];
+}
+
+export type ValueFormat = "plain" | "rich";
+
 export interface DocumentValue {
   id: number;
   document_id: number;
   field_name: string;
+  /** Plain text; for rich values the server-derived plain projection. */
   value: string;
   created_at: string;
   updated_at: string;
+  /** V1.7 P2 */
+  value_format: ValueFormat;
+  rich_content: RichTextDoc | null;
+  /** The saved value is an AI result the user did not edit afterwards. */
+  ai_modified: boolean;
+  ai_action: AiTextAction | null;
+  ai_modified_at: string | null;
 }
 
 export interface Document {
@@ -412,6 +438,8 @@ export interface Document {
 export type PdfStatus = "pending" | "converted" | "failed";
 
 export interface GeneratedInfo {
+  /** V1.7 P2: the version number of this (latest) output. */
+  version: number | null;
   generated_at: string;
   pdf_status: PdfStatus;
   /** User-readable reason of the last failed conversion. */
@@ -435,6 +463,8 @@ export interface GeneratedInfo {
 export interface GenerateDocumentResponse extends GeneratedInfo {
   document_id: number;
   document_status: string;
+  /** V1.7 P2: every generate creates a version; how many exist now. */
+  versions_count: number;
 }
 
 // --- V1.7 Phase 1: read-only document preview (GET /documents/{id}/preview) ---
@@ -477,6 +507,11 @@ export interface PreviewField {
   items: string[] | null;
   is_empty: boolean;
   missing_required: boolean;
+  /** V1.7 P2: rich textarea values carry their Tiptap JSON. */
+  value_format: ValueFormat;
+  rich_content: RichTextDoc | null;
+  ai_modified: boolean;
+  ai_action: AiTextAction | null;
 }
 
 export interface PreviewSection {
@@ -498,6 +533,9 @@ export interface PreviewGeneration {
   pdf_available: boolean;
   pdf_url: string | null;
   pdf_filename: string | null;
+  /** V1.7 P2: the latest version's number and how many versions exist. */
+  version: number | null;
+  versions_count: number;
 }
 
 export interface PreviewPermissions {
@@ -523,8 +561,19 @@ export interface DocumentCreate {
   name?: string;
 }
 
+/** One value in PUT /documents/{id}/values (plain-only items stay valid). */
+export interface DocumentValueSaveItem {
+  field_name: string;
+  /** Ignored by the server for rich values (derived from rich_content). */
+  value: string;
+  value_format?: ValueFormat;
+  rich_content?: RichTextDoc | null;
+  ai_modified?: boolean;
+  ai_action?: AiTextAction | null;
+}
+
 export interface DocumentValuesSave {
-  values: Array<{ field_name: string; value: string }>;
+  values: DocumentValueSaveItem[];
 }
 
 export interface DocumentValuesResponse {
@@ -532,13 +581,42 @@ export interface DocumentValuesResponse {
   values: DocumentValue[];
 }
 
+// --- V1.7 Phase 2: document versions (GET /documents/{id}/versions) ---
+
+export interface DocumentVersion {
+  version: number;
+  created_at: string;
+  /** "Deleted user" when the account is gone. */
+  created_by_name: string;
+  template_version: number | null;
+  pdf_status: PdfStatus | null;
+  pdf_error: string | null;
+  /** The file can be downloaded (false once pruned or missing). */
+  has_docx: boolean;
+  has_pdf: boolean;
+  /** Retention removed this version's files; its values stay viewable. */
+  files_pruned: boolean;
+  /** field_names changed since the previous version ([] for version 1). */
+  changed_fields: string[];
+  is_latest: boolean;
+  docx_url: string | null;
+  pdf_url: string | null;
+}
+
+export interface DocumentVersionDetail extends DocumentVersion {
+  document_id: number;
+  /** The version's values (from its snapshot), shaped like the preview. */
+  sections: PreviewSection[];
+}
+
 // --- V1.5 Phase 1: basic AI writing actions on a single field ---
 
 export type AiTextAction = "grammar" | "tone" | "concise" | "formal" | "expand";
 
 /**
- * Text and paragraph fields send original_text; list fields send
- * original_items (one entry per item, rewritten one by one).
+ * Text fields send original_text; list fields send original_items (one
+ * entry per item, rewritten one by one); rich paragraph (textarea) fields
+ * send their non-empty paragraphs and list items as original_items.
  */
 export interface ImproveTextRequest {
   template_id: number;
@@ -551,7 +629,7 @@ export interface ImproveTextRequest {
 
 export interface ImproveTextResponse {
   improved_text: string;
-  /** List fields only: the rewritten items, same count and order. */
+  /** When original_items were sent: the rewritten items, same count and order. */
   improved_items?: string[];
 }
 

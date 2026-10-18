@@ -1,3 +1,6 @@
+import { AiBadge } from "@/components/fields/AiBadge";
+import { RichTextViewer } from "@/features/rich-text/RichTextViewer";
+import type { RichDoc } from "@/features/rich-text/rich-model";
 import type { PreviewField } from "@/lib/api";
 
 import { fieldDisplay } from "./preview-model";
@@ -8,7 +11,9 @@ interface PreviewFieldRowProps {
 
 /**
  * One read-only label / value pair (render inside a <dl>). The value is the
- * backend's display_value / items as-is; add new kinds to the switch (P2: rich text).
+ * backend's display_value / items as-is; rich text renders read-only with
+ * its formatting (lazy viewer, plain text until it loads). An "AI" badge
+ * marks values written with AI.
  */
 export function PreviewFieldRow({ field }: PreviewFieldRowProps) {
   const display = fieldDisplay(field);
@@ -24,6 +29,7 @@ export function PreviewFieldRow({ field }: PreviewFieldRowProps) {
             <span className="sr-only"> (required)</span>
           </>
         )}
+        {field.ai_modified && !field.is_empty && <AiBadge action={field.ai_action} />}
       </dt>
       <dd className="mt-1 min-w-0 break-words text-sm text-slate-900 sm:mt-0">
         {(() => {
@@ -38,6 +44,8 @@ export function PreviewFieldRow({ field }: PreviewFieldRowProps) {
                   ))}
                 </ol>
               );
+            case "rich":
+              return <RichTextViewer doc={display.doc as RichDoc} fallbackText={display.text ?? ""} label={label} />;
             case "multiline":
               return <p className="whitespace-pre-wrap break-words">{display.text}</p>;
             case "text":
