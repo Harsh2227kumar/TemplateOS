@@ -52,7 +52,9 @@ def improve_text(
     - 403 if the user cannot view the template or does not own the document
     - 422 if the field is not an AI-enabled text/textarea/list field, the
       value is sent in the wrong shape (original_items for a list field,
-      original_text otherwise), or the document belongs to another template
+      original_text for a text field; a textarea field accepts either:
+      items are the blocks of a rich text value), or the document belongs
+      to another template
     - 503 if AI is not configured or Bedrock fails (logged as status="error")
     """
     template = get_template_by_id(db, payload.template_id)
@@ -100,15 +102,19 @@ def improve_text(
             detail="AI actions are not enabled for this field",
         )
 
-    is_list = field.field_type == "list"
-    if is_list != (payload.original_items is not None):
+    # list: always items; text: always text; textarea: text, or items (V1.7
+    # P2: the blocks of a rich text value, rewritten one by one so its
+    # paragraphs and list items keep their structure).
+    is_list = payload.original_items is not None
+    if field.field_type == "list" and not is_list:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=(
-                "Send original_items (one entry per item) for a list field"
-                if is_list
-                else "Send original_text for a text or paragraph field"
-            ),
+            detail="Send original_items (one entry per item) for a list field",
+        )
+    if field.field_type == "text" and is_list:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Send original_text for a text field",
         )
 
     model = ai_service.model_for_action(payload.action_type)

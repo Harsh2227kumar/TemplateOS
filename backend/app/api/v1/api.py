@@ -4,6 +4,7 @@ from app.api.v1.endpoints import (
     admin,
     ai,
     auth,
+    document_versions,
     documents,
     system,
     template_ai,
@@ -28,5 +29,8 @@ for template_router in (
 ):
     api_router.include_router(template_router, prefix="/templates", tags=["templates"])
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+api_router.include_router(
+    document_versions.router, prefix="/documents", tags=["document versions"]
+)
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

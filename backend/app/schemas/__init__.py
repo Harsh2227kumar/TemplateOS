@@ -23,6 +23,7 @@ from app.schemas.document_preview import (
     PreviewSection,
     PreviewTemplate,
 )
+from app.schemas.document_version import DocumentVersionDetail, DocumentVersionRead
 
 __all__ = [
     "LoginRequest",
@@ -48,4 +49,6 @@ __all__ = [
     "PreviewPermissions",
     "PreviewSection",
     "PreviewTemplate",
+    "DocumentVersionRead",
+    "DocumentVersionDetail",
 ]

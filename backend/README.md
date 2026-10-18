@@ -30,13 +30,6 @@ administrator account, run this from `backend/` after migrating:
 python scripts/seed_user.py --email admin@example.com --password "change-this-password" --full-name "TemplateOS Admin" --role super_admin
 ```
 
-
-Install development dependencies and run the isolated auth tests with:
-
-```bash
-pip install -r requirements-dev.txt
-pytest -q
-```
 Set a long, random `JWT_SECRET_KEY` in the repository root `.env` outside local
 throwaway development.
 
@@ -60,10 +53,10 @@ development only and must not be seeded in production.
 
 ### Persisted profile contract
 
-Member 2 can expose these User attributes directly through the protected profile
-schema: id, email, full_name, and role remain required; department,
-organization, job_title, phone, avatar_url, signature_path, and preferences are
-nullable. Demo preferences use the keys default_document_format (set to docx)
+The protected profile schema exposes these User attributes: `id`, `email`,
+`full_name` and `role` are always set; `department`, `organization`,
+`job_title`, `phone`, `avatar_url`, `signature_path` and `preferences` may be
+null. Demo preferences use the keys default_document_format (set to docx)
 and email_notifications (set to false).
 
 `GET /auth/me` also returns `organization_id` / `department_id`; `organization`
@@ -95,6 +88,41 @@ in `app/services/template_access.py` compares ids.
 - `/api/v1/admin/organizations` and `/api/v1/admin/departments` manage the
   directory (writes: super_admin; departments also org_admin in their own
   organization).
+
+## AI (AWS Bedrock)
+
+AI is optional. With `AWS_REGION` unset the AI endpoints return 503 and the
+rest of the app works normally. Only the backend talks to Bedrock; never put
+AWS credentials in the frontend.
+
+- `POST /api/v1/templates/{id}/suggest-fields`: field suggestions while
+  setting up a template (Claude via `BEDROCK_MODEL_SUGGESTIONS`).
+- `POST /api/v1/ai/improve-text`: rewrites one AI-enabled field in a style
+  (`grammar` with Nova Micro; `tone`, `concise`, `formal`, `expand` with Nova
+  Lite). List fields send `original_items` and are rewritten item by item.
+
+Settings (repository-root `.env`, restart the backend after a change):
+
+| Setting | Meaning |
+|---|---|
+| `AWS_REGION` | e.g. `ap-south-1`. Unset = AI off |
+| `AWS_BEARER_TOKEN_BEDROCK` | Bedrock API key (preferred), or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` |
+| `BEDROCK_MODEL_SUGGESTIONS` | Inference-profile id for field suggestions |
+| `BEDROCK_MODEL_NOVA_MICRO`, `BEDROCK_MODEL_NOVA_LITE` | Inference-profile ids for the text styles, e.g. `apac.amazon.nova-micro-v1:0` |
+| `AI_MAX_OUTPUT_TOKENS` | Reply length cap (default `1024`) |
+
+Check the setup from `backend/` with `python scripts/verify_bedrock.py`
+(`--live` also makes one tiny real call per model).
+
+Troubleshooting:
+
+- `AccessDeniedException ... Authentication failed: Please make sure your API
+  Key is valid` (503 in the app): the Bedrock API key is wrong or expired.
+  Short-term keys last at most 12 hours. Create a long-term key in the
+  Bedrock console for the same region as `AWS_REGION`, paste it on one line
+  without quotes, and restart the backend.
+- `You don't have access to the model`: enable the model under Bedrock
+  -> Model access in that region.
 
 ## PDF conversion (Gotenberg)
 
@@ -152,3 +180,32 @@ Troubleshooting:
   (known V1 limitation).
 - Tests never call a real Gotenberg (it is mocked with `httpx.MockTransport`).
   The one live test runs only with `GOTENBERG_LIVE_URL=http://localhost:3000`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+
+Run from `backend/`. The tests use in-memory or temporary SQLite and mock
+Bedrock and Gotenberg, so no real database, AWS account or Docker is needed.
+Settings still load at import time, so `DATABASE_URL` and `JWT_SECRET_KEY`
+must be set (your `.env` is enough); CI runs the same command with
+`DATABASE_URL=sqlite://` on every pull request.
+
+## Helper scripts
+
+Run from `backend/` after `alembic upgrade head`:
+
+| Script | Purpose |
+|---|---|
+| `scripts/seed_user.py` | Create one user with a chosen role |
+| `scripts/seed_demo_users.py` | Seed the seven `SIT_*` demo users from `.env` |
+| `scripts/seed_demo_template.py` | Demo template with every field type and validation rules |
+| `scripts/seed_templates.py` | A few sample templates |
+| `scripts/seed_preview_demo.py` | Template and draft covering every preview state |
+| `scripts/test_db_connection.py` | Check that `DATABASE_URL` connects |
+| `scripts/verify_template_fields.py` | Check stored template fields for bad types and order gaps |
+| `scripts/verify_bedrock.py` | Check the AI settings (`--live` for real calls) |
+| `scripts/verify_gotenberg.py` | Check Gotenberg (`--live` converts a test DOCX) |

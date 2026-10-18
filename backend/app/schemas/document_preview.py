@@ -13,10 +13,11 @@ Never put storage paths here: only basenames (pdf_filename) and API URLs.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from app.schemas.document import PdfStatus
+from app.schemas.document import AiAction, PdfStatus, ValueFormat
 
 
 class PreviewDocument(BaseModel):
@@ -55,6 +56,9 @@ class PreviewField(BaseModel):
     - items: list fields only, blank items dropped; None for other types
     - is_empty: same rule as the save validator
     - missing_required: is_required and is_empty
+    - value_format / rich_content (V1.7 P2): "rich" textarea values carry the
+      Tiptap JSON; value and display_value are its plain-text projection
+    - ai_modified / ai_action: the saved value was written by AI
     """
 
     field_name: str
@@ -68,6 +72,10 @@ class PreviewField(BaseModel):
     items: list[str] | None
     is_empty: bool
     missing_required: bool
+    value_format: ValueFormat = "plain"
+    rich_content: dict[str, Any] | None = None
+    ai_modified: bool = False
+    ai_action: AiAction | None = None
 
 
 class PreviewSection(BaseModel):
@@ -88,6 +96,9 @@ class PreviewGeneration(BaseModel):
     pdf_available: bool
     pdf_url: str | None
     pdf_filename: str | None
+    # V1.7 P2: the latest version's number and how many versions exist.
+    version: int | None = None
+    versions_count: int = 0
 
 
 class PreviewPermissions(BaseModel):

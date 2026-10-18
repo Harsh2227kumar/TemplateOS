@@ -38,6 +38,7 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
 
+from app.crud.generated_file_crud import latest_generated_file
 from app.core.config import settings
 from app.crud.template_field_crud import create_field
 from app.db.base import Base
@@ -271,10 +272,9 @@ def _fields_by_name(body: dict) -> dict[str, dict]:
 
 
 def _record(document_id: int) -> GeneratedFile | None:
+    """The latest version's row (V1.7 P2: one row per version)."""
     with TestSession() as session:
-        return session.execute(
-            select(GeneratedFile).where(GeneratedFile.document_id == document_id)
-        ).scalar_one_or_none()
+        return latest_generated_file(session, document_id)
 
 
 @pytest.fixture()

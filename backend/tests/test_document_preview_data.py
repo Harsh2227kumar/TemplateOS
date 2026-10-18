@@ -39,6 +39,7 @@ from app.crud.document_crud import get_document_for_preview  # noqa: E402
 from app.db.base import Base  # noqa: E402
 from app.models.document import Document  # noqa: E402
 from app.models.document_value import DocumentValue  # noqa: E402
+from app.models.document_version import DocumentVersion  # noqa: E402
 from app.models.generated_file import GeneratedFile  # noqa: E402
 from app.models.organization import Department, Organization  # noqa: E402
 from app.models.template import Template  # noqa: E402
@@ -169,9 +170,13 @@ def _make_document(db: Session, *, with_generated: bool, with_scope: bool) -> in
         ]
     )
     if with_generated:
+        version = DocumentVersion(document_id=document.id, version=1, values_snapshot="[]")
+        db.add(version)
+        db.flush()
         db.add(
             GeneratedFile(
                 document_id=document.id,
+                version_id=version.id,
                 docx_path="generated/docx/draft-1.docx",
                 pdf_path="generated/pdf/draft-1.pdf",
                 pdf_status="converted",

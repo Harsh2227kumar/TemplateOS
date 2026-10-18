@@ -706,17 +706,48 @@ def test_improve_text_requires_auth(world):
         ({"field_name": "missing_field"}, 404),
         ({"field_name": "notes"}, 422),  # ai_enabled = False
         ({"field_name": "items"}, 422),  # list field sent as original_text
-        ({"original_text": None, "original_items": ["a"]}, 422),  # text field sent as items
+        # text field sent as items
+        ({"field_name": "title", "original_text": None, "original_items": ["a"]}, 422),
+        ({"original_text": None, "original_items": ["a"], "field_name": "notes"}, 422),  # AI off
+        ({"original_text": None, "original_items": ["  ", ""]}, 422),  # no non-blank block
         ({"action_type": "rewrite"}, 422),
         ({"original_text": "   "}, 422),
     ],
 )
 def test_improve_text_rejects_bad_requests_without_calling_ai(world, monkeypatch, overrides, code):
     calls = _mock_improve(monkeypatch)
+    monkeypatch.setattr(
+        ai_service, "improve_items", lambda *args: calls.append(args) or ["x"]
+    )
     response = api_client.post(URL, json=_body(world, **overrides), headers=_auth(world.owner))
     assert response.status_code == code, response.text
     assert calls == []
     assert _audit_rows() == []
+
+
+def test_improve_text_rich_textarea_rewrites_blocks(world, monkeypatch):
+    """V1.7 P2: a rich paragraph field sends its blocks as original_items."""
+    calls = []
+
+    def fake_items(action_type, items):
+        calls.append((action_type, items))
+        return ["First paragraph.", "A bullet."]
+
+    monkeypatch.setattr(ai_service, "improve_items", fake_items)
+    _mock_improve(monkeypatch, AssertionError("text path must not run"))
+    response = api_client.post(
+        URL,
+        json=_body(world, original_text=None, original_items=["first para", "a bullet"], action_type="formal"),
+        headers=_auth(world.owner),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["improved_items"] == ["First paragraph.", "A bullet."]
+    assert calls == [("formal", ["first para", "a bullet"])]
+    assert _audit_rows()[0].field_key == "summary"
+
+    # The textarea field still accepts original_text (plain paragraphs).
+    _mock_improve(monkeypatch)
+    assert api_client.post(URL, json=_body(world), headers=_auth(world.owner)).status_code == 200
 
 
 def test_improve_text_document_from_other_template_is_422(world, monkeypatch):
