@@ -1,21 +1,21 @@
 import {
   forwardRef,
-  useLayoutEffect,
   useMemo,
-  useRef,
   type ComponentProps,
-  type ForwardedRef,
   type KeyboardEvent,
 } from "react";
-import { Controller, useFormContext, type FieldError, type FieldErrors } from "react-hook-form";
+import { Controller, useFormContext, useWatch, type FieldError, type FieldErrors } from "react-hook-form";
 import { format, parseISO } from "date-fns";
 import { AlertCircle } from "lucide-react";
 
 import { AiActionToolbar } from "@/components/fields/AiActionToolbar";
+import { AiBadge } from "@/components/fields/AiBadge";
 import { useAiStyleSwitcher } from "@/components/fields/use-ai-style-switcher";
+import { AI_FLAGS_KEY, aiFlagFor, readAiFlags } from "@/components/forms/ai-flags";
+import { formValueText } from "@/components/forms/form-values";
+import { RichTextField } from "@/features/rich-text/RichTextField";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   describeValidationRule,
@@ -54,8 +54,6 @@ interface DynamicFieldProps {
   disabled?: boolean;
 }
 
-const TEXTAREA_MAX_AUTO_HEIGHT = 480;
-
 /** First error message for a field, whatever shape RHF stored it in. */
 export function getFieldErrorMessage(errors: FieldErrors, name: string): string | null {
   const error = errors[name] as (FieldError & { root?: FieldError }) | FieldError[] | undefined;
@@ -91,6 +89,7 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
   const { formState: { errors } } = useFormContext();
   const name = field.field_name;
   const inputId = `field-${name}`;
+  const labelId = `${inputId}-label`;
   const hintId = `${inputId}-hint`;
   const metaId = `${inputId}-meta`;
   const errorId = `${inputId}-error`;
@@ -111,6 +110,8 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
     field,
     rule,
     inputId,
+    labelId,
+    label,
     metaId,
     describedBy,
     invalid,
@@ -120,7 +121,7 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
 
   return (
     <div data-field-name={name} className="min-w-0 space-y-1.5">
-      <Label htmlFor={inputId} className="block text-sm font-medium leading-snug text-slate-800">
+      <Label id={labelId} htmlFor={inputId} className="block text-sm font-medium leading-snug text-slate-800">
         {label}
         {field.is_required && (
           <>
@@ -128,6 +129,7 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
             <span className="sr-only"> (required)</span>
           </>
         )}
+        <FieldAiBadge name={name} />
       </Label>
       {field.description && (
         <p id={hintId} className="text-xs leading-snug text-slate-500">
@@ -181,10 +183,21 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
   );
 }
 
+/** "AI" badge while the field's current value is the one AI wrote. */
+function FieldAiBadge({ name }: { name: string }) {
+  const { control } = useFormContext();
+  const value = useWatch({ control, name });
+  const flags = useWatch({ control, name: AI_FLAGS_KEY });
+  const { ai_modified, ai_action } = aiFlagFor(readAiFlags({ [AI_FLAGS_KEY]: flags }), name, value);
+  return ai_modified ? <AiBadge action={ai_action} saved={false} /> : null;
+}
+
 interface FieldControlProps {
   field: DynamicFieldDefinition;
   rule: ValidationRule;
   inputId: string;
+  labelId: string;
+  label: string;
   metaId: string;
   describedBy: string;
   invalid: boolean;
@@ -198,7 +211,7 @@ function AiFieldControl({
   label,
   ...props
 }: FieldControlProps & { aiContext: AiFieldContext; label: string }) {
-  const kind = props.field.field_type === "textarea" ? "multiline" : "text";
+  const kind = aiFieldKind(props.field.field_type) ?? "text";
   const switcher = useAiStyleSwitcher({
     fieldName: props.field.field_name,
     fieldLabel: label,
@@ -208,7 +221,7 @@ function AiFieldControl({
   });
   return (
     <>
-      <FieldControl {...props} locked={switcher.isPending} />
+      <FieldControl {...props} label={label} locked={switcher.isPending} />
       <AiActionToolbar switcher={switcher} controlsId={props.inputId} disabled={props.disabled} kind={kind} />
     </>
   );
@@ -234,7 +247,18 @@ function AiListControl({
   );
 }
 
-function FieldControl({ field, rule, inputId, metaId, describedBy, invalid, disabled, locked }: FieldControlProps) {
+function FieldControl({
+  field,
+  rule,
+  inputId,
+  labelId,
+  label,
+  metaId,
+  describedBy,
+  invalid,
+  disabled,
+  locked,
+}: FieldControlProps) {
   const { control } = useFormContext();
   const type = field.field_type;
 
@@ -243,7 +267,7 @@ function FieldControl({ field, rule, inputId, metaId, describedBy, invalid, disa
       name={field.field_name}
       control={control}
       render={({ field: controller }) => {
-        const text = typeof controller.value === "string" ? controller.value : controller.value == null ? "" : String(controller.value);
+        const text = formValueText(controller.value);
         const common = {
           id: inputId,
           name: controller.name,
@@ -264,14 +288,22 @@ function FieldControl({ field, rule, inputId, metaId, describedBy, invalid, disa
         let input: JSX.Element;
         switch (type) {
           case "textarea":
+            // V1.7 P2: long text is rich text (Tiptap, lazy loaded).
             input = (
-              <AutoGrowTextarea
-                {...common}
+              <RichTextField
                 ref={controller.ref}
-                value={text}
-                onChange={(e) => controller.onChange(e.target.value)}
+                value={controller.value}
+                onChange={controller.onChange}
+                onBlur={controller.onBlur}
+                inputId={inputId}
+                labelId={labelId}
+                describedBy={describedBy || undefined}
+                invalid={invalid}
+                disabled={disabled}
+                locked={locked}
+                required={field.is_required}
                 placeholder={placeholder}
-                className={stateClass}
+                label={label}
               />
             );
             break;
@@ -438,42 +470,6 @@ function FieldMeta({
     </div>
   );
 }
-
-function assignRef<T>(ref: ForwardedRef<T>, el: T | null) {
-  if (typeof ref === "function") ref(el);
-  else if (ref) ref.current = el;
-}
-
-/** Textarea that grows with its content up to a max height, then scrolls. */
-const AutoGrowTextarea = forwardRef<HTMLTextAreaElement, ComponentProps<typeof Textarea>>(
-  ({ className, value, ...props }, ref) => {
-    const innerRef = useRef<HTMLTextAreaElement | null>(null);
-
-    useLayoutEffect(() => {
-      const el = innerRef.current;
-      if (!el) return;
-      el.style.height = "auto";
-      // +2 for the 1px top/bottom border (border-box sizing).
-      const target = el.scrollHeight + 2;
-      el.style.height = `${Math.min(target, TEXTAREA_MAX_AUTO_HEIGHT)}px`;
-      el.style.overflowY = target > TEXTAREA_MAX_AUTO_HEIGHT ? "auto" : "hidden";
-    }, [value]);
-
-    return (
-      <Textarea
-        {...props}
-        ref={(el) => {
-          innerRef.current = el;
-          assignRef(ref, el);
-        }}
-        value={value}
-        rows={3}
-        className={cn("min-h-[88px] resize-y leading-relaxed", className)}
-      />
-    );
-  },
-);
-AutoGrowTextarea.displayName = "AutoGrowTextarea";
 
 type NumberInputProps = Omit<ComponentProps<typeof Input>, "onChange" | "value" | "type"> & {
   value: string;

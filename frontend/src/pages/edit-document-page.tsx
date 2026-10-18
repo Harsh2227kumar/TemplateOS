@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle, CheckCircle2, ChevronLeft, Eye, Loader2, RotateCcw, Save } from "lucide-react";
+import { CheckCircle, CheckCircle2, ChevronLeft, Eye, History, Loader2, RotateCcw, Save } from "lucide-react";
 
 import { buildInitialValues, normalizeSavedFormValues, serializeValues } from "@/components/forms/form-values";
 import { useSaveShortcut, useUnsavedChangesWarning } from "@/components/forms/use-form-guards";
@@ -11,8 +11,10 @@ import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { latestTimestamp } from "@/features/documents/draft-timestamps";
 import { GenerationPanel } from "@/features/documents/GenerationPanel";
+import { LazyVersionHistoryPanel } from "@/features/document-versions/LazyVersionHistoryPanel";
 import {
   generateSuccessMessage,
+  versionCreatedText,
   markPdfFailed,
   PDF_FILE_MISSING_MESSAGE,
   RETRY_DOCX_MISSING_MESSAGE,
@@ -31,9 +33,12 @@ import {
   useTemplateFields,
 } from "@/hooks/queries";
 import { useSeedOnce } from "@/hooks/use-seed-once";
-import { ApiError, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
+import { ApiError, type Document, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
+
+// Same rule as the backend (document_permissions.EDITABLE_STATUSES).
+const EDITABLE_STATUSES = ["draft", "generated"];
 
 export function EditDocumentPage() {
   const navigate = useNavigate();
@@ -155,7 +160,9 @@ export function EditDocumentPage() {
       setLatestGenerated(result);
       // A PDF failure is not a generation failure: the panel shows it in amber.
       // Shown inline above the panel with an "Open preview" link.
-      setGenerateSuccess(generateSuccessMessage(result.pdf_status));
+      const created = versionCreatedText(result);
+      setGenerateSuccess(created ? `${created}. ${generateSuccessMessage(result.pdf_status)}` : generateSuccessMessage(result.pdf_status));
+      if (created) toast({ title: created, duration: 2500 });
     } catch (err) {
       // 422 with field errors maps onto the inputs like a failed save.
       setGenerateError(
@@ -225,6 +232,17 @@ export function EditDocumentPage() {
     } finally {
       setDownloading(null);
     }
+  };
+
+  /** A version was restored: its values become the form and the new baseline. */
+  const handleRestored = (restored: Document) => {
+    const initial = buildInitialValues(fields, restored.values ?? []);
+    lastSavedValuesRef.current = structuredClone(initial);
+    form.reset(initial);
+    setSaveError(null);
+    setGenerateSuccess(null);
+    setLatestGenerated(null);
+    setLastSavedAt(restored.updated_at);
   };
 
   const handleReset = () => {
@@ -311,6 +329,27 @@ export function EditDocumentPage() {
             onRetryPdf={() => void handleRetryPdf()}
             onDownload={(format) => void handleDownload(format)}
           />
+          {(latestGenerated ?? document.generated) && (
+            <details className="group rounded-lg border border-slate-200 bg-white">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <History className="h-4 w-4 text-slate-500" aria-hidden="true" />
+                Version history
+                <span className="ml-auto text-xs font-normal text-slate-500 group-open:hidden">Show</span>
+                <span className="ml-auto hidden text-xs font-normal text-slate-500 group-open:inline">Hide</span>
+              </summary>
+              <div className="border-t border-slate-100 px-4 py-3">
+                <LazyVersionHistoryPanel
+                  variant="plain"
+                  documentId={document.id}
+                  documentName={document.name}
+                  labelOf={(name) => fields.find((f) => f.field_name === name)?.field_label?.trim() || name}
+                  canRestore={EDITABLE_STATUSES.includes(document.status)}
+                  restoreDisabled={saving || generateDocument.isPending}
+                  onRestored={handleRestored}
+                />
+              </div>
+            </details>
+          )}
         </>
       }
       title="Edit draft"

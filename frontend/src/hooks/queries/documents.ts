@@ -7,6 +7,8 @@ import {
   type DocumentCreate,
   type DocumentPreview,
   type DocumentValuesSave,
+  type DocumentVersion,
+  type DocumentVersionDetail,
   type GenerateDocumentResponse,
 } from "@/lib/api";
 import { serverTime } from "@/lib/dates";
@@ -123,6 +125,59 @@ export function useDownloadGenerated() {
       const filename =
         filenameFromContentDisposition(file.contentDisposition) ??
         fallbackDownloadFilename(name, documentId, format);
+      saveBlob(file.blob, filename);
+      return filename;
+    },
+  });
+}
+
+// ── V1.7 Phase 2: document versions ──────────────────────────────
+
+/** Every generated version, newest first (refreshed by generate / restore). */
+export function useDocumentVersions(id: number, options: { enabled?: boolean } = {}) {
+  return useQuery<DocumentVersion[], ApiError>({
+    queryKey: documentKeys.versions(id),
+    queryFn: () => documentsApi.listVersions(id),
+    enabled: isValidId(id) && (options.enabled ?? true),
+  });
+}
+
+/** One version with its values. */
+export function useDocumentVersion(id: number, version: number) {
+  return useQuery<DocumentVersionDetail, ApiError>({
+    queryKey: documentKeys.version(id, version),
+    queryFn: () => documentsApi.getVersion(id, version),
+    enabled: isValidId(id) && Number.isInteger(version) && version > 0,
+  });
+}
+
+/** POST /versions/{n}/restore: the draft's values become the version's. */
+export function useRestoreVersion() {
+  const queryClient = useQueryClient();
+  return useMutation<Document, ApiError, { documentId: number; version: number }>({
+    mutationFn: ({ documentId, version }) => documentsApi.restoreVersion(documentId, version),
+    onSuccess: (document, { documentId }) => {
+      queryClient.setQueryData(documentKeys.detail(documentId), document);
+    },
+    onSettled: (_data, _error, { documentId }) => {
+      void queryClient.invalidateQueries({ queryKey: documentKeys.detail(documentId) });
+      void queryClient.invalidateQueries({ queryKey: documentKeys.lists() });
+    },
+  });
+}
+
+export interface VersionDownloadRequest extends DownloadRequest {
+  version: number;
+}
+
+/** Fetch one version's file with the session cookies and save it. */
+export function useDownloadVersion() {
+  return useMutation<string, ApiError, VersionDownloadRequest>({
+    mutationFn: async ({ documentId, version, format, name }) => {
+      const file = await documentsApi.downloadVersion(documentId, version, format);
+      const plainName = fallbackDownloadFilename(name, documentId, format);
+      const fallback = `${plainName.slice(0, -(format.length + 1))} v${version}.${format}`;
+      const filename = filenameFromContentDisposition(file.contentDisposition) ?? fallback;
       saveBlob(file.blob, filename);
       return filename;
     },

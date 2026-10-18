@@ -12,11 +12,24 @@ import {
   planRewriteAll,
   sameFieldValue,
   styleAppliesTo,
+  type AiFieldKind,
 } from "../src/components/fields/ai-style-state.ts";
+import { docToPlain, plainToDoc, richValue } from "../src/features/rich-text/rich-model.ts";
+
+// Rich (textarea) fields measure the plain text of the doc, as the hook does.
+const measureFor = (kind: AiFieldKind) =>
+  kind === "rich"
+    ? (text: string) => {
+        const plain = text ? docToPlain(JSON.parse(text)) : "";
+        return { empty: !plain.trim(), length: plain.length };
+      }
+    : (text: string) => ({ empty: !text.trim(), length: text.length });
+const rich = (text: string) => richValue(plainToDoc(text));
+const richText = (text: string) => JSON.stringify(plainToDoc(text));
 
 test("AI applies to text, paragraph and list fields only", () => {
   assert.equal(aiFieldKind("text"), "text");
-  assert.equal(aiFieldKind("textarea"), "multiline");
+  assert.equal(aiFieldKind("textarea"), "rich");
   assert.equal(aiFieldKind("list"), "list");
   for (const type of ["date", "time", "number", "email", "signature"]) {
     assert.equal(aiFieldKind(type), null, type);
@@ -56,23 +69,23 @@ const fields = [
 ];
 const values = {
   title: "meeting on budjet",
-  notes: "we discuss things",
+  notes: rich("we discuss things"),
   agenda: ["venue", "", "food"],
   venue: "Room 1",
   date: "2026-10-14",
-  summary: "   ",
-  long: "x".repeat(11),
+  summary: rich("   "),
+  long: rich("x".repeat(11)),
 };
 
 test("rewrite-all targets filled AI fields and skips the rest", () => {
-  const plan = planRewriteAll(fields, values, "formal", 5000);
+  const plan = planRewriteAll(fields, values, "formal", 5000, measureFor);
   assert.deepEqual(
     plan.targets.map((t) => [t.fieldName, t.kind, t.text]),
     [
       ["title", "text", "meeting on budjet"],
-      ["notes", "multiline", "we discuss things"],
+      ["notes", "rich", richText("we discuss things")],
       ["agenda", "list", "venue\n\nfood"],
-      ["long", "multiline", "x".repeat(11)],
+      ["long", "rich", richText("x".repeat(11))],
     ],
   );
   // venue is not AI-enabled and date is not a text type: neither is listed.
@@ -81,7 +94,7 @@ test("rewrite-all targets filled AI fields and skips the rest", () => {
 });
 
 test("rewrite-all reports over-long values and skips one-line fields for Expand", () => {
-  const plan = planRewriteAll(fields, values, "expand", 12);
+  const plan = planRewriteAll(fields, values, "expand", 12, measureFor);
   assert.deepEqual(plan.targets.map((t) => t.fieldName), ["agenda", "long"]);
   assert.deepEqual(plan.skipped, [
     { fieldName: "title", reason: "notApplicable" },
@@ -95,4 +108,7 @@ test("field values compare by content", () => {
   assert.equal(sameFieldValue(["a"], ["a", "b"]), false);
   assert.equal(sameFieldValue("a", ["a"]), false);
   assert.equal(sameFieldValue(undefined, ""), true);
+  assert.equal(sameFieldValue(rich("a"), rich("a")), true);
+  assert.equal(sameFieldValue(rich("a"), rich("b")), false);
+  assert.equal(sameFieldValue(rich("a"), "a"), false);
 });

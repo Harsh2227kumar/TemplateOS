@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { docToPlain, isRichValue, richLimitError } from "../features/rich-text/rich-model.ts";
+
 /**
  * Client-side validation for document fields. Mirrors the backend validator
  * (backend/app/services/document_validator.py) so that messages and rules
@@ -9,6 +11,8 @@ import { z } from "zod";
  * - email: rule "email" (and the email field type)
  * - min:N / max:N: value for numbers, item count for lists, length otherwise
  * Empty optional values skip every other check, as on the server.
+ * Rich text (V1.7 P2 textarea values) is checked on its plain-text
+ * projection, exactly as the server does.
  */
 
 export interface ValidationRule {
@@ -71,11 +75,17 @@ export function isValidIsoDate(value: string): boolean {
   return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d;
 }
 
+/** A value as the text the server validates (rich -> plain projection). */
+export function valueText(value: unknown): string {
+  if (isRichValue(value)) return docToPlain(value.doc);
+  return value === null || value === undefined ? "" : String(value);
+}
+
 /** Whether a field counts as filled in (same rule the backend uses for "required"). */
 export function isFieldFilled(fieldType: string, value: unknown): boolean {
   if (fieldType === "list") return cleanListItems(value).length > 0;
   if (value === null || value === undefined) return false;
-  return String(value).trim().length > 0;
+  return valueText(value).trim().length > 0;
 }
 
 /** Returns the first validation error for a value, or null when it is valid. */
@@ -94,7 +104,11 @@ export function validateFieldValue(field: ValidatableField, value: unknown): str
     return null;
   }
 
-  const text = String(value);
+  if (isRichValue(value)) {
+    const limit = richLimitError(value.doc);
+    if (limit) return limit;
+  }
+  const text = valueText(value);
 
   if (field.field_type === "number") {
     const num = parseNumber(text);

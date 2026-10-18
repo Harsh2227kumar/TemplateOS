@@ -9,6 +9,7 @@
  *   ["templates", "detail", id, "content", source]
  *   ["templates", "detail", id, "clean-suggestions"]
  *   ["documents"]                                   every draft query
+ *   ["documents", "detail", id, "versions", n]      a draft's versions (V1.7 P2)
  *
  * Kept free of runtime imports so it can be unit tested with `node --test`.
  */
@@ -54,6 +55,9 @@ export const documentKeys = {
   detail: (id: number) => [...documentKeys.details(), id] as const,
   /** Under detail(id), so every detail invalidation refreshes the preview too. */
   preview: (id: number) => [...documentKeys.detail(id), "preview"] as const,
+  /** V1.7 P2: under detail(id): generate / restore / save refresh them. */
+  versions: (id: number) => [...documentKeys.detail(id), "versions"] as const,
+  version: (id: number, version: number) => [...documentKeys.versions(id), version] as const,
 };
 
 export interface AdminUserListKeyParams {

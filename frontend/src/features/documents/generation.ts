@@ -247,3 +247,8 @@ export function generateActionLabel(generated: boolean, stale: boolean): string 
   if (!generated) return "Generate document";
   return stale ? "Regenerate (values changed)" : "Regenerate";
 }
+
+/** "Version 3 created" after a generate (V1.7 P2; null without a version number). */
+export function versionCreatedText(result: { version?: number | null }): string | null {
+  return result.version ? `Version ${result.version} created` : null;
+}
