@@ -27,7 +27,7 @@ export function AiBadge({
   return (
     <span
       className={cn(
-        "ml-1.5 inline-flex items-center gap-0.5 rounded-full border border-violet-200 bg-violet-50 px-1.5 py-px align-middle text-[10px] font-semibold uppercase tracking-wide text-violet-700",
+        "ml-1.5 inline-flex items-center gap-0.5 rounded-full border border-violet-200 bg-violet-50 px-1.5 py-px align-middle text-[10px] font-semibold tracking-wide text-violet-700",
         className,
       )}
       title={description}

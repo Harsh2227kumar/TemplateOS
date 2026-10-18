@@ -38,7 +38,7 @@ import "@/components/tiptap-templates/simple/tiptap-theme"
 import "@/components/tiptap-templates/simple/simple-editor.scss"
 
 import { richTextExtensions } from "@/features/rich-text/extensions"
-import { normalizeDoc, sameDoc, type RichDoc } from "@/features/rich-text/rich-model"
+import { docToPlain, normalizeDoc, sameDoc, type RichDoc } from "@/features/rich-text/rich-model"
 
 export interface SimpleEditorProps {
   content: RichDoc
@@ -101,17 +101,26 @@ export const SimpleEditor = forwardRef<SimpleEditorHandle, SimpleEditorProps>(fu
         spellcheck: "true",
       },
       handleKeyDown: (_view, event) => {
-        // Ctrl/Cmd+K opens the link popover.
+        // Ctrl/Cmd+K opens the link popover (after this keystroke is done,
+        // so the popover's focus handling does not see it and close again).
         if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
           event.preventDefault()
-          linkButtonRef.current?.click()
+          window.setTimeout(() => linkButtonRef.current?.click(), 0)
           return true
         }
         return false
       },
     },
     onUpdate: ({ editor: current }) => {
-      onChangeRef.current(normalizeDoc(current.getJSON()))
+      const raw = current.getJSON()
+      const doc = normalizeDoc(raw)
+      // The editor accepts some structure the document cannot show (lists
+      // nested deeper than 3 levels, e.g. after a paste): show the text the
+      // way it will be saved.
+      if (docToPlain(raw as RichDoc) !== docToPlain(doc)) {
+        current.commands.setContent(doc, { emitUpdate: false })
+      }
+      onChangeRef.current(doc)
     },
     onBlur: () => onBlurRef.current?.(),
   })
