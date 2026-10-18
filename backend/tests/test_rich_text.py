@@ -350,3 +350,13 @@ def test_from_blocks_length_mismatch():
         from_blocks(normalized, ["only one"])
     with pytest.raises(RichTextError):
         from_blocks(normalized, [None] * 9)  # type: ignore[list-item]
+
+
+def test_control_characters_are_removed():
+    normalized = validate_rich_content(
+        doc(para(text("a\x00b\x07"), text("\x0b", BOLD), text("c\r\nd\te")))
+    )
+    assert normalized == doc(para(text("ab"), text("c\nd\te")))
+    assert to_plain_text(normalized) == "abc\nd\te"
+    with pytest.raises(RichTextError):
+        validate_rich_content(doc(para(text("\x01", {"type": "code"}))))

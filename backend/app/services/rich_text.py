@@ -27,6 +27,7 @@ Stored values never contain HTML: only the normalized JSON.
 """
 
 import json
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -51,6 +52,9 @@ _MARK_ORDER = ("bold", "italic", "underline", "strike", "highlight", "link")
 _BLOCK_NODES = ("paragraph", "bulletList", "orderedList")
 _LIST_NODES = ("bulletList", "orderedList")
 _INLINE_NODES = ("text", "hardBreak")
+# Same rule as generation_service.clean_text: keep \t and \n, drop every
+# other C0 control character (and DEL); they are invalid in DOCX XML.
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
 
 class RichTextError(ValueError):
@@ -118,7 +122,8 @@ def _normalize_marks(raw: Any) -> list[dict]:
     return [marks[name] for name in _MARK_ORDER if name in marks]
 
 
-def _normalize_inline(node: Any) -> dict:
+def _normalize_inline(node: Any) -> dict | None:
+    """A normalized inline node; None for text that is only control characters."""
     node_type = _node_type(node)
     if node_type == "hardBreak":
         return {"type": "hardBreak"}
@@ -127,6 +132,10 @@ def _normalize_inline(node: Any) -> dict:
     text = node.get("text")
     if not isinstance(text, str) or text == "":
         raise RichTextError("Invalid rich text structure")
+    text = _CONTROL_CHARS.sub("", text.replace("\r\n", "\n").replace("\r", "\n"))
+    if not text:
+        _normalize_marks(node.get("marks"))  # still reject bad marks
+        return None
     normalized: dict = {"type": "text", "text": text}
     marks = _normalize_marks(node.get("marks"))
     if marks:
@@ -135,7 +144,7 @@ def _normalize_inline(node: Any) -> dict:
 
 
 def _normalize_paragraph(node: dict) -> dict:
-    content = [_normalize_inline(child) for child in _content(node)]
+    content = [inline for child in _content(node) if (inline := _normalize_inline(child))]
     return {"type": "paragraph", "content": content} if content else {"type": "paragraph"}
 
 
