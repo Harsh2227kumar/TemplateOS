@@ -3157,3 +3157,123 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 
 - Integration check across M1/M2/M3 (built in parallel): frontend types vs backend schemas match field by field including nullability; backend 638 passed; frontend tsc, 113/113 tests, build; browser end-to-end with real Gotenberg verified every preview state, deep links, generate from preview, PDF preview + blob revocation, downloads and the stale warning.
 - Merge order: #173 -> `backend`, retarget #174 to `backend` and merge, #175 -> `frontend`, then integrate into `dev`. No migration in Phase 1.
+
+### Checkpoint 0064
+
+- Date: 2026-10-18
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v17-p2-versions-rich-text-data` (from `backend`, PR #182 into `backend`); tracker on `docs/project-change-tracker-v17-p2` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0063 -> 2026-10-18
+
+#### Summary
+
+- V1.7 Phase 2 data layer: rich text storage and validation, per-value AI provenance, and document versions (one `generated_files` row per version, with retention).
+
+#### Completed Tasks
+
+- Migration `a7d3f9c1e5b8` (down_revision `e3c9a7b5d1f2`): `document_values.value_format/rich_content/ai_modified/ai_action/ai_modified_at` (+ CHECK), new `document_versions` (unique `(document_id, version)`), `generated_files.version_id` (NOT NULL, unique, FK CASCADE) + `files_pruned_at`, per-document unique dropped. Backfill: every existing generated document becomes version 1 with a snapshot of its current values (SQL per dialect, also visible with `alembic upgrade --sql`). Downgrade keeps the newest row per document.
+- `app/services/rich_text.py`: whitelist validator (nodes paragraph/hardBreak/bulletList/orderedList/listItem, lists <= 3 levels; marks bold/italic/underline/strike/highlight/link with http/https/mailto only; unknown attributes dropped; 50 KB JSON / 20,000 chars; control characters stripped), `to_plain_text`, `to_blocks`, `from_blocks`.
+- `document_version_crud.py`: snapshot, create (retry once on a duplicate number), list/get/count/latest, diff, restore (deletes values absent from the snapshot), retention pruning (paths returned for after-commit deletion).
+- `upsert_values` stores rich content and AI flags (`ai_modified_at` set when the flag flips); `Document.generated_file` reads the latest version; document delete still removes every version's files.
+- Schemas `DocumentVersionRead/Detail`, extended value/preview schemas; setting `GENERATED_VERSIONS_KEEP_FILES` (default 10).
+
+#### Code Changes
+
+- `backend/alembic/versions/a7d3f9c1e5b8_document_versions_rich_text.py` (new), `backend/app/models/document_value.py`, `document_version.py` (new), `generated_file.py`, `document.py`, `__init__.py`, `backend/app/services/rich_text.py` (new), `backend/app/crud/document_value_crud.py`, `document_version_crud.py` (new), `generated_file_crud.py`, `backend/app/schemas/document.py`, `document_preview.py`, `document_version.py` (new), `__init__.py`, `backend/app/core/config.py`, `.env.example`, tests `test_rich_text.py`, `test_document_versions_data.py`, `test_v17_p2_migration.py` (new), `test_document_preview_data.py`
+
+#### Features Added / Updated / Removed
+
+- Added: document versions table, rich text validator, AI flags, retention setting.
+- Updated: `generated_files` is one row per version (latest = highest version).
+- Removed: `uq_generated_files_document_id`.
+
+#### Issues Fixed
+
+- None (new feature).
+
+#### Notes For Next Push
+
+- Shared test vector with the frontend: `SHARED_DOC` / `SHARED_PLAIN` in `test_rich_text.py` and `frontend/tests/rich-model.test.ts` assert the same plain text.
+- On its own this branch keeps V1.6 generation behaviour (a transitional upsert on version 1); the versioned generate lands with Checkpoint 0065. Tests: 716 passed, 1 skipped (opt-in live Gotenberg).
+
+### Checkpoint 0065
+
+- Date: 2026-10-18
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v17-p2-rich-versions-api` (stacked on `feature/backend-v17-p2-versions-rich-text-data`, PR #183; retarget to `backend` after #182 merges)
+- Push status: before push
+- Range covered: after Checkpoint 0064 -> 2026-10-18
+
+#### Summary
+
+- V1.7 Phase 2 API: rich values with AI flags, rich rendering into the DOCX/PDF, versioned generation with retention, and the version endpoints.
+
+#### Completed Tasks
+
+- `PUT /documents/{id}/values`: `value_format` / `rich_content` / `ai_modified` / `ai_action`; rich only for textarea fields (422 otherwise); unsupported formatting 422 "Unsupported formatting: <name>"; plain value derived on the server; required/min/max on the plain projection; plain-only clients unchanged.
+- Rendering: rich fields render through their plain `{{ field }}` placeholders. docxtpl only splits runs for `{{r field }}`, and a plain tag put the runs inside `<w:t>` (invalid DOCX), so the template class rewrites simple rich placeholders to `{{r }}` and keeps the placeholder run's font and size. Bold, italic, underline, strike, real Word highlight, real hyperlinks; filters and `{% if %}` see the plain text; invalid stored JSON falls back to plain text.
+- Generate creates version N+1 (response adds `version`, `versions_count`), never deletes earlier files; retention prunes files beyond `GENERATED_VERSIONS_KEEP_FILES` after commit.
+- New router `document_versions.py`: `GET /documents/{id}/versions`, `GET /versions/{n}` (sections from the snapshot, fields removed from the template still shown), `GET /versions/{n}/download/{docx|pdf}` ("<name> v<n>.<ext>"; 404 / 409 / 410), `POST /versions/{n}/restore` (409 when not editable). Latest-version downloads unchanged.
+- Preview fields add `value_format`, `rich_content`, `ai_modified`, `ai_action`; generation adds `version`, `versions_count`.
+- `POST /ai/improve-text` accepts `original_items` for textarea fields (rich paragraphs rewritten block by block); text fields still require `original_text`.
+
+#### Code Changes
+
+- `backend/app/api/v1/endpoints/documents.py`, `document_versions.py` (new), `ai.py`, `backend/app/api/v1/api.py`, `backend/app/services/generation_service.py`, `document_generation.py`, `backend/app/crud/generated_file_crud.py`, `document_version_crud.py`, `backend/app/schemas/document.py`, `ai.py`, tests `test_v17_p2_api.py` (new), `test_ai_endpoints.py`, `test_document_generation.py`, `test_pdf_conversion.py`, `test_document_preview_api.py`, `test_document_versions_data.py`
+
+#### Features Added / Updated / Removed
+
+- Added: version endpoints, rich rendering, retention.
+- Updated: generate is versioned; save/preview/AI contracts extended (backward compatible).
+- Removed: transitional `upsert_generated_file`.
+
+#### Issues Fixed
+
+- The plan's assumption that RichText works in a plain `{{ field }}` tag was wrong (it produced invalid DOCX XML); fixed as described above.
+- The AI endpoint rejected `original_items` for textarea fields, so block-wise AI on rich text was impossible; now allowed.
+
+#### Notes For Next Push
+
+- Tests: 745 passed including the live Gotenberg test (`GOTENBERG_LIVE_URL=http://localhost:3000`), fastapi 0.143.0.
+
+### Checkpoint 0066
+
+- Date: 2026-10-18
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v17-p2-rich-text-versions` (from `frontend`, PR #184 into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0065 -> 2026-10-18
+
+#### Summary
+
+- V1.7 Phase 2 frontend: Tiptap rich text for long-text fields, AI on rich fields with `ai_modified` badges, version history with view, downloads and restore.
+
+#### Completed Tasks
+
+- Tiptap via `npx @tiptap/cli@latest add simple-editor` (MIT template, MIT core, no Tiptap Cloud features), trimmed to the backend whitelist: undo/redo, bold, italic, underline, strike, one highlight colour, link (Ctrl+K), bullet and numbered lists (Tab stops at 3 levels). Template global styles removed, editor styles scoped; `sass-embedded` added; CLI output moved under `src/components/tiptap-*` (on Windows it wrote to a literal `@/` folder).
+- `features/rich-text`: `rich-model.ts` (whitelist parity, lenient `normalizeDoc` so pasted Word content never causes a 422, `docToPlain` identical to the backend, blocks), lazy `RichTextField` and `RichTextViewer`.
+- Forms: textarea values are `{ format: "rich", doc }`; validation on the plain projection; save sends `value_format` / `rich_content` / AI flags.
+- AI: rich fields are rewritten paragraph by paragraph ("Original" restores the exact doc); `ai_modified` is derived from a per-field fingerprint, so manual edits clear it and Reset Form / restore bring it back; AI badge on the form, preview and version view.
+- Versions: history panel (preview and edit pages), version page `/documents/:id/versions/:n`, per-version downloads explained when pruned (410) or missing, restore with confirmation, "Version N created" after generate.
+
+#### Code Changes
+
+- `frontend/src/components/tiptap-*` (template, trimmed), `frontend/src/features/rich-text/*`, `frontend/src/features/document-versions/*`, `frontend/src/pages/document-version-page.tsx` (new), `document-preview-page.tsx`, `edit-document-page.tsx`, `App.tsx`, `frontend/src/components/forms/DynamicField.tsx`, `form-values.ts`, `ai-flags.ts` (new), `frontend/src/components/fields/*` (AI switcher, rewrite-all, `AiBadge.tsx` new), `frontend/src/lib/api/types.ts`, `documents.ts`, `frontend/src/lib/validation.ts`, `frontend/src/lib/query/keys.ts`, `frontend/src/hooks/queries/documents.ts`, `frontend/src/features/document-preview/*`, `frontend/package.json`, `package-lock.json`, `vite.config.ts`, `tsconfig.app.json`, tests `rich-model.test.ts`, `ai-flags.test.ts`, `versions.test.ts` (new), `ai-fields.test.ts`
+
+#### Features Added / Updated / Removed
+
+- Added: rich text editor, AI badges, version history and version page.
+- Updated: textarea fields, AI style switcher and rewrite-all, preview rows.
+- Removed: `AutoGrowTextarea` (the editor's loading state is a read-only skeleton).
+
+#### Issues Fixed
+
+- Ctrl+K closed the link popover immediately; lists deeper than 3 levels from a paste were shown unflattened (both found in the browser check and fixed).
+
+#### Notes For Next Push
+
+- Integration check (M3 + M2 + M1, scratch SQLite, fake AI, real Gotenberg 8): backend 745 passed; frontend tsc, 130/130 tests, build; frontend types vs backend schemas compared field by field (12 pairs, 0 differences); browser: old plain value opens as paragraphs, typing and paste formatting, Word paste saved without 422, AI Formal per paragraph + badge + Original + manual edit + Reset, generate v1/v2/v3, DOCX runs and PDF fonts/highlight/link verified, version view, per-version downloads, restore, retention (keep=2) pruned v1 -> 410 while its values stay viewable.
+- Bundle: Tiptap is only in lazy chunks (`RichTextEditor` 115 kB + shared 407 kB); the main chunk grows 17 kB raw / 5.8 kB gzip (rich model for validation and saving, AI flags, version hooks), slightly over the 5 kB target.
+- `tsconfig.app.json` now allows `.ts` import extensions so pure modules can import each other and stay testable with `node --test`.
+- Merge order: #182 -> `backend`, retarget #183 to `backend` and merge, #184 -> `frontend`, then integrate `backend` and `frontend` into `dev`. After merging run `alembic upgrade head` (applies `a7d3f9c1e5b8`).
