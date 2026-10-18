@@ -10,6 +10,12 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  css: {
+    // Tiptap UI styles are SCSS (sass-embedded); use its current API.
+    preprocessorOptions: {
+      scss: { api: "modern-compiler" },
+    },
+  },
   server: {
     port: 5173,
   },
