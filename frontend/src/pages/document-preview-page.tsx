@@ -8,10 +8,12 @@ import { GeneratedDocumentCard } from "@/features/document-preview/GeneratedDocu
 import { PdfPreview } from "@/features/document-preview/PdfPreview";
 import { PreviewHeader } from "@/features/document-preview/PreviewHeader";
 import { PreviewSectionCard } from "@/features/document-preview/PreviewSectionCard";
+import { LazyVersionHistoryPanel } from "@/features/document-versions/LazyVersionHistoryPanel";
 import { pdfPreviewKey, previewTitle } from "@/features/document-preview/preview-model";
 import { DraftLoadError, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import {
   generateSuccessMessage,
+  versionCreatedText,
   PDF_FILE_MISSING_MESSAGE,
   RETRY_DOCX_MISSING_MESSAGE,
   type DownloadFormat,
@@ -79,7 +81,11 @@ export function DocumentPreviewPage() {
     if (generateDocument.isPending || retryPdf.isPending) return;
     try {
       const result = await generateDocument.mutateAsync(documentId);
-      toast({ title: generateSuccessMessage(result.pdf_status), duration: 3500 });
+      toast({
+        title: versionCreatedText(result) ?? generateSuccessMessage(result.pdf_status),
+        description: versionCreatedText(result) ? generateSuccessMessage(result.pdf_status) : undefined,
+        duration: 3500,
+      });
     } catch (err) {
       const status = err instanceof ApiError ? err.status : undefined;
       toast({
@@ -160,6 +166,7 @@ export function DocumentPreviewPage() {
 
   const generating = generateDocument.isPending;
   const retrying = retryPdf.isPending;
+  const labels = new Map(preview.sections.flatMap((section) => section.fields.map((f) => [f.field_name, f.label] as const)));
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -204,6 +211,15 @@ export function DocumentPreviewPage() {
             pdfPreviewOpen={pdfPreviewOpen}
             onPdfPreviewOpenChange={setPdfPreviewOpen}
           />
+          {preview.generation && (
+            <LazyVersionHistoryPanel
+              documentId={documentId}
+              documentName={preview.document.name}
+              labelOf={(name) => labels.get(name) || name}
+              canRestore={preview.permissions.can_edit}
+              restoreDisabled={generating || retrying}
+            />
+          )}
         </aside>
       </div>
     </div>
