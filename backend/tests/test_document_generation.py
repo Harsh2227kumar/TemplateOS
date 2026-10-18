@@ -46,6 +46,7 @@ os.environ.setdefault(
     "JWT_SECRET_KEY", "test-secret-that-is-long-enough-for-auth-tests"
 )
 
+from app.crud.generated_file_crud import latest_generated_file
 from app.core.config import settings
 from app.crud.document_crud import delete_document
 from app.crud.template_field_crud import create_field
@@ -370,10 +371,9 @@ def ready_doc(owner_token) -> int:
 
 
 def _record(document_id: int) -> GeneratedFile | None:
+    """The latest version's row (V1.7 P2: one row per version)."""
     with TestSession() as session:
-        return session.execute(
-            select(GeneratedFile).where(GeneratedFile.document_id == document_id)
-        ).scalar_one_or_none()
+        return latest_generated_file(session, document_id)
 
 
 # ── 3. POST /generate ─────────────────────────────────────────────
@@ -703,18 +703,20 @@ def test_libreoffice_converter(monkeypatch):
 # ── 6. Regeneration and cleanup ───────────────────────────────────
 
 
-def test_regeneration_replaces_files(owner_token, ready_doc, gotenberg):
-    assert _generate(owner_token, ready_doc).status_code == 200
+def test_regeneration_creates_a_new_version_and_keeps_files(owner_token, ready_doc, gotenberg):
+    first_response = _generate(owner_token, ready_doc)
+    assert first_response.status_code == 200
+    assert (first_response.json()["version"], first_response.json()["versions_count"]) == (1, 1)
     first = _record(ready_doc)
-    assert _generate(owner_token, ready_doc).status_code == 200
+    second_response = _generate(owner_token, ready_doc)
+    assert (second_response.json()["version"], second_response.json()["versions_count"]) == (2, 2)
     second = _record(ready_doc)
-    assert second.id == first.id  # upsert, still one row
+    assert second.id != first.id  # one row per version
     assert second.docx_path != first.docx_path
     assert second.pdf_path != first.pdf_path
-    assert not storage_service.exists(first.docx_path)
-    assert not storage_service.exists(first.pdf_path)
-    assert storage_service.exists(second.docx_path)
-    assert storage_service.exists(second.pdf_path)
+    # Earlier versions keep their files (only retention removes them).
+    for path in (first.docx_path, first.pdf_path, second.docx_path, second.pdf_path):
+        assert storage_service.exists(path)
 
 
 def test_document_delete_cascades_row_and_files(owner_token, ready_doc, gotenberg):

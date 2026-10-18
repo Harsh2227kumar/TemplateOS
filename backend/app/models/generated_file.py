@@ -1,8 +1,13 @@
 """
-GeneratedFile model for V1.6 — the latest generated output of a document.
+GeneratedFile model — the generated output of one document version.
 
-One row per document (1:1, document_id is UNIQUE). Regenerating replaces the
-row's paths (upsert) and the superseded files are removed from storage.
+V1.7 Phase 2: one row per document VERSION (version_id is UNIQUE, NOT NULL);
+a document has many rows and the latest one belongs to its highest version
+(Document.generated_file). Files of old versions are pruned from storage
+after GENERATED_VERSIONS_KEEP_FILES newer versions exist: files_pruned_at is
+set and the paths are kept for reference, so downloads answer 410.
+(V1.6 kept one row per document and overwrote it on regenerate.)
+
 Paths are relative to the storage root (generated/docx, generated/pdf);
 binary content never lives in the database.
 
@@ -31,6 +36,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.document import Document
+    from app.models.document_version import DocumentVersion
 
 PdfStatus = Literal["pending", "converted", "failed"]
 PDF_STATUSES: tuple[str, ...] = get_args(PdfStatus)
@@ -40,7 +46,7 @@ PDF_ERROR_MAX_LENGTH = 500
 class GeneratedFile(Base):
     __tablename__ = "generated_files"
     __table_args__ = (
-        UniqueConstraint("document_id", name="uq_generated_files_document_id"),
+        UniqueConstraint("version_id", name="uq_generated_files_version_id"),
     )
 
     def __init__(self, **kwargs):
@@ -54,6 +60,12 @@ class GeneratedFile(Base):
     document_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    version_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("document_versions.id", ondelete="CASCADE"),
         nullable=False,
     )
     docx_path: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -78,9 +90,14 @@ class GeneratedFile(Base):
         server_default=text("CURRENT_TIMESTAMP"),
         nullable=False,
     )
+    # Set when retention removed this version's DOCX / PDF from storage.
+    files_pruned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     document: Mapped["Document"] = relationship(
-        "Document", back_populates="generated_file"
+        "Document", back_populates="generated_files"
+    )
+    version: Mapped["DocumentVersion"] = relationship(
+        "DocumentVersion", back_populates="generated_file"
     )
 
     @validates("pdf_status")
@@ -91,4 +108,8 @@ class GeneratedFile(Base):
 
     @property
     def has_pdf(self) -> bool:
-        return self.pdf_path is not None
+        return self.pdf_path is not None and self.files_pruned_at is None
+
+    @property
+    def files_pruned(self) -> bool:
+        return self.files_pruned_at is not None

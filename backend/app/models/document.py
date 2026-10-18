@@ -9,7 +9,7 @@ and has a one-to-many relationship with DocumentValue for field values.
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, and_, select, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.clock import utc_now_naive
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from app.models.user import User
     from app.models.document_value import DocumentValue
     from app.models.generated_file import GeneratedFile
+    from app.models.document_version import DocumentVersion
 
 DOCUMENT_STATUSES = ("draft", "generated", "submitted", "approved", "rejected", "final")
 
@@ -73,13 +74,29 @@ class Document(Base):
     values: Mapped[list["DocumentValue"]] = relationship(
         "DocumentValue", back_populates="document", cascade="all, delete-orphan"
     )
-    # V1.6: latest generated DOCX/PDF (1:1). The DB FK is also ON DELETE
-    # CASCADE; stored files are removed by app.services.generated_file_cleanup.
-    generated_file: Mapped["GeneratedFile | None"] = relationship(
+    # V1.7 P2: every Generate is a version (newest first). The DB FKs are ON
+    # DELETE CASCADE as well.
+    versions: Mapped[list["DocumentVersion"]] = relationship(
+        "DocumentVersion",
+        back_populates="document",
+        order_by="DocumentVersion.version.desc()",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    # One row per version. Not passive: the rows are deleted through the ORM
+    # so app.services.generated_file_cleanup removes their stored files.
+    generated_files: Mapped[list["GeneratedFile"]] = relationship(
         "GeneratedFile",
         back_populates="document",
-        uselist=False,
         cascade="all, delete-orphan",
+    )
+    # The generated output of the highest version (read-only), None until
+    # the first Generate. Keeps V1.6 code reading document.generated_file.
+    generated_file: Mapped["GeneratedFile | None"] = relationship(
+        "GeneratedFile",
+        primaryjoin=lambda: _latest_generated_file_join(),
+        viewonly=True,
+        uselist=False,
     )
 
     @validates("status")
@@ -87,3 +104,20 @@ class Document(Base):
         if value not in DOCUMENT_STATUSES:
             raise ValueError(f"Invalid status: {value}")
         return value
+
+
+def _latest_generated_file_join():
+    from app.models.document_version import DocumentVersion
+    from app.models.generated_file import GeneratedFile
+
+    latest_version_id = (
+        select(DocumentVersion.id)
+        .where(DocumentVersion.document_id == Document.id)
+        .order_by(DocumentVersion.version.desc())
+        .limit(1)
+        .scalar_subquery()
+    )
+    return and_(
+        GeneratedFile.document_id == Document.id,
+        GeneratedFile.version_id == latest_version_id,
+    )

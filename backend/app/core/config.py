@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     libreoffice_timeout_seconds: float = Field(
         default=120, gt=0, alias="LIBREOFFICE_TIMEOUT_SECONDS"
     )
+    # --- Document versions (V1.7 Phase 2) ---
+    # Every Generate is a new version. The DOCX/PDF files of versions older
+    # than the newest N are removed from storage (rows and value snapshots
+    # are kept, so old versions stay viewable and restorable).
+    generated_versions_keep_files: int = Field(
+        default=10, ge=1, alias="GENERATED_VERSIONS_KEEP_FILES"
+    )
 
     @property
     def ai_is_configured(self) -> bool:

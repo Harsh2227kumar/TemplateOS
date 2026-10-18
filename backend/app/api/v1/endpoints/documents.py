@@ -12,10 +12,14 @@ V1.7 preview (owner only, read-only):
 - GET /documents/{document_id}/preview
 
 V1.6 generation (owner only):
-- POST /documents/{document_id}/generate      render DOCX, then convert to PDF
+- POST /documents/{document_id}/generate      new version: render DOCX, then PDF
 - POST /documents/{document_id}/generate-pdf  retry the PDF conversion only
-- GET  /documents/{document_id}/download?format=docx|pdf
+- GET  /documents/{document_id}/download?format=docx|pdf  (latest version)
 - GET  /documents/{document_id}/download/pdf  (same as ?format=pdf)
+
+V1.7 Phase 2: values may be rich text (textarea fields, Tiptap JSON) and
+carry AI provenance (ai_modified / ai_action). Version history lives in
+document_versions.py.
 """
 
 import logging
@@ -35,6 +39,7 @@ from app.crud.document_crud import (
     get_documents_by_user,
 )
 from app.crud.document_value_crud import get_values_by_document, upsert_values
+from app.crud.document_version_crud import count_versions
 from app.crud.generated_file_crud import (
     get_generated_file,
     get_generated_files_for_documents,
@@ -50,6 +55,7 @@ from app.schemas.document import (
     DocumentListItem,
     DocumentRead,
     DocumentValidationErrorResponse,
+    DocumentValueRead,
     DocumentValuesBulkRead,
     DocumentValuesBulkUpsert,
     GenerateDocumentResponse,
@@ -58,6 +64,7 @@ from app.schemas.document_preview import (
     DocumentPreview,
     PreviewDocument,
     PreviewGeneration,
+    PreviewSection,
     PreviewTemplate,
 )
 from app.services import document_generation
@@ -68,6 +75,7 @@ from app.services.document_permissions import (
 from app.services.document_preview import build_sections, compute_completeness
 from app.services.document_validator import validate_document_values
 from app.services.generation_service import format_field_value
+from app.services.rich_text import RichTextError, to_plain_text, validate_rich_content
 from app.services.storage_service import (
     StorageError,
     StoredFileNotFoundError,
@@ -82,6 +90,10 @@ MEDIA_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pdf": "application/pdf",
 }
+
+RICH_ONLY_TEXTAREA = "Rich text is only available for long text fields"
+RICH_CONTENT_REQUIRED = "Rich text content is missing"
+AI_ACTION_REQUIRED = "ai_action is required when ai_modified is true"
 
 
 def _get_owned_document(
@@ -99,6 +111,74 @@ def _get_owned_document(
             detail="You can only access your own drafts",
         )
     return document
+
+
+def value_read(value) -> DocumentValueRead:
+    """A saved DocumentValue as its API shape (rich_content parsed)."""
+    return DocumentValueRead.model_validate(value)
+
+
+def document_read(db, document: Document) -> DocumentRead:
+    """GET /documents/{id} body: metadata, latest generation, saved values."""
+    return DocumentRead(
+        id=document.id,
+        template_id=document.template_id,
+        created_by=document.created_by,
+        name=document.name,
+        status=document.status,
+        created_at=document.created_at,
+        updated_at=document.updated_at,
+        generated=document_generation.generated_info(
+            document, get_generated_file(db, document.id)
+        ),
+        values=[value_read(v) for v in document.values],
+    )
+
+
+def prepare_values(fields, items) -> list[dict]:
+    """
+    PUT /values items as upsert dicts (V1.7 Phase 2 rules):
+
+    - value_format "rich" only for textarea fields; rich_content is validated
+      against the whitelist (app.services.rich_text) and stored normalized;
+      `value` becomes its plain-text projection (the client value is ignored)
+    - ai_modified true needs ai_action; false drops any ai_action
+
+    Raises 422 [{field_name, error}] for every invalid item. Unknown fields
+    are left for validate_document_values to report.
+    """
+    field_map = {field.field_name: field for field in fields}
+    errors: list[dict] = []
+    prepared: list[dict] = []
+    for item in items:
+        data = item.model_dump()
+        name = data["field_name"]
+        field = field_map.get(name)
+        if data["value_format"] == "rich" and field is not None:
+            if field.field_type != "textarea":
+                errors.append({"field_name": name, "error": RICH_ONLY_TEXTAREA})
+                continue
+            if data["rich_content"] is None:
+                errors.append({"field_name": name, "error": RICH_CONTENT_REQUIRED})
+                continue
+            try:
+                data["rich_content"] = validate_rich_content(data["rich_content"])
+            except RichTextError as exc:
+                errors.append({"field_name": name, "error": str(exc)})
+                continue
+            data["value"] = to_plain_text(data["rich_content"])
+        else:
+            data["value_format"] = "plain"
+            data["rich_content"] = None
+        if data["ai_modified"] and data["ai_action"] is None:
+            errors.append({"field_name": name, "error": AI_ACTION_REQUIRED})
+            continue
+        if not data["ai_modified"]:
+            data["ai_action"] = None
+        prepared.append(data)
+    if errors:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=errors)
+    return prepared
 
 
 @router.post(
@@ -177,8 +257,13 @@ def save_document_values(
     Validate and upsert field values for a document draft.
 
     - Enforces ownership (created_by == current_user.id)
+    - Rich text (V1.7 P2): value_format "rich" + rich_content (Tiptap JSON)
+      for textarea fields only; unsupported formatting -> 422 "Unsupported
+      formatting: <name>"; the plain value is derived on the server
+    - AI provenance: ai_modified / ai_action are stored per value
     - Validates against template fields: required, type (number, list),
-      validation_rule (email, min:N, max:N); 422 detail is [{field_name, error}]
+      validation_rule (email, min:N, max:N; rich fields use their plain
+      text); 422 detail is [{field_name, error}]
     - Bumps the document's updated_at on success
     - Returns saved values on success
     """
@@ -214,9 +299,9 @@ def save_document_values(
 
     fields = get_fields_by_template(db, document.template_id)
 
-    # Validate values
-    values_to_save = [v.model_dump() for v in payload.values]
+    # Rich content + AI flags, then the per-field rules on the plain values
     try:
+        values_to_save = prepare_values(fields, payload.values)
         validate_document_values(fields, values_to_save)
     except HTTPException as exc:
         logger.info(
@@ -239,17 +324,7 @@ def save_document_values(
     # Return saved values
     return DocumentValuesBulkRead(
         document_id=document_id,
-        values=[
-            {
-                "id": v.id,
-                "document_id": v.document_id,
-                "field_name": v.field_name,
-                "value": v.value,
-                "created_at": v.created_at,
-                "updated_at": v.updated_at,
-            }
-            for v in saved_values
-        ],
+        values=[value_read(v) for v in saved_values],
     )
 
 
@@ -325,30 +400,7 @@ def get_document(
             detail="You can only access your own drafts",
         )
 
-    # Build response with values
-    return DocumentRead(
-        id=document.id,
-        template_id=document.template_id,
-        created_by=document.created_by,
-        name=document.name,
-        status=document.status,
-        created_at=document.created_at,
-        updated_at=document.updated_at,
-        generated=document_generation.generated_info(
-            document, get_generated_file(db, document.id)
-        ),
-        values=[
-            {
-                "id": v.id,
-                "document_id": v.document_id,
-                "field_name": v.field_name,
-                "value": v.value,
-                "created_at": v.created_at,
-                "updated_at": v.updated_at,
-            }
-            for v in document.values
-        ],
-    )
+    return document_read(db, document)
 
 
 # ── V1.7 preview ─────────────────────────────────────────────────
@@ -362,9 +414,7 @@ def _stored_file_exists(document_id: int, relative_path: str | None, kind: str) 
     """
     if not relative_path:
         return False
-    try:
-        storage_service.file_path(relative_path)
-    except StorageError:  # StoredFileNotFoundError / InvalidStoragePathError
+    if not document_generation.stored_file_available(relative_path):
         logger.warning(
             "Preview: generated %s of document %s is missing on disk", kind, document_id
         )
@@ -373,7 +423,7 @@ def _stored_file_exists(document_id: int, relative_path: str | None, kind: str) 
 
 
 def _preview_generation(
-    document: Document, record: GeneratedFile | None
+    db, document: Document, record: GeneratedFile | None
 ) -> PreviewGeneration | None:
     """Latest generated output, with availability checked against the disk."""
     if record is None:
@@ -390,7 +440,48 @@ def _preview_generation(
         pdf_available=pdf_available,
         pdf_url=document_generation.download_url(document.id, "pdf") if pdf_available else None,
         pdf_filename=PurePosixPath(record.pdf_path).name if record.pdf_path else None,
+        version=record.version.version,
+        versions_count=count_versions(db, document.id),
     )
+
+
+def annotate_sections(sections: list[PreviewSection], items: dict[str, dict]) -> list[PreviewSection]:
+    """
+    Add each field's value_format / rich_content / ai_modified / ai_action
+    (V1.7 P2) from `items` ({field_name: value dict}, e.g. a snapshot item).
+    """
+    result = []
+    for section in sections:
+        fields = []
+        for field in section.fields:
+            item = items.get(field.field_name)
+            if item is None:
+                fields.append(field)
+                continue
+            rich = item.get("value_format") == "rich" and isinstance(item.get("rich_content"), dict)
+            ai_modified = bool(item.get("ai_modified"))
+            fields.append(
+                field.model_copy(
+                    update={
+                        "value_format": "rich" if rich else "plain",
+                        "rich_content": item["rich_content"] if rich else None,
+                        "ai_modified": ai_modified,
+                        "ai_action": item.get("ai_action") if ai_modified else None,
+                    }
+                )
+            )
+        result.append(section.model_copy(update={"fields": fields}))
+    return result
+
+
+def value_items(values) -> dict[str, dict]:
+    """document.values as {field_name: {value_format, rich_content (dict), ai_*}}."""
+    return {
+        value.field_name: value_read(value).model_dump(
+            include={"value_format", "rich_content", "ai_modified", "ai_action"}
+        )
+        for value in values
+    }
 
 
 @router.get(
@@ -412,10 +503,12 @@ def get_document_preview(
 
     - sections: every template field, grouped like the edit form, with
       display_value formatted exactly like the generated document
-      (generation_service.format_field_value)
+      (generation_service.format_field_value); rich textarea values also
+      carry their Tiptap JSON, and AI-written values ai_modified / ai_action
     - completeness: required fields filled vs missing
-    - generation: null until generated; docx/pdf availability is checked on
-      disk; URLs are API-relative, never storage paths
+    - generation: null until generated; the latest version, its number and
+      the number of versions; docx/pdf availability is checked on disk;
+      URLs are API-relative, never storage paths
     - permissions: what the user may do next (document_permissions)
 
     Never triggers generation or PDF conversion.
@@ -434,6 +527,7 @@ def get_document_preview(
 
     fields = list(template.fields)
     values_by_name = {value.field_name: value.value for value in document.values}
+    sections = build_sections(fields, values_by_name, format_value=format_field_value)
     return DocumentPreview(
         document=PreviewDocument.model_validate(document),
         template=PreviewTemplate(
@@ -444,8 +538,8 @@ def get_document_preview(
             has_processed_file=bool(template.processed_file_path),
         ),
         completeness=compute_completeness(fields, values_by_name),
-        sections=build_sections(fields, values_by_name, format_value=format_field_value),
-        generation=_preview_generation(document, document.generated_file),
+        sections=annotate_sections(sections, value_items(document.values)),
+        generation=_preview_generation(db, document, document.generated_file),
         permissions=document_permissions(current_user, document),
     )
 
@@ -485,17 +579,7 @@ def get_document_values(
 
     return DocumentValuesBulkRead(
         document_id=document_id,
-        values=[
-            {
-                "id": v.id,
-                "document_id": v.document_id,
-                "field_name": v.field_name,
-                "value": v.value,
-                "created_at": v.created_at,
-                "updated_at": v.updated_at,
-            }
-            for v in values
-        ],
+        values=[value_read(v) for v in values],
     )
 
 
@@ -506,7 +590,7 @@ def get_document_values(
     "/{document_id}/generate",
     response_model=GenerateDocumentResponse,
     responses={422: {"model": DocumentValidationErrorResponse}},
-    summary="Generate the DOCX and PDF from the saved values",
+    summary="Generate a new version (DOCX and PDF) from the saved values",
 )
 def generate_document_endpoint(
     db: DbSession,
@@ -521,7 +605,10 @@ def generate_document_endpoint(
       invalid (same validator and shape as saving); 422 with a string detail
       when the template itself cannot be rendered
     - 409 when the template file is missing
-    - Regenerating replaces the previous DOCX/PDF
+    - Every call creates a new version (V1.7 P2): `version` is its number,
+      `versions_count` the total; older versions keep their files until
+      retention (GENERATED_VERSIONS_KEEP_FILES) removes them
+    - Rich textarea values render with their formatting
     - Then converts the DOCX to PDF; a PDF failure never fails this call
       (pdf_status "converted" or "failed" with pdf_error)
     - Sets the document status to "generated"
@@ -532,8 +619,10 @@ def generate_document_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Template not found"
         )
-    record = document_generation.generate_document(db, document, template)
-    return document_generation.generation_response(document, record)
+    record = document_generation.generate_document(
+        db, document, template, created_by=current_user.id
+    )
+    return document_generation.generation_response(db, document, record)
 
 
 @router.post(
@@ -544,7 +633,7 @@ def generate_document_endpoint(
         410: {"description": "The generated DOCX is missing on the server"},
         503: {"description": "PDF conversion failed; detail is the reason"},
     },
-    summary="Retry the PDF conversion of the generated DOCX",
+    summary="Retry the PDF conversion of the latest generated DOCX",
 )
 def retry_pdf_endpoint(
     db: DbSession,
@@ -552,7 +641,7 @@ def retry_pdf_endpoint(
     document_id: int,
 ):
     """
-    Convert the last generated DOCX to PDF again (owner only).
+    Convert the latest version's DOCX to PDF again (owner only).
 
     - 200 with the generation info when the PDF is converted (also when it
       already was and the file exists: no new conversion)
@@ -563,7 +652,7 @@ def retry_pdf_endpoint(
     """
     document = _get_owned_document(db, document_id, current_user)
     record = document_generation.retry_pdf(db, document)
-    return document_generation.generation_response(document, record)
+    return document_generation.generation_response(db, document, record)
 
 
 def _send_generated_file(db, current_user: User, document_id: int, file_format: str):
@@ -619,7 +708,7 @@ def _send_generated_file(db, current_user: User, document_id: int, file_format: 
         409: {"description": "No PDF for this document"},
         410: {"description": "The PDF file is missing on the server"},
     },
-    summary="Download the generated PDF",
+    summary="Download the latest generated PDF",
 )
 def download_pdf(
     db: DbSession,
@@ -627,9 +716,10 @@ def download_pdf(
     document_id: int,
 ):
     """
-    Stream the generated PDF as an attachment named after the draft (owner
-    only). 404 when not generated; 409 when there is no PDF (see pdf_status /
-    pdf_error, use Retry PDF); 410 when the stored PDF is missing on disk.
+    Stream the latest version's PDF as an attachment named after the draft
+    (owner only). 404 when not generated; 409 when there is no PDF (see
+    pdf_status / pdf_error, use Retry PDF); 410 when the stored PDF is
+    missing on disk.
     """
     return _send_generated_file(db, current_user, document_id, "pdf")
 
@@ -637,7 +727,7 @@ def download_pdf(
 @router.get(
     "/{document_id}/download",
     response_class=FileResponse,
-    summary="Download the generated DOCX or PDF",
+    summary="Download the latest generated DOCX or PDF",
 )
 def download_document(
     db: DbSession,
@@ -646,7 +736,7 @@ def download_document(
     format: Literal["docx", "pdf"] = Query("docx"),
 ):
     """
-    Stream the generated file as an attachment named after the draft.
+    Stream the latest version's file as an attachment named after the draft.
     404 when the document has not been generated. DOCX: 409 when the stored
     file is missing. PDF (same as /download/pdf): 409 when there is no PDF,
     410 when the stored PDF is missing on disk.

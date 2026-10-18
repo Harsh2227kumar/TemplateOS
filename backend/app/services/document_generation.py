@@ -1,11 +1,17 @@
 """
-Document generation orchestration (V1.6): validate -> render DOCX -> store ->
-record (pdf_status "pending") -> remove superseded files -> convert PDF ->
-record converted / failed.
+Document generation orchestration: validate -> render DOCX (rich fields with
+their formatting) -> store -> create version N+1 with its generated_files
+row (pdf_status "pending") -> convert PDF -> record converted / failed ->
+retention (prune the files of versions older than the newest
+GENERATED_VERSIONS_KEEP_FILES, deleted after commit).
+
+V1.7 Phase 2: every Generate is a new version; earlier versions keep their
+files until retention removes them (V1.6 overwrote one row per document).
 
 A PDF problem never fails generation: the DOCX row is committed before the
 conversion starts, and every conversion outcome is recorded on the row
-(pdf_status, pdf_error, pdf_attempts, pdf_converted_at).
+(pdf_status, pdf_error, pdf_attempts, pdf_converted_at). Neither does a
+retention problem: it is logged and retried on the next generate.
 
 Called from the plain `def` endpoints in app/api/v1/endpoints/documents.py,
 so this blocking work runs in FastAPI's threadpool.
@@ -21,11 +27,17 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now_naive
 from app.core.config import settings
+from app.crud.document_version_crud import (
+    count_versions,
+    create_version,
+    prune_old_version_files,
+    snapshot_values,
+)
 from app.crud.generated_file_crud import (
+    create_generated_file,
     get_generated_file,
     mark_pdf_converted,
     mark_pdf_failed,
-    upsert_generated_file,
 )
 from app.crud.template_field_crud import get_fields_by_template
 from app.models.document import Document
@@ -40,6 +52,7 @@ from app.services.generation_service import (
     build_context,
     render_docx,
 )
+from app.services.rich_text import RichTextError, parse_stored, validate_rich_content
 from app.services.pdf_service import (
     PdfConversionError,
     get_pdf_converter,
@@ -80,6 +93,12 @@ def content_disposition(filename: str) -> str:
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
 
 
+def version_filename(document: Document, version: int, extension: str) -> str:
+    """download_filename with the version: "Weekly MoM v3.docx"."""
+    stem = download_filename(document, extension)[: -len(extension) - 1]
+    return f"{stem} v{version}.{extension}"
+
+
 def download_url(document_id: int, file_format: str) -> str:
     base = f"{settings.api_v1_prefix}/documents/{document_id}/download"
     if file_format == "pdf":
@@ -87,10 +106,27 @@ def download_url(document_id: int, file_format: str) -> str:
     return f"{base}?format={file_format}"
 
 
+def version_download_url(document_id: int, version: int, file_format: str) -> str:
+    return f"{settings.api_v1_prefix}/documents/{document_id}/versions/{version}/download/{file_format}"
+
+
+def stored_file_available(relative_path: str | None) -> bool:
+    """True when the stored file is on disk (a stale path is never an error)."""
+    if not relative_path:
+        return False
+    try:
+        storage_service.file_path(relative_path)
+    except StorageError:  # StoredFileNotFoundError / InvalidStoragePathError
+        return False
+    return True
+
+
 def generated_info(document: Document, record: GeneratedFile | None) -> GeneratedInfo | None:
+    """The latest generated output (null until the first generate)."""
     if record is None:
         return None
     return GeneratedInfo(
+        version=record.version.version if record.version is not None else None,
         generated_at=record.generated_at,
         pdf_status=record.pdf_status,
         pdf_error=record.pdf_error,
@@ -110,10 +146,15 @@ def is_stale(document: Document, record: GeneratedFile) -> bool:
     return document.updated_at > record.generated_at
 
 
-def generation_response(document: Document, record: GeneratedFile) -> GenerateDocumentResponse:
+def generation_response(
+    db: Session, document: Document, record: GeneratedFile
+) -> GenerateDocumentResponse:
     info = generated_info(document, record)
     return GenerateDocumentResponse(
-        **info.model_dump(), document_id=document.id, document_status=document.status
+        **info.model_dump(),
+        document_id=document.id,
+        document_status=document.status,
+        versions_count=count_versions(db, document.id),
     )
 
 
@@ -174,15 +215,65 @@ def convert_and_record(
     return record
 
 
-def generate_document(db: Session, document: Document, template: Template) -> GeneratedFile:
+def rich_values_for(fields, document: Document) -> dict[str, dict]:
     """
-    Render, store and record the document's DOCX, then convert it to PDF.
-    The returned row's pdf_status is converted or failed (pending only when
-    recording the PDF outcome itself failed).
+    {field_name: normalized doc} of the document's rich textarea values.
+    Stored JSON is validated again; anything that no longer passes renders
+    as its plain text instead of failing the generation.
+    """
+    textarea = {field.field_name for field in fields if field.field_type == "textarea"}
+    result = {}
+    for value in document.values:
+        if value.value_format != "rich" or value.field_name not in textarea:
+            continue
+        doc = parse_stored(value.rich_content)
+        if doc is None:
+            continue
+        try:
+            result[value.field_name] = validate_rich_content(doc)
+        except RichTextError:
+            logger.warning(
+                "Stored rich text of document %s field %s is invalid; rendering plain text",
+                document.id,
+                value.field_name,
+            )
+    return result
+
+
+def prune_after_generate(db: Session, document_id: int) -> None:
+    """
+    Retention after a generate: mark the files of versions older than the
+    newest GENERATED_VERSIONS_KEEP_FILES as pruned, commit, then delete
+    them from storage. Never fails the generation (the next one retries).
+    """
+    try:
+        paths = prune_old_version_files(db, document_id, settings.generated_versions_keep_files)
+        db.commit()
+    except Exception:
+        logger.exception("Could not apply version retention for document %s", document_id)
+        db.rollback()
+        return
+    if paths:
+        delete_stored_files(paths)
+        logger.info("Retention removed %s file(s) of document %s", len(paths), document_id)
+
+
+def generate_document(
+    db: Session, document: Document, template: Template, created_by: int | None = None
+) -> GeneratedFile:
+    """
+    Render and store the document's DOCX as a NEW version (N+1), then
+    convert it to PDF and apply retention. The returned row's pdf_status is
+    converted or failed (pending only when recording the PDF outcome itself
+    failed). created_by defaults to the document owner.
     """
     fields = get_fields_by_template(db, template.id)
     values = {value.field_name: value.value for value in document.values}
     _validate_required(fields, values)
+    rich_values = rich_values_for(fields, document)
+    snapshot = snapshot_values(document)
+    if created_by is None:
+        created_by = document.created_by
 
     source_path = get_renderable_path(template)
     if not source_path:
@@ -198,7 +289,7 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
         ) from None
 
     try:
-        docx_bytes = render_docx(template_bytes, build_context(fields, values))
+        docx_bytes = render_docx(template_bytes, build_context(fields, values), rich_values)
     except TemplateRenderError as exc:
         raise HTTPException(
             status_code=422, detail=str(exc)
@@ -216,15 +307,27 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
         ) from None
 
     now = utc_now_naive()
+    document_id = document.id
     try:
-        record, superseded = upsert_generated_file(
+        # First write of the transaction: create_version may roll back once
+        # to retry a version number taken by a concurrent generate.
+        version = create_version(
             db,
-            document.id,
+            document,
+            created_by=created_by,
+            template_version=template.version,
+            snapshot=snapshot,
+            created_at=now,
+        )
+        record = create_generated_file(
+            db,
+            version,
             docx_path=stored_docx.path,
             generated_at=now,
             template_version=template.version,
             template_source_path=source_path,
         )
+        document = db.get(Document, document_id)
         if document.status in _GENERATABLE_STATUSES:
             document.status = "generated"
         document.updated_at = now
@@ -235,18 +338,21 @@ def generate_document(db: Session, document: Document, template: Template) -> Ge
         raise
     db.refresh(record)
     db.refresh(document)
-    delete_stored_files(superseded)
 
     try:
         record = convert_and_record(db, record, docx_bytes, f"{filename_stem}.docx")
     except Exception:  # the DOCX is committed; leave the PDF "pending"
-        logger.exception("Could not record the PDF result for document %s", document.id)
+        logger.exception("Could not record the PDF result for document %s", document_id)
         db.rollback()
         db.refresh(record)
+
+    prune_after_generate(db, document_id)
+    db.refresh(record)
     db.refresh(document)
     logger.info(
-        "Generated document %s (pdf=%s) from template %s v%s",
-        document.id,
+        "Generated document %s version %s (pdf=%s) from template %s v%s",
+        document_id,
+        record.version.version,
         record.pdf_status,
         template.id,
         template.version,

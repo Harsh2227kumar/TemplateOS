@@ -121,7 +121,9 @@ class ImproveTextRequest(BaseModel):
 
     Text and paragraph fields send original_text; list fields send
     original_items (one entry per item) so every item is rewritten on its
-    own and the list keeps its shape in the generated document.
+    own and the list keeps its shape in the generated document. A rich
+    paragraph (textarea) field may send original_items too: its non-empty
+    paragraphs and list items, rewritten one by one (V1.7 Phase 2).
     """
 
     template_id: int

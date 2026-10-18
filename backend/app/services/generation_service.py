@@ -26,6 +26,13 @@ Rendering uses autoescape (so "&" and "<" are safe) and StrictUndefined: a
 placeholder that is not one of the template's fields is a template problem
 and is reported (TemplateRenderError -> HTTP 422) instead of silently
 rendering blank.
+
+Rich text (V1.7 Phase 2): a textarea value saved as Tiptap JSON is rendered
+through the same plain `{{ field }}` placeholder as a docxtpl RichText
+(rich_to_richtext): bold / italic / underline / strike runs, highlight as
+shading, links as real hyperlinks, hard and paragraph breaks as line breaks,
+list items as "• " / "1. " lines. Its text equals
+rich_text.to_plain_text(doc), so the preview and the plain value match.
 """
 
 import json
@@ -35,8 +42,12 @@ from datetime import date
 from io import BytesIO
 from typing import TYPE_CHECKING, Any
 
-from docxtpl import DocxTemplate
+from docxtpl import DocxTemplate, RichText
 from jinja2 import Environment, StrictUndefined, TemplateSyntaxError, UndefinedError
+
+from markupsafe import escape as xml_escape
+
+from app.services.rich_text import iter_paragraphs, to_plain_text
 
 if TYPE_CHECKING:
     from app.models.template_field import TemplateField
@@ -164,16 +175,217 @@ def _describe_error(exc: Exception) -> str:
     return f"The template could not be rendered: {exc}"
 
 
-def render_docx(template_bytes: bytes, context: dict[str, Any]) -> bytes:
+HIGHLIGHT_COLOR = "yellow"
+LINK_COLOR = "0563C1"
+
+# CT_RPr child order (ECMA-376), so merged run properties stay valid.
+_RPR_ORDER = {
+    name: index
+    for index, name in enumerate(
+        (
+            "rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss "
+            "imprint noProof snapToGrid vanish webHidden color spacing w kern position sz "
+            "szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang "
+            "eastAsianLayout specVanish oMath"
+        ).split()
+    )
+}
+_RPR_CHILD = re.compile(r"<w:(\w+)\b[^>]*?(?:/>|>.*?</w:\1>)", re.DOTALL)
+# Properties a mark replaces: the template run's own value is dropped first.
+_MARK_PROPS = {
+    "bold": ("b", "bCs"),
+    "italic": ("i", "iCs"),
+    "underline": ("u",),
+    "strike": ("strike", "dstrike"),
+    "highlight": ("highlight", "shd"),
+    "link": ("color", "u"),
+}
+
+
+def rich_segments(doc: dict) -> list[tuple[str, dict]]:
+    """
+    A normalized rich doc as (text, marks) runs in reading order, with "\\n"
+    between paragraphs and for hard breaks, and the trailing whitespace
+    removed exactly like rich_text.to_plain_text. `marks` maps a mark type
+    to its attrs (link: {"href": ...}).
+    """
+    segments: list[tuple[str, dict]] = []
+    for index, (paragraph, _kind, _depth, prefix) in enumerate(iter_paragraphs(doc)):
+        if index:
+            segments.append(("\n", {}))
+        if prefix:
+            segments.append((prefix, {}))
+        for node in paragraph.get("content") or []:
+            if node.get("type") == "hardBreak":
+                segments.append(("\n", {}))
+            else:
+                marks = {mark["type"]: mark.get("attrs") or {} for mark in node.get("marks") or []}
+                segments.append((node.get("text", ""), marks))
+    # Strip trailing whitespace across runs (same result as str.rstrip()).
+    while segments:
+        text, marks = segments[-1]
+        stripped = text.rstrip()
+        if stripped:
+            segments[-1] = (stripped, marks)
+            break
+        segments.pop()
+    return segments
+
+
+def _run_props(base_props: str, marks: dict) -> str:
+    """The template run's properties with the marks applied, in schema order."""
+    dropped = {prop for mark in marks for prop in _MARK_PROPS.get(mark, ())}
+    children = [
+        (match.group(1), match.group(0))
+        for match in _RPR_CHILD.finditer(base_props)
+        if match.group(1) not in dropped
+    ]
+    if "bold" in marks:
+        children.append(("b", "<w:b/>"))
+    if "italic" in marks:
+        children.append(("i", "<w:i/>"))
+    if "strike" in marks:
+        children.append(("strike", "<w:strike/>"))
+    if "highlight" in marks:
+        children.append(("highlight", f'<w:highlight w:val="{HIGHLIGHT_COLOR}"/>'))
+    if "link" in marks:
+        children.append(("color", f'<w:color w:val="{LINK_COLOR}"/>'))
+    if "underline" in marks or "link" in marks:
+        children.append(("u", '<w:u w:val="single"/>'))
+    children.sort(key=lambda child: _RPR_ORDER.get(child[0], len(_RPR_ORDER)))
+    return "".join(xml for _, xml in children)
+
+
+def _run_xml(text: str, props: str) -> str:
+    """One run; "\\n" -> <w:br/>, "\\t" -> <w:tab/>, text XML-escaped."""
+    parts = []
+    for line_index, line in enumerate(text.split("\n")):
+        if line_index:
+            parts.append("<w:br/>")
+        for tab_index, chunk in enumerate(line.split("\t")):
+            if tab_index:
+                parts.append("<w:tab/>")
+            if chunk:
+                parts.append(f'<w:t xml:space="preserve">{xml_escape(chunk)}</w:t>')
+    rpr = f"<w:rPr>{props}</w:rPr>" if props else ""
+    return f"<w:r>{rpr}{''.join(parts)}</w:r>"
+
+
+def rich_to_richtext(tpl: DocxTemplate, doc: dict, base_props: str = "") -> RichText:
+    """
+    The docxtpl RichText (run XML) for a normalized rich doc (see
+    rich_segments). Every run starts from `base_props`, the formatting of
+    the template run that held the placeholder (font, size, ...), with the
+    marks applied: bold / italic / underline / strike, highlight (yellow),
+    link (a real hyperlink, blue and underlined). Links need the template
+    instance: build_url_id adds the relationship.
+    """
+    rich = RichText()
+    for text, marks in rich_segments(doc):
+        text = clean_text(text)
+        if not text:
+            continue
+        run = _run_xml(text, _run_props(base_props, marks))
+        href = marks.get("link", {}).get("href")
+        if href:
+            run = f'<w:hyperlink r:id="{tpl.build_url_id(href)}" w:history="1">{run}</w:hyperlink>'
+        rich.xml += run
+    return rich
+
+
+# docxtpl's first two patch_xml steps: join "{{", "}}" split across runs and
+# remove the XML tags inside a {{ ... }} tag, so a placeholder can be found.
+_SPLIT_BRACES = re.compile(r"(?<={)(<[^>]*>)+(?=[\{%\#])|(?<=[%\}\#])(<[^>]*>)+(?=\})", re.DOTALL)
+_JINJA_TAG = re.compile(r"{%(?:(?!%}).)*|{#(?:(?!#}).)*|{{(?:(?!}}).)*", re.DOTALL)
+_TAGS_IN_JINJA = re.compile(r"</w:t>.*?(<w:t>|<w:t [^>]*>)", re.DOTALL)
+_RUN_PROPS = re.compile(r"<w:rPr>(.*?)</w:rPr>", re.DOTALL)
+
+
+class _RichDocxTemplate(DocxTemplate):
+    """
+    A DocxTemplate that renders rich fields through their plain
+    `{{ field }}` placeholders.
+
+    docxtpl only inserts run XML correctly for `{{r field }}` (which closes
+    the surrounding run); a plain `{{ field }}` would put the runs inside
+    the outer <w:t>, an invalid document. patch_xml therefore rewrites the
+    simple placeholders of rich fields to `{{r field }}` and remembers the
+    run properties of the placeholder's run, so the rich runs keep the
+    template's font and size. Other uses of a rich field (filters, tests,
+    loops) are left alone and get its plain text.
+    """
+
+    def __init__(self, template_file, rich_names):
+        super().__init__(template_file)
+        self.rich_names = tuple(rich_names)
+        self.rich_run_props: dict[str, str] = {}
+
+    def patch_xml(self, src_xml):
+        src_xml = _SPLIT_BRACES.sub("", src_xml)
+        src_xml = _JINJA_TAG.sub(lambda m: _TAGS_IN_JINJA.sub("", m.group(0)), src_xml)
+        for name in self.rich_names:
+            placeholder = re.compile(r"\{\{-?\s*" + re.escape(name) + r"\s*-?\}\}")
+            match = placeholder.search(src_xml)
+            if match is None:
+                continue
+            if name not in self.rich_run_props:
+                run_start = max(src_xml.rfind("<w:r>", 0, match.start()), src_xml.rfind("<w:r ", 0, match.start()))
+                props = _RUN_PROPS.search(src_xml, run_start, match.start()) if run_start >= 0 else None
+                self.rich_run_props[name] = props.group(1) if props else ""
+            src_xml = placeholder.sub("{{r " + name + " }}", src_xml)
+        return super().patch_xml(src_xml)
+
+
+class _RichValue:
+    """
+    Context value of a rich field: run XML where its `{{ field }}` was
+    rewritten to `{{r field }}`, its plain text everywhere else (str(),
+    filters, `{% if %}`).
+    """
+
+    def __init__(self, tpl: _RichDocxTemplate, name: str, doc: dict, plain: str):
+        self.tpl, self.name, self.doc, self.plain = tpl, name, doc, plain
+
+    def __str__(self) -> str:
+        return self.plain
+
+    def __bool__(self) -> bool:
+        return bool(self.plain)
+
+    def __html__(self) -> str:
+        if self.name in self.tpl.rich_run_props:
+            return rich_to_richtext(self.tpl, self.doc, self.tpl.rich_run_props[self.name]).xml
+        return str(xml_escape(self.plain))
+
+
+def render_docx(
+    template_bytes: bytes,
+    context: dict[str, Any],
+    rich_values: dict[str, dict] | None = None,
+) -> bytes:
     """
     Render the DOCX template with the context and return the new DOCX bytes.
+
+    rich_values maps field_name -> normalized rich doc; those fields render
+    with their formatting through `{{ field }}` (see _RichDocxTemplate). A
+    rich value whose text is empty stays the context's "" so `{% if %}`
+    tests behave like for plain values.
 
     Raises TemplateRenderError with a user-facing message on any docxtpl /
     Jinja failure (syntax error, undefined variable, broken XML).
     """
     environment = Environment(autoescape=True, undefined=StrictUndefined)
     try:
-        template = DocxTemplate(BytesIO(template_bytes))
+        rich_values = {
+            name: doc
+            for name, doc in (rich_values or {}).items()
+            if name in context and rich_segments(doc)
+        }
+        template = _RichDocxTemplate(BytesIO(template_bytes), rich_values)
+        if rich_values:
+            context = dict(context)
+            for name, doc in rich_values.items():
+                context[name] = _RichValue(template, name, doc, to_plain_text(doc))
         template.render(context, jinja_env=environment, autoescape=True)
         output = BytesIO()
         template.save(output)
