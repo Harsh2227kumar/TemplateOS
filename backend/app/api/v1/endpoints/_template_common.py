@@ -41,7 +41,11 @@ def read_stored(path: str) -> bytes:
 
 
 def save_processed(db: Session, template: Template, processed_bytes: bytes) -> str:
-    """Store a new processed copy and drop the superseded one."""
+    """
+    Store a new processed copy. V1.7 P2.1: the superseded copy is kept, because
+    template_revisions reference every stored template file (history and
+    restore); stored files are removed when the template is deleted.
+    """
     try:
         stored = storage_service.save_bytes(
             "templates_processed",
@@ -53,14 +57,5 @@ def save_processed(db: Session, template: Template, processed_bytes: bytes) -> s
         raise HTTPException(
             status_code=500, detail="Could not save the cleaned template"
         ) from None
-    previous_processed_path = template.processed_file_path
     set_processed_path(db, template, stored.path)
-    if previous_processed_path and previous_processed_path != stored.path:
-        try:
-            storage_service.delete_file(previous_processed_path)
-        except StorageError:
-            logger.warning(
-                f"Could not remove superseded processed file for template "
-                f"{template.id}: {previous_processed_path}"
-            )
     return stored.path

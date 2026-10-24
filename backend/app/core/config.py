@@ -143,6 +143,33 @@ class Settings(BaseSettings):
     generated_versions_keep_files: int = Field(
         default=10, ge=1, alias="GENERATED_VERSIONS_KEEP_FILES"
     )
+    # --- Word file editor (V1.7 Phase 2.1): ONLYOFFICE Docs Community Edition ---
+    # Off by default. The browser loads the editor from ONLYOFFICE_PUBLIC_URL;
+    # the backend downloads saved files from ONLYOFFICE_INTERNAL_URL (defaults
+    # to the public URL) and signs configs / verifies callbacks with
+    # ONLYOFFICE_JWT_SECRET (the container's JWT_SECRET). The Document Server
+    # reaches the backend at BACKEND_URL_FOR_ONLYOFFICE.
+    onlyoffice_enabled: bool = Field(default=False, alias="ONLYOFFICE_ENABLED")
+    onlyoffice_public_url: str | None = Field(default=None, alias="ONLYOFFICE_PUBLIC_URL")
+    onlyoffice_internal_url: str | None = Field(default=None, alias="ONLYOFFICE_INTERNAL_URL")
+    onlyoffice_jwt_secret: str | None = Field(default=None, alias="ONLYOFFICE_JWT_SECRET")
+    backend_url_for_onlyoffice: str = Field(
+        default="http://host.docker.internal:8000", alias="BACKEND_URL_FOR_ONLYOFFICE"
+    )
+    editor_session_ttl_minutes: int = Field(
+        default=240, ge=15, alias="EDITOR_SESSION_TTL_MINUTES"
+    )
+    editor_max_file_mb: int = Field(default=20, ge=1, le=100, alias="EDITOR_MAX_FILE_MB")
+
+    @property
+    def onlyoffice_internal_base(self) -> str | None:
+        """Where the backend reaches the Document Server (no trailing slash)."""
+        url = self.onlyoffice_internal_url or self.onlyoffice_public_url
+        return url.rstrip("/") if url else None
+
+    @property
+    def onlyoffice_public_base(self) -> str | None:
+        return self.onlyoffice_public_url.rstrip("/") if self.onlyoffice_public_url else None
 
     @property
     def ai_is_configured(self) -> bool:
@@ -213,6 +240,28 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
+
+    @field_validator("onlyoffice_public_url", "onlyoffice_internal_url", mode="before")
+    @classmethod
+    def normalize_onlyoffice_url(cls, value: str | None) -> str | None:
+        """Blank -> None (not set); trailing slashes removed."""
+        if value is None:
+            return None
+        value = str(value).strip().rstrip("/")
+        return value or None
+
+    @model_validator(mode="after")
+    def check_onlyoffice(self) -> "Settings":
+        """The word editor needs its URL and a strong shared secret when enabled."""
+        if self.onlyoffice_enabled:
+            if not self.onlyoffice_public_url:
+                raise ValueError("ONLYOFFICE_PUBLIC_URL is required when ONLYOFFICE_ENABLED=true")
+            if not self.onlyoffice_jwt_secret or len(self.onlyoffice_jwt_secret) < _MIN_JWT_SECRET_LENGTH:
+                raise ValueError(
+                    "ONLYOFFICE_JWT_SECRET must be at least "
+                    f"{_MIN_JWT_SECRET_LENGTH} characters when ONLYOFFICE_ENABLED=true"
+                )
+        return self
 
     @model_validator(mode="after")
     def check_production_safety(self) -> "Settings":

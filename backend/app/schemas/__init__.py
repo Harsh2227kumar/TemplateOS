@@ -24,6 +24,13 @@ from app.schemas.document_preview import (
     PreviewTemplate,
 )
 from app.schemas.document_version import DocumentVersionDetail, DocumentVersionRead
+from app.schemas.editor import (
+    EditorConfigResponse,
+    EditorSessionRead,
+    EditorStatusConfig,
+    FieldChangesRead,
+    TemplateRevisionRead,
+)
 
 __all__ = [
     "LoginRequest",
@@ -51,4 +58,9 @@ __all__ = [
     "PreviewTemplate",
     "DocumentVersionRead",
     "DocumentVersionDetail",
+    "EditorConfigResponse",
+    "EditorSessionRead",
+    "EditorStatusConfig",
+    "FieldChangesRead",
+    "TemplateRevisionRead",
 ]

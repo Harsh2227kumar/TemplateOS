@@ -13,6 +13,8 @@ DEFAULT_STORAGE_ROOT = settings.storage_root
 STORAGE_FOLDERS = {
     "templates_original": Path("templates/original"),
     "templates_processed": Path("templates/processed"),
+    # V1.7 P2.1: stored copy of every template file change (template_revisions)
+    "templates_revisions": Path("templates/revisions"),
     "generated_docx": Path("generated/docx"),
     "generated_pdf": Path("generated/pdf"),
     "signatures": Path("signatures"),

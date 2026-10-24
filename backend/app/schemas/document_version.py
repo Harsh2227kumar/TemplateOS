@@ -11,10 +11,14 @@ paths: only API URLs (null when the file is not downloadable).
 
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel
 
 from app.schemas.document import PdfStatus
 from app.schemas.document_preview import PreviewSection
+
+VersionSource = Literal["generated", "manual_edit"]
 
 
 class DocumentVersionRead(BaseModel):
@@ -33,6 +37,9 @@ class DocumentVersionRead(BaseModel):
     version: int
     created_at: datetime
     created_by_name: str
+    # V1.7 P2.1: "manual_edit" = the Word file of base_version edited by hand.
+    source: VersionSource = "generated"
+    base_version: int | None = None
     template_version: int | None
     pdf_status: PdfStatus | None
     pdf_error: str | None = None
