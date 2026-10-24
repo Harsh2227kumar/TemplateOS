@@ -78,6 +78,10 @@ async function toApiError(response: Response, fallback: string): Promise<ApiErro
     } else if (Array.isArray(body.detail)) {
       message = "Validation failed";
       detail = body.detail;
+    } else if (body.detail && typeof body.detail === "object") {
+      // V1.7 P2.1: coded conflicts, e.g. {"detail": "...", "code": "manual_edits", "version": 3}.
+      if (typeof body.detail.detail === "string") message = body.detail.detail;
+      detail = body.detail;
     }
   } catch {
     // Keep a safe user-facing fallback when the server does not return JSON.

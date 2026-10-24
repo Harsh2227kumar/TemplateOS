@@ -36,9 +36,12 @@ export const documentsApi = {
    * V1.6: render the DOCX from the SAVED values, then convert it to PDF.
    * Always 200 once the DOCX exists; the PDF outcome is in pdf_status.
    * V1.7 P2: every call creates a new version (`version`, `versions_count`).
+   * V1.7 P2.1: 409 code "manual_edits" when the latest version was edited by
+   * hand, unless `replaceManualEdits` (that version stays in the history).
    */
-  generate: async (documentId: number): Promise<GenerateDocumentResponse> => {
-    return request<GenerateDocumentResponse>(`/documents/${documentId}/generate`, { method: "POST" });
+  generate: async (documentId: number, options: { replaceManualEdits?: boolean } = {}): Promise<GenerateDocumentResponse> => {
+    const query = options.replaceManualEdits ? "?replace_manual_edits=true" : "";
+    return request<GenerateDocumentResponse>(`/documents/${documentId}/generate${query}`, { method: "POST" });
   },
 
   /**

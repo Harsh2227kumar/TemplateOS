@@ -1,8 +1,9 @@
 import { TemplateListItem } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Lock, Globe, Building, Users, UsersRound, ShieldCheck } from "lucide-react";
+import { Lock, Globe, Building, Users, UsersRound, ShieldCheck, Copy } from "lucide-react";
 import { describeRoles } from "@/components/templates/AudienceFields";
+import { copyBadgeText } from "@/features/word-editor/word-editor-model";
 
 interface TemplateCardProps {
   template: TemplateListItem;
@@ -45,6 +46,8 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
       default: return "bg-gray-400";
     }
   };
+
+  const copyBadge = copyBadgeText(template);
 
   const formattedDate = new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -116,6 +119,17 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
             </div>
           )}
           
+          {copyBadge && (
+            <Badge
+              variant="outline"
+              className="max-w-full gap-1 border-violet-200 bg-violet-50 font-medium text-violet-800"
+              title={copyBadge}
+            >
+              <Copy className="h-3 w-3 shrink-0" />
+              <span className="truncate">{copyBadge}</span>
+            </Badge>
+          )}
+
           <div className="text-xs text-slate-400">
             Uploaded on {formattedDate}
           </div>

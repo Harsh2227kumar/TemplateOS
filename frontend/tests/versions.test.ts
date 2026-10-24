@@ -21,6 +21,8 @@ import type { DocumentVersion } from "../src/lib/api/types.ts";
 
 const version = (overrides: Partial<DocumentVersion> = {}): DocumentVersion => ({
   version: 3,
+  source: "generated",
+  base_version: null,
   created_at: "2026-10-18T10:00:00",
   created_by_name: "Priya",
   template_version: 2,
