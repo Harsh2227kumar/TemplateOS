@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from app.models.template_field import TemplateField
     from app.models.document import Document
     from app.models.organization import Department, Organization
+    from app.models.template_revision import TemplateRevision
 
 TEMPLATE_CATEGORIES = (
     "notice",
@@ -108,6 +109,11 @@ class Template(Base):
 
     # Flags
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # V1.7 P2.1: a user's personal copy ("Customize for me") points at the
+    # template it was copied from; the original is never changed by them.
+    parent_template_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("templates.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     is_locked: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
@@ -128,6 +134,26 @@ class Template(Base):
     scope_department_ref: Mapped["Department | None"] = relationship(
         "Department", foreign_keys=[scope_department_id], lazy="selectin"
     )
+
+    parent: Mapped["Template | None"] = relationship(
+        "Template", remote_side="Template.id", foreign_keys=[parent_template_id]
+    )
+    # V1.7 P2.1: every file change, newest first. Deleted through the ORM so
+    # their stored files are removed (app.services.generated_file_cleanup).
+    revisions: Mapped[list["TemplateRevision"]] = relationship(
+        "TemplateRevision",
+        back_populates="template",
+        order_by="TemplateRevision.revision.desc()",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def parent_template_name(self) -> str | None:
+        return self.parent.name if self.parent is not None else None
+
+    @property
+    def is_personal_copy(self) -> bool:
+        return self.parent_template_id is not None
 
     @property
     def scope_organization_name(self) -> str | None:

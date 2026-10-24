@@ -3,7 +3,8 @@ Remove generated DOCX/PDF files from storage when their rows go away (V1.6).
 
 generated_files rows disappear when a document is deleted (ORM cascade) or,
 through ON DELETE CASCADE in the database, when its template or owner is
-deleted. Mapper `before_delete` hooks collect the affected stored paths into
+deleted. template_revisions (V1.7 P2.1) are handled the same way: each
+revision has its own stored copy of the template file. Mapper `before_delete` hooks collect the affected stored paths into
 `session.info`; they are deleted from storage only AFTER the transaction
 commits (a rollback discards the list), so a failed delete never loses files
 that rows still point at.
@@ -54,8 +55,24 @@ def _paths_for(connection, where_clause) -> list[str]:
     return [path for row in rows for path in row if path]
 
 
+def _revision_paths_for(connection, where_clause) -> list[str]:
+    from app.models.template import Template
+    from app.models.template_revision import TemplateRevision
+
+    rows = connection.execute(
+        select(TemplateRevision.file_path)
+        .join(Template, Template.id == TemplateRevision.template_id)
+        .where(where_clause)
+    ).all()
+    return [row[0] for row in rows if row[0]]
+
+
 def _on_generated_file_delete(_mapper, _connection, target) -> None:
     _queue(target, (target.docx_path, target.pdf_path))
+
+
+def _on_revision_delete(_mapper, _connection, target) -> None:
+    _queue(target, (target.file_path,))
 
 
 def _on_template_delete(_mapper, connection, target) -> None:
@@ -67,7 +84,11 @@ def _on_template_delete(_mapper, connection, target) -> None:
 def _on_user_delete(_mapper, connection, target) -> None:
     from app.models.document import Document
 
+    from app.models.template import Template
+
     _queue(target, _paths_for(connection, Document.created_by == target.id))
+    # Templates uploaded by the user go too (ON DELETE CASCADE).
+    _queue(target, _revision_paths_for(connection, Template.uploaded_by == target.id))
 
 
 def _after_commit(session: Session) -> None:
@@ -83,11 +104,13 @@ def _after_rollback(session: Session, _previous_transaction=None) -> None:
 def register() -> None:
     from app.models.generated_file import GeneratedFile
     from app.models.template import Template
+    from app.models.template_revision import TemplateRevision
     from app.models.user import User
 
     if event.contains(GeneratedFile, "before_delete", _on_generated_file_delete):
         return
     event.listen(GeneratedFile, "before_delete", _on_generated_file_delete)
+    event.listen(TemplateRevision, "before_delete", _on_revision_delete)
     event.listen(Template, "before_delete", _on_template_delete)
     event.listen(User, "before_delete", _on_user_delete)
     event.listen(Session, "after_commit", _after_commit)

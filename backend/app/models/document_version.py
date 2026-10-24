@@ -12,16 +12,31 @@ values_snapshot: JSON array sorted by field_name of
 
 Rows and snapshots are kept forever; only the stored files of old versions
 are pruned (generated_files.files_pruned_at, GENERATED_VERSIONS_KEEP_FILES).
+
+V1.7 P2.1: `source` is "generated" (rendered from the values) or
+"manual_edit" (the Word file of `base_version` edited by hand in
+ONLYOFFICE; its snapshot is copied from the base, the values did not change).
 """
 
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.clock import utc_now_naive
 from app.db.base import Base
+
+VERSION_SOURCES: tuple[str, ...] = ("generated", "manual_edit")
 
 if TYPE_CHECKING:
     from app.models.document import Document
@@ -33,6 +48,7 @@ class DocumentVersion(Base):
     __tablename__ = "document_versions"
     __table_args__ = (
         UniqueConstraint("document_id", "version", name="uq_document_versions_document_version"),
+        CheckConstraint("source IN ('generated', 'manual_edit')", name="ck_document_versions_source"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -55,6 +71,12 @@ class DocumentVersion(Base):
     template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     values_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="generated", server_default="generated"
+    )
+    base_version_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("document_versions.id", ondelete="SET NULL"), nullable=True
+    )
 
     document: Mapped["Document"] = relationship("Document", back_populates="versions")
     creator: Mapped["User | None"] = relationship("User")
@@ -64,3 +86,17 @@ class DocumentVersion(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    base_version: Mapped["DocumentVersion | None"] = relationship(
+        "DocumentVersion", remote_side="DocumentVersion.id", foreign_keys=[base_version_id]
+    )
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if "source" not in kwargs:
+            self.source = "generated"
+
+    @validates("source")
+    def validate_source(self, _key: str, value: str) -> str:
+        if value not in VERSION_SOURCES:
+            raise ValueError(f"Invalid version source: {value}")
+        return value

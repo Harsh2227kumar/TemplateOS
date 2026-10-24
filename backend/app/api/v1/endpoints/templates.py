@@ -21,7 +21,7 @@ from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, sta
 from sqlalchemy import false, func, select
 
 from app.api.deps import CurrentUser, DbSession
-from app.api.v1.endpoints._template_common import require_manage
+from app.api.v1.endpoints._template_common import record_file_revision, require_manage
 from app.services.storage_service import StorageError, storage_service
 from app.services.template_access import (
     ASSIGNABLE_ROLES,
@@ -487,4 +487,5 @@ def upload_template(
             status_code=500, detail="Could not save template record"
         ) from None
 
+    record_file_revision(db, template, stored.path, content, "upload", current_user.id)
     return _template_response(template, current_user)

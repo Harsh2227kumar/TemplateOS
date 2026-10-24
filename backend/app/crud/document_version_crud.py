@@ -108,10 +108,16 @@ def create_version(
     note: str | None = None,
     snapshot: list[dict] | None = None,
     created_at: datetime | None = None,
+    source: str = "generated",
+    base_version: DocumentVersion | None = None,
 ) -> DocumentVersion:
     """
     Add version max(version)+1 with a snapshot of the document's values
     (flushed, not committed).
+
+    V1.7 P2.1: source "manual_edit" records a Word file edited by hand from
+    `base_version`; its snapshot is the base version's (the values did not
+    change) unless `snapshot` is given.
 
     A concurrent generate may take the same number: on IntegrityError the
     session is rolled back and the next number is tried once more. Call it
@@ -119,7 +125,11 @@ def create_version(
     discards them; pass `snapshot` taken before the call to keep it stable.
     """
     document_id = document.id
-    snapshot_text = dump_snapshot(snapshot if snapshot is not None else snapshot_values(document))
+    base_version_id = base_version.id if base_version is not None else None
+    if snapshot is None and base_version is not None and source == "manual_edit":
+        snapshot_text = base_version.values_snapshot
+    else:
+        snapshot_text = dump_snapshot(snapshot if snapshot is not None else snapshot_values(document))
     for attempt in range(2):
         version = DocumentVersion(
             document_id=document_id,
@@ -129,6 +139,8 @@ def create_version(
             template_version=template_version,
             values_snapshot=snapshot_text,
             note=note,
+            source=source,
+            base_version_id=base_version_id,
         )
         db.add(version)
         try:
