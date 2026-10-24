@@ -59,6 +59,10 @@ class TemplateAudienceMixin(BaseModel):
     allowed_roles: list[str] | None = None
     # Computed for the requesting user (see template_access.can_manage).
     can_manage: bool = False
+    # V1.7 P2.1: personal copies ("Customize for me") of another template.
+    parent_template_id: int | None = None
+    parent_template_name: str | None = None
+    is_personal_copy: bool = False
 
     @field_validator("allowed_roles", mode="before")
     @classmethod

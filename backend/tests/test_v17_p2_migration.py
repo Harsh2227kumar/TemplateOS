@@ -221,5 +221,5 @@ def test_single_head() -> None:
         "JWT_SECRET_KEY": "test-secret-that-is-long-enough-for-migration-tests",
     }
     heads = _alembic(environment, "heads").stdout.split()
-    assert heads[0] == REVISION
+    assert len(heads) >= 2  # "<rev> (head)": newer revisions follow this one
     assert heads.count("(head)") == 1
