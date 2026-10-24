@@ -53,3 +53,19 @@ export function openErrorMessage(status: number | undefined, fallback?: string):
   if (status === 404) return fallback || "This file does not exist.";
   return fallback || "The document editor could not be opened. Please try again.";
 }
+
+const localTime = (date: Date) => date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/**
+ * The 409 {code: "editor_locked", user_name, since} from opening an editor,
+ * with the time in the user's zone; null for any other error detail.
+ */
+export function editorLockedMessage(detail: unknown, formatTime: (date: Date) => string = localTime): string | null {
+  if (!detail || typeof detail !== "object") return null;
+  const locked = detail as { code?: unknown; user_name?: unknown; since?: unknown };
+  if (locked.code !== "editor_locked" || typeof locked.user_name !== "string") return null;
+  const since = typeof locked.since === "string" ? new Date(locked.since) : null;
+  return since && !Number.isNaN(since.getTime())
+    ? `Being edited by ${locked.user_name} since ${formatTime(since)}`
+    : `Being edited by ${locked.user_name}`;
+}

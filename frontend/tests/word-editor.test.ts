@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  editorLockedMessage,
   isFinal,
   nextPollDelay,
   openErrorMessage,
@@ -190,4 +191,13 @@ test("keys and helpers", () => {
     docsApiScriptUrl("http://localhost:8082/"),
     "http://localhost:8082/web-apps/apps/api/documents/api.js",
   );
+});
+
+test("editor locked message uses the local time", () => {
+  const detail = { detail: "Being edited by Asha since 13:50 UTC", code: "editor_locked", user_name: "Asha", since: "2026-10-24T13:50:00+00:00" };
+  const format = (date: Date) => date.toISOString().slice(11, 16);
+  assert.equal(editorLockedMessage(detail, format), "Being edited by Asha since 13:50");
+  assert.equal(editorLockedMessage({ ...detail, since: "nope" }, format), "Being edited by Asha");
+  assert.equal(editorLockedMessage({ code: "manual_edits" }), null);
+  assert.equal(editorLockedMessage(undefined), null);
 });

@@ -8,6 +8,7 @@ import { ApiError, wordEditorApi, type EditorConfigResponse, type EditorSessionR
 
 import { OnlyOfficeEditor } from "./OnlyOfficeEditor";
 import {
+  editorLockedMessage,
   isFinal,
   nextPollDelay,
   openErrorMessage,
@@ -57,7 +58,9 @@ export function EditorPage({ target, fileName, backTo, backLabel, help, onSaved 
         setPhase({
           kind: "open-error",
           status: error instanceof ApiError ? error.status : undefined,
-          message: openErrorMessage(error instanceof ApiError ? error.status : undefined, error.message),
+          message:
+            editorLockedMessage(error instanceof ApiError ? error.detail : undefined) ??
+            openErrorMessage(error instanceof ApiError ? error.status : undefined, error.message),
         }),
     });
   };
