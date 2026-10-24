@@ -12,6 +12,7 @@ from app.api.v1.endpoints import (
     template_fields,
     template_placeholders,
     templates,
+    word_editor,
 )
 
 api_router = APIRouter()
@@ -33,4 +34,6 @@ api_router.include_router(
     document_versions.router, prefix="/documents", tags=["document versions"]
 )
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+# V1.7 P2.1 Word file editor: routes under /system, /templates, /documents, /editor.
+api_router.include_router(word_editor.router)
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

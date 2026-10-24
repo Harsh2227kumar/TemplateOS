@@ -39,7 +39,7 @@ from app.crud.document_crud import (
     get_documents_by_user,
 )
 from app.crud.document_value_crud import get_values_by_document, upsert_values
-from app.crud.document_version_crud import count_versions
+from app.crud.document_version_crud import count_versions, get_version, latest_version_number
 from app.crud.generated_file_crud import (
     get_generated_file,
     get_generated_files_for_documents,
@@ -442,6 +442,7 @@ def _preview_generation(
         pdf_filename=PurePosixPath(record.pdf_path).name if record.pdf_path else None,
         version=record.version.version,
         versions_count=count_versions(db, document.id),
+        source=record.version.source,
     )
 
 
@@ -596,6 +597,7 @@ def generate_document_endpoint(
     db: DbSession,
     current_user: CurrentUser,
     document_id: int,
+    replace_manual_edits: bool = Query(False),
 ):
     """
     Render the template's processed DOCX with the draft's SAVED values.
@@ -612,8 +614,25 @@ def generate_document_endpoint(
     - Then converts the DOCX to PDF; a PDF failure never fails this call
       (pdf_status "converted" or "failed" with pdf_error)
     - Sets the document status to "generated"
+    - V1.7 P2.1: when the latest version was edited by hand in the Word
+      editor, 409 {"code": "manual_edits", "version": n} unless
+      replace_manual_edits=true (the manual version stays in the history)
     """
     document = _get_owned_document(db, document_id, current_user, include_values=True)
+    latest_number = latest_version_number(db, document.id)
+    latest = get_version(db, document.id, latest_number) if latest_number else None
+    if latest is not None and latest.source == "manual_edit" and not replace_manual_edits:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "detail": (
+                    f"The latest version (v{latest.version}) was edited manually. Generating "
+                    f"replaces those edits (v{latest.version} stays in the history)."
+                ),
+                "code": "manual_edits",
+                "version": latest.version,
+            },
+        )
     template = get_template_by_id(db, document.template_id)
     if not template:
         raise HTTPException(
