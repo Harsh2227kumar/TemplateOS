@@ -23,6 +23,7 @@ file, mark the session failed and answer {"error": 1}.
 """
 
 import logging
+from datetime import timezone
 from pathlib import PurePosixPath
 
 from fastapi import HTTPException, status
@@ -152,7 +153,20 @@ def _config_response(session: EditorSession, *, title: str, user: User, reused: 
 
 
 def _locked(exc: EditorLocked) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    """
+    409 with the holder and an ISO UTC `since`, so the browser can show the
+    time in the user's zone ("detail" keeps a UTC fallback text).
+    """
+    since = exc.since if exc.since.tzinfo else exc.since.replace(tzinfo=timezone.utc)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "detail": f"{exc} UTC",
+            "code": "editor_locked",
+            "user_name": exc.user_name,
+            "since": since.isoformat(),
+        },
+    )
 
 
 def _title(name: str | None, fallback: str) -> str:

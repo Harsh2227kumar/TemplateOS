@@ -277,7 +277,10 @@ def test_lock_between_managers_and_expired_link():
     super_token, _ = _login("super_admin")
     first = client.post(f"{API}/templates/{template_id}/editor-session", headers=_auth(admin)).json()
     locked = client.post(f"{API}/templates/{template_id}/editor-session", headers=_auth(super_token))
-    assert locked.status_code == 409 and "Being edited by" in locked.json()["detail"]
+    assert locked.status_code == 409
+    detail = locked.json()["detail"]
+    assert detail["code"] == "editor_locked" and detail["detail"].startswith("Being edited by")
+    assert detail["detail"].endswith("UTC") and detail["since"].endswith("+00:00") and detail["user_name"]
     with TestSession() as db:
         session = db.execute(select(EditorSession).where(EditorSession.session_key == first["session_key"])).scalar_one()
         session.expires_at = utc_now_naive() - timedelta(minutes=1)
