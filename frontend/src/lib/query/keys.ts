@@ -8,8 +8,11 @@
  *   ["templates", "detail", id, "fields"]
  *   ["templates", "detail", id, "content", source]
  *   ["templates", "detail", id, "clean-suggestions"]
+ *   ["templates", "detail", id, "revisions"]        file history (V1.7 P2.1)
+ *   ["templates", "detail", id, "field-changes"]
  *   ["documents"]                                   every draft query
  *   ["documents", "detail", id, "versions", n]      a draft's versions (V1.7 P2)
+ *   ["word-editor", "config"] / ["word-editor", "session", key]   (V1.7 P2.1)
  *
  * Kept free of runtime imports so it can be unit tested with `node --test`.
  */
@@ -45,6 +48,15 @@ export const templateKeys = {
   content: (id: number, source: "original" | "processed" = "original") =>
     [...templateKeys.detail(id), "content", source] as const,
   cleanSuggestions: (id: number) => [...templateKeys.detail(id), "clean-suggestions"] as const,
+  /** V1.7 P2.1: under detail(id), so a saved file edit refreshes them with the template. */
+  revisions: (id: number) => [...templateKeys.detail(id), "revisions"] as const,
+  fieldChanges: (id: number) => [...templateKeys.detail(id), "field-changes"] as const,
+};
+
+export const wordEditorKeys = {
+  all: ["word-editor"] as const,
+  config: () => [...wordEditorKeys.all, "config"] as const,
+  session: (key: string) => [...wordEditorKeys.all, "session", key] as const,
 };
 
 export const documentKeys = {
@@ -94,6 +106,7 @@ export const queryKeys = {
   templates: templateKeys,
   documents: documentKeys,
   admin: adminKeys,
+  wordEditor: wordEditorKeys,
 };
 
 /** True when `key` starts with `prefix` (how TanStack matches invalidations). */

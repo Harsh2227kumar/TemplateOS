@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,9 +19,26 @@ import {
   type DownloadFormat,
 } from "@/features/documents/generation";
 import { useNow } from "@/features/documents/use-draft-form";
-import { useDocumentPreview, useDownloadGenerated, useGenerateDocument, useRetryPdf } from "@/hooks/queries";
+import {
+  canEditDocumentFile,
+  documentEditorPath,
+  manualEditsConflict,
+  type ManualEditsConflict,
+} from "@/features/word-editor/word-editor-model";
+import {
+  useDocumentPreview,
+  useDownloadGenerated,
+  useEditorEnabled,
+  useGenerateDocument,
+  useRetryPdf,
+} from "@/hooks/queries";
 import { ApiError } from "@/lib/api";
 import { parseRouteId } from "@/lib/route-params";
+
+// V1.7 P2.1: loaded when generate asks about manual edits.
+const ManualEditsDialog = lazy(() =>
+  import("@/features/word-editor/ManualEditsDialog").then((module) => ({ default: module.ManualEditsDialog })),
+);
 
 function PreviewLoadingSkeleton() {
   return (
@@ -63,6 +80,8 @@ export function DocumentPreviewPage() {
   const downloadGenerated = useDownloadGenerated();
   const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
   const [pdfPreviewOpen, setPdfPreviewOpen] = useState(false);
+  const [manualConflict, setManualConflict] = useState<ManualEditsConflict | null>(null);
+  const editorEnabled = useEditorEnabled();
   useNow();
 
   const preview = previewQuery.data ?? null;
@@ -77,16 +96,23 @@ export function DocumentPreviewPage() {
 
   if (!documentId) return NOT_FOUND;
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (replaceManualEdits = false) => {
     if (generateDocument.isPending || retryPdf.isPending) return;
     try {
-      const result = await generateDocument.mutateAsync(documentId);
+      const result = await generateDocument.mutateAsync({ documentId, replaceManualEdits });
+      setManualConflict(null);
       toast({
         title: versionCreatedText(result) ?? generateSuccessMessage(result.pdf_status),
         description: versionCreatedText(result) ? generateSuccessMessage(result.pdf_status) : undefined,
         duration: 3500,
       });
     } catch (err) {
+      const conflict = manualEditsConflict(err);
+      if (conflict) {
+        setManualConflict(conflict);
+        return;
+      }
+      setManualConflict(null);
       const status = err instanceof ApiError ? err.status : undefined;
       toast({
         variant: "destructive",
@@ -166,6 +192,13 @@ export function DocumentPreviewPage() {
 
   const generating = generateDocument.isPending;
   const retrying = retryPdf.isPending;
+  const editFileHref = canEditDocumentFile({
+    editorEnabled,
+    documentStatus: preview.permissions.can_edit ? preview.document.status : null,
+    hasDocx: Boolean(preview.generation?.docx_available),
+  })
+    ? documentEditorPath(documentId)
+    : null;
   const labels = new Map(preview.sections.flatMap((section) => section.fields.map((f) => [f.field_name, f.label] as const)));
 
   return (
@@ -210,6 +243,7 @@ export function DocumentPreviewPage() {
             onDownload={(format) => void handleDownload(format)}
             pdfPreviewOpen={pdfPreviewOpen}
             onPdfPreviewOpenChange={setPdfPreviewOpen}
+            editFileHref={editFileHref}
           />
           {preview.generation && (
             <LazyVersionHistoryPanel
@@ -222,6 +256,16 @@ export function DocumentPreviewPage() {
           )}
         </aside>
       </div>
+      {manualConflict && (
+        <Suspense fallback={null}>
+          <ManualEditsDialog
+            conflict={manualConflict}
+            generating={generating}
+            onCancel={() => setManualConflict(null)}
+            onConfirm={() => void handleGenerate(true)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

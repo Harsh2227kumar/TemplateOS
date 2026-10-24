@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { CheckCircle, CheckCircle2, ChevronLeft, Eye, History, Loader2, RotateCcw, Save } from "lucide-react";
@@ -23,9 +23,16 @@ import {
 import { useDraftForm, useNow } from "@/features/documents/use-draft-form";
 import { useFocusFieldFromHash } from "@/features/documents/use-focus-field-from-hash";
 import {
+  canEditDocumentFile,
+  documentEditorPath,
+  manualEditsConflict,
+  type ManualEditsConflict,
+} from "@/features/word-editor/word-editor-model";
+import {
   combineQueries,
   useDocument,
   useDownloadGenerated,
+  useEditorEnabled,
   useGenerateDocument,
   useRetryPdf,
   useSaveDocumentValues,
@@ -36,6 +43,11 @@ import { useSeedOnce } from "@/hooks/use-seed-once";
 import { ApiError, type Document, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
+
+// V1.7 P2.1: loaded when generate asks about manual edits.
+const ManualEditsDialog = lazy(() =>
+  import("@/features/word-editor/ManualEditsDialog").then((module) => ({ default: module.ManualEditsDialog })),
+);
 
 // Same rule as the backend (document_permissions.EDITABLE_STATUSES).
 const EDITABLE_STATUSES = ["draft", "generated"];
@@ -64,6 +76,8 @@ export function EditDocumentPage() {
   const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
   // Success message of the last Generate (with an "Open preview" link).
   const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
+  const [manualConflict, setManualConflict] = useState<ManualEditsConflict | null>(null);
+  const editorEnabled = useEditorEnabled();
 
   // Fields as of seeding: the schema and inputs never change under the user.
   const [fields, setFields] = useState<TemplateField[]>([]);
@@ -152,11 +166,12 @@ export function EditDocumentPage() {
     await saveDraft(formData);
   };
 
-  const runGenerate = async () => {
+  const runGenerate = async (replaceManualEdits = false) => {
     setGenerateError(null);
     setGenerateSuccess(null);
     try {
-      const result = await generateDocument.mutateAsync(documentId);
+      const result = await generateDocument.mutateAsync({ documentId, replaceManualEdits });
+      setManualConflict(null);
       setLatestGenerated(result);
       // A PDF failure is not a generation failure: the panel shows it in amber.
       // Shown inline above the panel with an "Open preview" link.
@@ -164,6 +179,13 @@ export function EditDocumentPage() {
       setGenerateSuccess(created ? `${created}. ${generateSuccessMessage(result.pdf_status)}` : generateSuccessMessage(result.pdf_status));
       if (created) toast({ title: created, duration: 2500 });
     } catch (err) {
+      // V1.7 P2.1: the latest version was edited by hand: ask first.
+      const conflict = manualEditsConflict(err);
+      if (conflict) {
+        setManualConflict(conflict);
+        return;
+      }
+      setManualConflict(null);
       // 422 with field errors maps onto the inputs like a failed save.
       setGenerateError(
         describeSaveError(err, "Failed to generate the document. Please try again.") ??
@@ -328,7 +350,26 @@ export function EditDocumentPage() {
             onGenerate={handleGenerate}
             onRetryPdf={() => void handleRetryPdf()}
             onDownload={(format) => void handleDownload(format)}
+            editFileHref={
+              canEditDocumentFile({
+                editorEnabled,
+                documentStatus: document.status,
+                hasDocx: Boolean(latestGenerated ?? document.generated),
+              })
+                ? documentEditorPath(document.id)
+                : null
+            }
           />
+          {manualConflict && (
+            <Suspense fallback={null}>
+              <ManualEditsDialog
+                conflict={manualConflict}
+                generating={generateDocument.isPending}
+                onCancel={() => setManualConflict(null)}
+                onConfirm={() => void runGenerate(true)}
+              />
+            </Suspense>
+          )}
           {(latestGenerated ?? document.generated) && (
             <details className="group rounded-lg border border-slate-200 bg-white">
               <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-slate-800 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">

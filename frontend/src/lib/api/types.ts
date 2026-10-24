@@ -61,7 +61,7 @@ export interface TemplateResponse extends TemplateAudience {
   category: string;
   visibility: string;
   status: string;
-  original_file_path: string;
+  original_file_path: string | null;
   original_filename: string | null;
   file_size_bytes: number | null;
   uploaded_by: number;
@@ -85,6 +85,10 @@ export interface TemplateAudience {
   allowed_roles: string[] | null;
   /** Computed by the server for the current user. */
   can_manage: boolean;
+  /** V1.7 P2.1: set on a personal copy ("Customize for me") of another template. */
+  parent_template_id: number | null;
+  parent_template_name: string | null;
+  is_personal_copy: boolean;
 }
 
 export interface TemplateAccessUpdate {
@@ -536,6 +540,8 @@ export interface PreviewGeneration {
   /** V1.7 P2: the latest version's number and how many versions exist. */
   version: number | null;
   versions_count: number;
+  /** V1.7 P2.1: "manual_edit" when the latest version was edited in the Word editor. */
+  source: string;
 }
 
 export interface PreviewPermissions {
@@ -583,8 +589,14 @@ export interface DocumentValuesResponse {
 
 // --- V1.7 Phase 2: document versions (GET /documents/{id}/versions) ---
 
+/** V1.7 P2.1: "manual_edit" = the Word file was edited by hand (values unchanged). */
+export type VersionSource = "generated" | "manual_edit";
+
 export interface DocumentVersion {
   version: number;
+  source: VersionSource;
+  /** The version a manual edit started from; null for generated versions. */
+  base_version: number | null;
   created_at: string;
   /** "Deleted user" when the account is gone. */
   created_by_name: string;
@@ -633,3 +645,73 @@ export interface ImproveTextResponse {
   improved_items?: string[];
 }
 
+
+// --- V1.7 Phase 2.1: Word file editor (ONLYOFFICE Docs) ---
+
+export type EditorTarget = "template" | "document";
+export type EditorSessionStatus = "open" | "saving" | "saved" | "closed" | "failed" | "expired";
+export type RevisionSource = "upload" | "clean" | "fix_placeholders" | "customize" | "manual_edit" | "restore";
+
+/** GET /system/editor-config */
+export interface EditorStatusConfig {
+  enabled: boolean;
+  document_server_url: string | null;
+}
+
+/** POST .../editor-session: `config` is signed; pass it to DocsAPI.DocEditor unchanged. */
+export interface EditorConfigResponse {
+  session_key: string;
+  document_server_url: string;
+  config: Record<string, any>;
+  /** The user's open session for the same file was reused. */
+  reused: boolean;
+}
+
+/** GET /editor/sessions/{key} */
+export interface EditorSessionRead {
+  session_key: string;
+  status: EditorSessionStatus;
+  target_type: EditorTarget;
+  template_id: number | null;
+  document_id: number | null;
+  /** Template revision / document version created by the save. */
+  result_revision: number | null;
+  result_version: number | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  expires_at: string;
+}
+
+/** GET /templates/{id}/revisions (newest first) */
+export interface TemplateRevision {
+  revision: number;
+  source: RevisionSource;
+  created_at: string;
+  created_by_name: string;
+  placeholders_added: string[];
+  placeholders_removed: string[];
+  blank_suggestions: number;
+  note: string | null;
+  is_current: boolean;
+}
+
+export interface AddedPlaceholder {
+  key: string;
+  suggested_label: string;
+  suggested_type: string;
+}
+
+/** GET /templates/{id}/field-changes: what the current file means for the form. */
+export interface FieldChanges {
+  template_id: number;
+  revision: number;
+  added: AddedPlaceholder[];
+  /** Configured field names no longer in the file. */
+  removed: string[];
+  /** Blanks ("______", empty values, [brackets]) that can become fields. */
+  blank_suggestions: number;
+  renderable: boolean;
+  render_error: string | null;
+  has_changes: boolean;
+}
