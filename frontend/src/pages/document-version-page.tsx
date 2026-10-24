@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, ChevronLeft, Download, Loader2, RotateCcw } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Download, FilePenLine, Loader2, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -11,6 +11,7 @@ import { PreviewSectionCard } from "@/features/document-preview/PreviewSectionCa
 import { previewTitle } from "@/features/document-preview/preview-model";
 import {
   changedFieldsText,
+  manualEditLabel,
   PRUNED_DETAIL,
   restoreConfirmText,
   restoreErrorMessage,
@@ -22,7 +23,8 @@ import {
 } from "@/features/document-versions/version-model";
 import { DraftLoadError, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { useNow } from "@/features/documents/use-draft-form";
-import { useDocument, useDocumentVersion, useDownloadVersion, useRestoreVersion } from "@/hooks/queries";
+import { canEditDocumentFile, documentEditorPath, VALUES_UNCHANGED_NOTE } from "@/features/word-editor/word-editor-model";
+import { useDocument, useDocumentVersion, useDownloadVersion, useEditorEnabled, useRestoreVersion } from "@/hooks/queries";
 import { ApiError } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
@@ -40,6 +42,7 @@ export function DocumentVersionPage() {
   const documentQuery = useDocument(documentId);
   const download = useDownloadVersion();
   const restore = useRestoreVersion();
+  const editorEnabled = useEditorEnabled();
   const [downloading, setDownloading] = useState<VersionFormat | null>(null);
   const [confirming, setConfirming] = useState(false);
   useNow();
@@ -86,6 +89,12 @@ export function DocumentVersionPage() {
 
   const created = parseServerDate(version.created_at);
   const name = previewTitle(document?.name ?? null);
+  const manualLabel = manualEditLabel(version);
+  const canEditFile = canEditDocumentFile({
+    editorEnabled,
+    documentStatus: document?.status,
+    hasDocx: versionDownloadState(version, "docx").enabled,
+  });
 
   const handleDownload = async (format: VersionFormat) => {
     setDownloading(format);
@@ -148,6 +157,11 @@ export function DocumentVersionPage() {
                   Latest
                 </span>
               )}
+              {manualLabel && (
+                <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                  {manualLabel}
+                </span>
+              )}
             </p>
             <p className="mt-1 text-sm text-slate-600">{changedFieldsText(version)}</p>
           </div>
@@ -174,6 +188,14 @@ export function DocumentVersionPage() {
                 </Button>
               );
             })}
+            {canEditFile && (
+              <Button asChild type="button" variant="outline" size="sm">
+                <Link to={documentEditorPath(documentId, version.version)}>
+                  <FilePenLine className="h-4 w-4" aria-hidden="true" />
+                  Edit Word file
+                </Link>
+              </Button>
+            )}
             {canRestore && (
               <Button type="button" size="sm" onClick={() => setConfirming(true)} disabled={restore.isPending}>
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
@@ -191,7 +213,10 @@ export function DocumentVersionPage() {
         </div>
       )}
 
-      <p className="text-xs text-slate-500">Read-only: these are the values this version was generated from.</p>
+      <p className="text-xs text-slate-500">
+        Read-only: these are the values this version was generated from.
+        {manualLabel && ` ${VALUES_UNCHANGED_NOTE}`}
+      </p>
 
       {version.sections.length === 0 ? (
         <p className="rounded-lg border border-dashed border-slate-200 p-6 text-center text-sm text-slate-500">

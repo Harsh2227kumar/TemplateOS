@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useDeleteTemplate, useTemplate } from "@/hooks/queries";
+import { useDeleteTemplate, useEditorEnabled, useTemplate } from "@/hooks/queries";
+import { copyBadgeText } from "@/features/word-editor/word-editor-model";
 import { parseRouteId } from "@/lib/route-params";
 import { useAuth } from "@/context/auth-context";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
   Building,
+  Copy,
   Download,
   Eraser,
   Eye,
@@ -33,6 +35,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { ManageAccessDialog } from "@/components/templates/ManageAccessDialog";
 import { describeRoles } from "@/components/templates/AudienceFields";
+
+// V1.7 P2.1: the Word editor actions and the file history load on demand.
+const TemplateFileActions = lazy(() =>
+  import("@/features/word-editor/TemplateFileActions").then((module) => ({ default: module.TemplateFileActions })),
+);
+const TemplateRevisionsPanel = lazy(() =>
+  import("@/features/word-editor/TemplateRevisionsPanel").then((module) => ({ default: module.TemplateRevisionsPanel })),
+);
 
 const STATUS_BADGE_CLASSES: Record<string, string> = {
   uploaded: "bg-slate-100 text-slate-700",
@@ -88,6 +98,7 @@ export function TemplateDetailPage() {
   const isDeleting = deleteMutation.isPending;
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [accessOpen, setAccessOpen] = useState(false);
+  const editorEnabled = useEditorEnabled();
 
   // Loading covers the first fetch and a retry after an error.
   const isLoading =
@@ -170,6 +181,7 @@ export function TemplateDetailPage() {
   const configAction = canManage ? getConfigAction(template.id, template.status) : null;
   const isRestricted = Boolean(template.allowed_roles?.length);
   const canSubmitDelete = confirmText.trim().toLowerCase() === "confirm" && !isDeleting;
+  const copyBadge = copyBadgeText(template);
 
   const openDeleteDialog = () => {
     setConfirmText("");
@@ -210,6 +222,12 @@ export function TemplateDetailPage() {
             <Badge variant="outline" className="gap-1 border-transparent bg-slate-200 text-slate-700">
               <Eye className="h-3 w-3" />
               View only
+            </Badge>
+          )}
+          {copyBadge && (
+            <Badge variant="outline" className="gap-1 border-violet-200 bg-violet-50 text-violet-800">
+              <Copy className="h-3 w-3" />
+              {copyBadge}
             </Badge>
           )}
         </div>
@@ -338,6 +356,11 @@ export function TemplateDetailPage() {
             Clean Template
           </Button>
         )}
+        {editorEnabled && (
+          <Suspense fallback={null}>
+            <TemplateFileActions template={template} />
+          </Suspense>
+        )}
         <Button variant="outline" disabled title="Coming soon" className="gap-2">
           <Download className="h-4 w-4" />
           Download Original
@@ -354,6 +377,12 @@ export function TemplateDetailPage() {
           </Button>
         )}
       </div>
+
+      {editorEnabled && (
+        <Suspense fallback={<Skeleton className="h-24 w-full" />}>
+          <TemplateRevisionsPanel templateId={template.id} canRestore={canManage} />
+        </Suspense>
+      )}
 
       {canManage && (
         <ManageAccessDialog

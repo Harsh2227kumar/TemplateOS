@@ -1,5 +1,6 @@
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, Download, FileOutput, FileText, Info, Loader2, RefreshCw, RotateCw } from "lucide-react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, Download, FileOutput, FilePenLine, FileText, Info, Loader2, RefreshCw, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,6 +31,8 @@ interface GenerationPanelProps {
   onGenerate: () => void;
   onRetryPdf: () => void;
   onDownload: (format: DownloadFormat) => void;
+  /** V1.7 P2.1: the Word editor page for the latest version (hidden when null). */
+  editFileHref?: string | null;
 }
 
 /**
@@ -48,6 +51,7 @@ export function GenerationPanel({
   onGenerate,
   onRetryPdf,
   onDownload,
+  editFileHref = null,
 }: GenerationPanelProps) {
   const generatedDate = parseServerDate(generated?.generated_at);
   const stale = Boolean(generated && (generated.is_stale || isDirty));
@@ -133,6 +137,7 @@ export function GenerationPanel({
                 downloading={downloading === "docx"}
                 downloadDisabled={downloading !== null}
                 onDownload={() => onDownload("docx")}
+                editHref={editFileHref}
               />
             )}
             <PdfRow
@@ -156,27 +161,39 @@ export interface DocxRowProps {
   downloading: boolean;
   downloadDisabled: boolean;
   onDownload: () => void;
+  /** V1.7 P2.1: "Edit Word file" link (the latest version). */
+  editHref?: string | null;
 }
 
 /** The generated Word file row (shared with the V1.7 preview page). Render inside a <ul>. */
-export function DocxRow({ downloading, downloadDisabled, onDownload }: DocxRowProps) {
+export function DocxRow({ downloading, downloadDisabled, onDownload, editHref = null }: DocxRowProps) {
   return (
     <li className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
       <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
         <FileText className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
         Word document (DOCX)
       </span>
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onClick={onDownload}
-        disabled={downloadDisabled}
-        className="w-full shrink-0 sm:w-auto"
-      >
-        {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-        Download DOCX
-      </Button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+        {editHref && (
+          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+            <Link to={editHref}>
+              <FilePenLine className="h-4 w-4" aria-hidden="true" />
+              Edit Word file
+            </Link>
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={onDownload}
+          disabled={downloadDisabled}
+          className="w-full shrink-0 sm:w-auto"
+        >
+          {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Download DOCX
+        </Button>
+      </div>
     </li>
   );
 }

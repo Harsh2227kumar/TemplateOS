@@ -12,6 +12,7 @@ import {
 } from "@/features/documents/generation";
 import type { DocumentPreview } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
+import { VALUES_UNCHANGED_NOTE } from "@/features/word-editor/word-editor-model";
 
 import { PdfPreviewToggle } from "./PdfPreview";
 import { previewPdfState } from "./preview-model";
@@ -27,6 +28,8 @@ interface GeneratedDocumentCardProps {
   onDownload: (format: DownloadFormat) => void;
   pdfPreviewOpen: boolean;
   onPdfPreviewOpenChange: (open: boolean) => void;
+  /** V1.7 P2.1: the Word editor page for the latest version (hidden when null). */
+  editFileHref?: string | null;
 }
 
 /**
@@ -43,6 +46,7 @@ export function GeneratedDocumentCard({
   onDownload,
   pdfPreviewOpen,
   onPdfPreviewOpenChange,
+  editFileHref = null,
 }: GeneratedDocumentCardProps) {
   const { generation, permissions } = preview;
   const summary = generationSummary(generation, Boolean(generation?.is_stale));
@@ -71,7 +75,15 @@ export function GeneratedDocumentCard({
                 {generatedDate ? formatDistanceToNow(generatedDate, { addSuffix: true }) : "earlier"}
               </span>
               {generation.template_version ? ` · template v${generation.template_version}` : null}
+              {generation.source === "manual_edit" && (
+                <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                  Edited manually
+                </span>
+              )}
             </p>
+          )}
+          {generation?.source === "manual_edit" && (
+            <p className="text-xs text-slate-500">{VALUES_UNCHANGED_NOTE}</p>
           )}
         </div>
 
@@ -122,6 +134,7 @@ export function GeneratedDocumentCard({
                 downloading={downloading === "docx"}
                 downloadDisabled={downloading !== null}
                 onDownload={() => onDownload("docx")}
+                editHref={editFileHref}
               />
             )}
             <PdfRow

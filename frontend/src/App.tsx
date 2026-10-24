@@ -24,6 +24,16 @@ import { AdminOrganizationsPage } from "./pages/admin-organizations-page";
 const DocumentVersionPage = lazy(() =>
   import("./pages/document-version-page").then((module) => ({ default: module.DocumentVersionPage })),
 );
+// V1.7 P2.1: the Word file editor pages (ONLYOFFICE) load on demand.
+const TemplateFileEditorPage = lazy(() =>
+  import("./pages/template-file-editor-page").then((module) => ({ default: module.TemplateFileEditorPage })),
+);
+const DocumentFileEditorPage = lazy(() =>
+  import("./pages/document-file-editor-page").then((module) => ({ default: module.DocumentFileEditorPage })),
+);
+const TemplateFieldChangesPage = lazy(() =>
+  import("./pages/template-field-changes-page").then((module) => ({ default: module.TemplateFieldChangesPage })),
+);
 
 export function App() {
   return (
@@ -42,9 +52,33 @@ export function App() {
           <Route path="/templates/:id/placeholders" element={<PlaceholderReviewPage />} />
           <Route path="/templates/:id/clean" element={<TemplateCleaningPage />} />
           <Route path="/templates/:id/fields" element={<FieldSetupPage />} />
+          <Route
+            path="/templates/:id/edit-file"
+            element={
+              <Suspense fallback={<DraftLoadingSkeleton />}>
+                <TemplateFileEditorPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/templates/:id/field-changes"
+            element={
+              <Suspense fallback={<DraftLoadingSkeleton />}>
+                <TemplateFieldChangesPage />
+              </Suspense>
+            }
+          />
           <Route path="/documents/create/:id" element={<CreateDocumentPage />} />
           <Route path="/documents/:id/edit" element={<EditDocumentPage />} />
           <Route path="/documents/:id/preview" element={<DocumentPreviewPage />} />
+          <Route
+            path="/documents/:id/edit-file"
+            element={
+              <Suspense fallback={<DraftLoadingSkeleton />}>
+                <DocumentFileEditorPage />
+              </Suspense>
+            }
+          />
           <Route
             path="/documents/:id/versions/:version"
             element={

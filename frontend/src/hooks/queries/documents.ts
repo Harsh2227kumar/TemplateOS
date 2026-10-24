@@ -92,12 +92,21 @@ function useInvalidateDocument() {
   };
 }
 
-/** POST /documents/{id}/generate. A 422 carries field errors like a save. */
+export interface GenerateRequest {
+  documentId: number;
+  /** V1.7 P2.1: confirmed replacing a manually edited latest version. */
+  replaceManualEdits?: boolean;
+}
+
+/**
+ * POST /documents/{id}/generate. A 422 carries field errors like a save;
+ * a 409 with code "manual_edits" asks first (see manualEditsConflict).
+ */
 export function useGenerateDocument() {
   const invalidate = useInvalidateDocument();
-  return useMutation<GenerateDocumentResponse, ApiError, number>({
-    mutationFn: (documentId) => documentsApi.generate(documentId),
-    onSettled: (_data, _error, documentId) => invalidate(documentId),
+  return useMutation<GenerateDocumentResponse, ApiError, GenerateRequest>({
+    mutationFn: ({ documentId, replaceManualEdits }) => documentsApi.generate(documentId, { replaceManualEdits }),
+    onSettled: (_data, _error, { documentId }) => invalidate(documentId),
   });
 }
 

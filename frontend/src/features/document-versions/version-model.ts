@@ -24,14 +24,22 @@ export function versionMeta(version: Pick<DocumentVersion, "version" | "created_
   return [versionLabel(version), relativeTime, `by ${version.created_by_name}`].filter(Boolean).join(" · ");
 }
 
+/** V1.7 P2.1: "Edited manually" (+ " from v3"), or null for a generated version. */
+export function manualEditLabel(version: Pick<DocumentVersion, "source" | "base_version">): string | null {
+  if (version.source !== "manual_edit") return null;
+  return version.base_version ? `Edited manually from v${version.base_version}` : "Edited manually";
+}
+
 /**
  * "Changed: Discussion, Venue" from field names (labels where known).
  * Version 1 is the first version; an unchanged regenerate says so.
+ * A manual edit changes the Word file, not the values.
  */
 export function changedFieldsText(
-  version: Pick<DocumentVersion, "version" | "changed_fields">,
+  version: Pick<DocumentVersion, "version" | "changed_fields"> & Partial<Pick<DocumentVersion, "source">>,
   labelOf: (fieldName: string) => string = (name) => name,
 ): string {
+  if (version.source === "manual_edit") return "Word file edited; values unchanged";
   if (version.version <= 1) return "First version";
   if (version.changed_fields.length === 0) return "No value changes";
   return `Changed: ${version.changed_fields.map(labelOf).join(", ")}`;

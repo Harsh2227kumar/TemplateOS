@@ -4,3 +4,4 @@ export * from "./documents";
 export * from "./ai";
 export * from "./combine";
 export * from "./admin";
+export * from "./word-editor";

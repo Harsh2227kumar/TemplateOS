@@ -1,19 +1,21 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Download, Eye, History, Loader2, RotateCcw } from "lucide-react";
+import { Download, Eye, FilePenLine, History, Loader2, RotateCcw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
-import { useDocumentVersions, useDownloadVersion, useRestoreVersion } from "@/hooks/queries";
+import { useDocumentVersions, useDownloadVersion, useEditorEnabled, useRestoreVersion } from "@/hooks/queries";
+import { documentEditorPath } from "@/features/word-editor/word-editor-model";
 import { ApiError, type Document, type DocumentVersion } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import {
   changedFieldsText,
+  manualEditLabel,
   restoreConfirmText,
   restoreErrorMessage,
   versionDownloadErrorMessage,
@@ -63,6 +65,8 @@ export function VersionHistoryPanel({
   className,
 }: VersionHistoryPanelProps) {
   const versionsQuery = useDocumentVersions(documentId);
+  // V1.7 P2.1: editing a version's Word file needs the editor and an editable draft.
+  const canEditFile = useEditorEnabled() && canRestore;
   const download = useDownloadVersion();
   const restore = useRestoreVersion();
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -150,6 +154,11 @@ export function VersionHistoryPanel({
                     Latest
                   </span>
                 )}
+                {manualEditLabel(version) && (
+                  <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+                    {manualEditLabel(version)}
+                  </span>
+                )}
               </div>
               <p className="break-words text-xs text-slate-600">{changedFieldsText(version, labelOf)}</p>
               <p
@@ -191,6 +200,14 @@ export function VersionHistoryPanel({
                     View<span className="sr-only"> {versionLabel(version)}</span>
                   </Link>
                 </Button>
+                {canEditFile && docx.enabled && (
+                  <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-xs">
+                    <Link to={documentEditorPath(documentId, version.version)}>
+                      <FilePenLine className="h-3.5 w-3.5" aria-hidden="true" />
+                      Edit Word file<span className="sr-only"> of {versionLabel(version)}</span>
+                    </Link>
+                  </Button>
+                )}
                 {canRestore && (
                   <Button
                     type="button"
