@@ -3311,6 +3311,7 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 #### Issues Fixed
 
 - Replacing a processed file used to delete the old one; revisions now keep the history readable.
+- Found with the real container: a required `${ONLYOFFICE_JWT_SECRET:?}` broke every compose command (also `docker compose up -d gotenberg`). The secret is now optional, the service is in an `editor` profile (`docker compose up -d onlyoffice` still starts it), and `ALLOW_PRIVATE_IP_ADDRESS=true` lets it download from `host.docker.internal`.
 
 #### Notes For Next Push
 
@@ -3349,10 +3350,12 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 #### Issues Fixed
 
 - Found in the browser check: cleaning reads `original_file_path`, so blanks typed in the editor were not offered and applying cleaning would have overwritten the edited file. An activated edit or restore now becomes the cleaning source too (the uploaded original stays in revision 1).
+- Found with the real container: the lock message showed the server's UTC time. The 409 is now `{"detail", "code": "editor_locked", "user_name", "since"}` (ISO UTC) so the browser shows local time.
 
 #### Notes For Next Push
 
 - 10 new API tests (fake Document Server, fake converter); full suite 767 passed, 1 skipped; ruff clean on the changed files.
+- Verified against `onlyoffice/documentserver:8.3`: signed config accepted, file served through the HMAC link, real save callbacks (status 2 and 4) stored as a template revision and a `manual_edit` version with its Gotenberg PDF.
 - Callbacks must reach the backend: set `BACKEND_URL_FOR_ONLYOFFICE` (default `http://host.docker.internal:8000`) and run uvicorn with `--host 0.0.0.0` when the Document Server runs in Docker.
 
 ### Checkpoint 0069
@@ -3388,10 +3391,11 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 #### Issues Fixed
 
 - `TemplateResponse.original_file_path` is nullable in the API; the TS type now says so.
+- Found in the browser checks: the editor was destroyed after React detached its iframe (now a layout-effect cleanup); "Customize for me" had its tooltip as accessible name; the lock time is now shown in the user's zone.
 
 #### Notes For Next Push
 
-- Integration check (M3 + M2 + M1, scratch SQLite): backend 767 passed; frontend tsc, 141/141 tests, build; types vs backend schemas compared field by field (20 pairs, 0 differences).
-- Browser check against a stand-in Document Server (Docker was not running, so no real ONLYOFFICE or Gotenberg): faculty Customize for me -> edit adds "Date of meeting: ____" -> field changes -> clean -> form shows Date of Meeting -> v1 DOCX has it; edit v1 by hand -> v2 "Edited manually from v1"; Regenerate asks first -> v3; admin's original unchanged; admin gets the shared-template warning. Still to do with the real `onlyoffice` container: the same flow, two-user lock, 375 px layout, PDF of manual versions.
+- Integration check (M3 + M2 + M1, scratch SQLite): backend 767 passed; frontend tsc, 142/142 tests, build; types vs backend schemas compared field by field (20 pairs, 0 differences).
+- Browser check with the real `onlyoffice/documentserver:8.3` container and real Gotenberg: faculty Customize for me -> typed "Date of meeting: ________" in ONLYOFFICE -> Done -> saved in about 10 s -> field changes (1 blank) -> clean -> Date of Meeting field -> v1 DOCX and PDF show 24-10-2026; edited v1 in ONLYOFFICE -> v2 "Edited manually from v1" with the added line in DOCX and PDF; closing without changes says "No changes were made"; a second user gets "Being edited by ... since <local time>"; 375 px: Done editing reachable, editor fits. Earlier stand-in run also covered Regenerate -> "Generate anyway" -> v3, revision restore, the admin's shared-template warning, and the admin's original staying unchanged.
 - Bundle: editor code is lazy; main chunk +7.2 kB raw / +2.0 kB gzip.
 - Merge order: data PR -> `backend`, retarget the API PR to `backend` and merge, frontend PR -> `frontend`, then `backend` and `frontend` into `dev`. Run `alembic upgrade head` (applies `b8e4c2a6d1f9`).
