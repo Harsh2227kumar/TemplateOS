@@ -302,6 +302,10 @@ def test_template_save_callback_records_revision_and_field_changes(editor_on):
     detail = client.get(f"{API}/templates/{template_id}", headers=_auth(admin)).json()
     assert detail["version"] == 2 and detail["status"] == "placeholder_detected"
     assert storage_service.read_bytes(detail["processed_file_path"]) == edited
+    # Cleaning reads the edited file too (its blanks can become fields).
+    assert detail["original_file_path"] == detail["processed_file_path"]
+    content = client.get(f"{API}/templates/{template_id}/content", headers=_auth(admin)).json()
+    assert "Date of meeting" in json.dumps(content)
 
     changes = client.get(f"{API}/templates/{template_id}/field-changes", headers=_auth(admin)).json()
     assert [(a["key"], a["suggested_type"]) for a in changes["added"]] == [("meeting_date", "date")]

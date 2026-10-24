@@ -254,6 +254,10 @@ def _activate_template_file(
     """
     Record revision N+1 for a stored file; switch the template to it when
     docxtpl can parse it. Returns (revision, render_error). Not committed.
+
+    The file becomes both the fill-ready file and the cleaning source, so
+    "Turn blanks into fields" works on the edited text (cleaning reads
+    original_file_path); the uploaded original stays in revision 1.
     """
     error = check_renderable(content)
     template.version = (template.version or 1) + 1
@@ -268,6 +272,7 @@ def _activate_template_file(
     )
     if error is None:
         template.processed_file_path = path
+        template.original_file_path = path
         if (revision.added_names or revision.removed_names) and template.status in _REVIEWED_STATUSES:
             template.status = "placeholder_detected"
     return revision, error
@@ -285,7 +290,7 @@ def restore_revision(db: Session, user: User, template: Template, number: int) -
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=f"The file of revision {number} is missing on the server") from None
     error = check_renderable(content)
     if error:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Revision {number} cannot be used: {error}")
+        raise HTTPException(status_code=422, detail=f"Revision {number} cannot be used: {error}")
     stored = storage_service.save_bytes("templates_revisions", template.original_filename or "template.docx", content)
     try:
         _activate_template_file(
