@@ -28,16 +28,25 @@ services:
   #   ONLYOFFICE_JWT_SECRET=<same value as in .env> docker compose up -d onlyoffice
   # Then set ONLYOFFICE_ENABLED=true, ONLYOFFICE_PUBLIC_URL=http://localhost:8082
   # and ONLYOFFICE_JWT_SECRET in .env. The container reaches the backend on the
-  # host through host.docker.internal (BACKEND_URL_FOR_ONLYOFFICE).
+  # host through host.docker.internal (BACKEND_URL_FOR_ONLYOFFICE), so run
+  # uvicorn with --host 0.0.0.0 while editing.
   onlyoffice:
     image: onlyoffice/documentserver:8.3
+    # Not part of a plain `docker compose up`; naming the service starts it.
+    profiles: ["editor"]
     container_name: templateos-onlyoffice
     ports:
       - "8082:80"
     environment:
       JWT_ENABLED: "true"
-      JWT_SECRET: "${ONLYOFFICE_JWT_SECRET:?set ONLYOFFICE_JWT_SECRET}"
+      # Must equal the backend's ONLYOFFICE_JWT_SECRET. Not required here so
+      # the other services start without it (unset = a random secret, and the
+      # editor then reports a token error).
+      JWT_SECRET: "${ONLYOFFICE_JWT_SECRET:-}"
       JWT_HEADER: "Authorization"
+      # The backend is reached via host.docker.internal (a private address),
+      # which the Document Server refuses to download from by default.
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
