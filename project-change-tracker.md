@@ -3277,3 +3277,125 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Bundle: Tiptap is only in lazy chunks (`RichTextEditor` 115 kB + shared 407 kB); the main chunk grows 17 kB raw / 5.8 kB gzip (rich model for validation and saving, AI flags, version hooks), slightly over the 5 kB target.
 - `tsconfig.app.json` now allows `.ts` import extensions so pure modules can import each other and stay testable with `node --test`.
 - Merge order: #182 -> `backend`, retarget #183 to `backend` and merge, #184 -> `frontend`, then integrate `backend` and `frontend` into `dev`. After merging run `alembic upgrade head` (applies `a7d3f9c1e5b8`).
+
+### Checkpoint 0067
+
+- Date: 2026-10-24
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v17-p21-word-editor-data` (from `backend`, PR into `backend`); tracker on `docs/project-change-tracker-v17-p21` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0066 -> 2026-10-24
+
+#### Summary
+
+- V1.7 Phase 2.1 data layer for the Word file editor (ONLYOFFICE Docs Community Edition): template file revisions, personal template copies, manual-edit document versions and editor sessions.
+
+#### Completed Tasks
+
+- Migration `b8e4c2a6d1f9` (after `a7d3f9c1e5b8`): `templates.parent_template_id`, `template_revisions` (unique per template + revision, source CHECK, placeholders added/removed, blank count, note), `document_versions.source` (`generated` / `manual_edit`) and `base_version_id`, `editor_sessions` (unique session key, target/status CHECKs, target index). Backfills one `upload` revision per template with a file. Works on PostgreSQL and SQLite (batch mode).
+- Models `TemplateRevision`, `EditorSession`; `Template.parent` / `revisions`; `DocumentVersion.source` / `base_version`.
+- CRUD: `template_revision_crud` (add/list/get, `field_changes` with suggested label and type for new placeholders), `template_copy_crud` ("X (my copy)", files and fields copied, private, `customize` revision), `editor_session_crud` (open or reuse, one editor per file with "Being edited by ... since ...", expiry, saving/saved/closed/failed), `create_version(source=, base_version=)`.
+- Storage category `templates/revisions`; file cleanup covers revision files on template and user delete; superseded processed files are kept (revisions reference them).
+- Settings `ONLYOFFICE_*`, `BACKEND_URL_FOR_ONLYOFFICE`, `EDITOR_SESSION_TTL_MINUTES`, `EDITOR_MAX_FILE_MB` (secret of 32+ characters required when enabled); `docker-compose.yml` `onlyoffice` service (`onlyoffice/documentserver:8.3`, port 8082, JWT on); schemas in `app/schemas/editor.py`.
+
+#### Code Changes
+
+- `backend/alembic/versions/b8e4c2a6d1f9_word_file_editor.py` (new), `backend/app/models/template_revision.py`, `editor_session.py` (new), `template.py`, `document_version.py`, `__init__.py`, `backend/app/crud/template_revision_crud.py`, `template_copy_crud.py`, `editor_session_crud.py` (new), `document_version_crud.py`, `backend/app/services/storage_service.py`, `generated_file_cleanup.py`, `backend/app/api/v1/endpoints/_template_common.py`, `backend/app/core/config.py`, `backend/app/schemas/editor.py` (new), `template.py`, `document_version.py`, `__init__.py`, `.env.example`, `docker-compose.yml`, tests `test_v17_p21_migration.py`, `test_word_editor_data.py` (new), `test_v17_p2_migration.py`
+
+#### Features Added / Updated / Removed
+
+- Added: template revisions, personal copies, editor sessions, manual-edit version source.
+- Updated: document versions, template schemas (`parent_template_id`, `parent_template_name`, `is_personal_copy`), processed-file replacement (keeps old files).
+- Removed: none.
+
+#### Issues Fixed
+
+- Replacing a processed file used to delete the old one; revisions now keep the history readable.
+- Found with the real container: a required `${ONLYOFFICE_JWT_SECRET:?}` broke every compose command (also `docker compose up -d gotenberg`). The secret is now optional, the service is in an `editor` profile (`docker compose up -d onlyoffice` still starts it), and `ALLOW_PRIVATE_IP_ADDRESS=true` lets it download from `host.docker.internal`.
+
+#### Notes For Next Push
+
+- 13 new tests; full suite 744 passed, 1 skipped (SQLite).
+- After merging run `alembic upgrade head` (applies `b8e4c2a6d1f9`).
+
+### Checkpoint 0068
+
+- Date: 2026-10-24
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v17-p21-word-editor-api` (stacked on `feature/backend-v17-p21-word-editor-data`; retarget to `backend` after the data PR merges)
+- Push status: before push
+- Range covered: after Checkpoint 0067 -> 2026-10-24
+
+#### Summary
+
+- V1.7 Phase 2.1 editor API: signed ONLYOFFICE editor sessions for template files and generated versions, verified save callbacks, Customize for me, template revisions and the field-changes review.
+
+#### Completed Tasks
+
+- `onlyoffice_service`: editor config signed with HS256 (passed to the browser unchanged), HMAC file links with expiry, callback JWT from the body or `Authorization` header, download only from the configured Document Server origin (SSRF guard), no redirects, size cap, DOCX validation.
+- `word_editor_service` + `word_editor` endpoints: `GET /system/editor-config`, `POST /templates/{id}/customize`, `POST /templates/{id}/editor-session` (managers; others get the "Customize for me" hint), `GET /templates/{id}/revisions`, `POST .../revisions/{r}/restore`, `GET /templates/{id}/field-changes`, `POST /documents/{id}/editor-session?version=n`, `GET /editor/sessions/{key}`, `GET /editor/files/{key}` and `POST /editor/callback/{key}` (Document Server only, no cookies).
+- Template save: new revision; the file becomes current only when docxtpl can render it (otherwise "Not activated: ..."), status back to `placeholder_detected` when placeholders changed. Document save: a new `manual_edit` version from the base version's values, DOCX + PDF, retention applied; the form values are not changed.
+- Generate answers 409 `{"code": "manual_edits", "version": n}` when the latest version was edited by hand, unless `replace_manual_edits=true`. Upload, clean and fix-placeholders now record revisions.
+
+#### Code Changes
+
+- `backend/app/services/onlyoffice_service.py`, `word_editor_service.py` (new), `backend/app/api/v1/endpoints/word_editor.py` (new), `api.py`, `_template_common.py`, `templates.py`, `template_cleaning.py`, `template_placeholders.py`, `documents.py`, `document_versions.py`, `backend/app/schemas/document_preview.py`, tests `test_v17_p21_api.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Word editor API, personal copies, revision restore, field-changes review.
+- Updated: generate (manual-edit guard), versions (`source`, `base_version`), preview (`generation.source`).
+- Removed: none.
+
+#### Issues Fixed
+
+- Found in the browser check: cleaning reads `original_file_path`, so blanks typed in the editor were not offered and applying cleaning would have overwritten the edited file. An activated edit or restore now becomes the cleaning source too (the uploaded original stays in revision 1).
+- Found with the real container: the lock message showed the server's UTC time. The 409 is now `{"detail", "code": "editor_locked", "user_name", "since"}` (ISO UTC) so the browser shows local time.
+
+#### Notes For Next Push
+
+- 10 new API tests (fake Document Server, fake converter); full suite 767 passed, 1 skipped; ruff clean on the changed files.
+- Verified against `onlyoffice/documentserver:8.3`: signed config accepted, file served through the HMAC link, real save callbacks (status 2 and 4) stored as a template revision and a `manual_edit` version with its Gotenberg PDF.
+- Callbacks must reach the backend: set `BACKEND_URL_FOR_ONLYOFFICE` (default `http://host.docker.internal:8000`) and run uvicorn with `--host 0.0.0.0` when the Document Server runs in Docker.
+
+### Checkpoint 0069
+
+- Date: 2026-10-24
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v17-p21-word-editor` (from `frontend`, PR into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0068 -> 2026-10-24
+
+#### Summary
+
+- V1.7 Phase 2.1 UI: edit template Word files (personal copies or, for managers, the original) and generated documents in the embedded ONLYOFFICE editor.
+
+#### Completed Tasks
+
+- Editor script loaded from the Document Server URL (no npm package), signed config passed unchanged, editor destroyed before React removes its iframe, "Done editing" then save-status polling (1 s -> 2 s, "Still saving" after 90 s); locked / removed / disabled states explained.
+- Lazy routes `/templates/:id/edit-file`, `/documents/:id/edit-file?version=n`, `/templates/:id/field-changes`.
+- Template detail: "Customize for me", "Edit Word file" (warning before editing a shared original), "My copy of ..." badge (also on library cards), file history with restore; editor help panel with field chips that copy `{{ name }}`.
+- Field changes page: new placeholders (label + type), removed fields, blanks; routes into clean / detect / fields, or "Create a draft"; render error with "Open the editor again" and "Restore revision n".
+- Documents: "Edit Word file" on the generated card, the edit page panel, every history row and the version page; "Edited manually from vN" badges; regenerate asks first on 409 `manual_edits` ("Generate anyway").
+
+#### Code Changes
+
+- `frontend/src/features/word-editor/*` (new), `frontend/src/pages/template-file-editor-page.tsx`, `document-file-editor-page.tsx`, `template-field-changes-page.tsx` (new), `App.tsx`, `template-detail-page.tsx`, `document-preview-page.tsx`, `document-version-page.tsx`, `edit-document-page.tsx`, `frontend/src/lib/api/word-editor.ts` (new), `types.ts`, `documents.ts`, `client.ts` (coded error details), `index.ts`, `frontend/src/hooks/queries/word-editor.ts`, `word-editor-actions.ts` (new), `documents.ts`, `index.ts`, `frontend/src/lib/query/keys.ts`, `frontend/src/features/document-versions/*`, `frontend/src/features/documents/GenerationPanel.tsx`, `frontend/src/features/document-preview/GeneratedDocumentCard.tsx`, `frontend/src/components/templates/TemplateCard.tsx`, tests `word-editor.test.ts` (new), `versions.test.ts`
+
+#### Features Added / Updated / Removed
+
+- Added: Word editor pages, Customize for me, field-changes review, template file history, manual-edit badges and regenerate confirmation.
+- Updated: version history rows, generated-file rows, template detail and library cards.
+- Removed: none.
+
+#### Issues Fixed
+
+- `TemplateResponse.original_file_path` is nullable in the API; the TS type now says so.
+- Found in the browser checks: the editor was destroyed after React detached its iframe (now a layout-effect cleanup); "Customize for me" had its tooltip as accessible name; the lock time is now shown in the user's zone.
+
+#### Notes For Next Push
+
+- Integration check (M3 + M2 + M1, scratch SQLite): backend 767 passed; frontend tsc, 142/142 tests, build; types vs backend schemas compared field by field (20 pairs, 0 differences).
+- Browser check with the real `onlyoffice/documentserver:8.3` container and real Gotenberg: faculty Customize for me -> typed "Date of meeting: ________" in ONLYOFFICE -> Done -> saved in about 10 s -> field changes (1 blank) -> clean -> Date of Meeting field -> v1 DOCX and PDF show 24-10-2026; edited v1 in ONLYOFFICE -> v2 "Edited manually from v1" with the added line in DOCX and PDF; closing without changes says "No changes were made"; a second user gets "Being edited by ... since <local time>"; 375 px: Done editing reachable, editor fits. Earlier stand-in run also covered Regenerate -> "Generate anyway" -> v3, revision restore, the admin's shared-template warning, and the admin's original staying unchanged.
+- Bundle: editor code is lazy; main chunk +7.2 kB raw / +2.0 kB gzip.
+- Merge order: data PR -> `backend`, retarget the API PR to `backend` and merge, frontend PR -> `frontend`, then `backend` and `frontend` into `dev`. Run `alembic upgrade head` (applies `b8e4c2a6d1f9`).
