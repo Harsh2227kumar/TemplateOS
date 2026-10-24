@@ -85,6 +85,8 @@ def version_read(
     creator = version.creator
     return DocumentVersionRead(
         version=version.version,
+        source=version.source,
+        base_version=version.base_version.version if version.base_version is not None else None,
         created_at=version.created_at,
         created_by_name=(creator.full_name or creator.email) if creator else DELETED_USER,
         template_version=version.template_version,

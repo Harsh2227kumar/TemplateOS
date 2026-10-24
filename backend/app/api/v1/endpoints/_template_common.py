@@ -40,6 +40,25 @@ def read_stored(path: str) -> bytes:
         ) from None
 
 
+def record_file_revision(
+    db: Session, template: Template, path: str, content: bytes, source: str, user_id: int | None
+) -> None:
+    """
+    V1.7 P2.1: the template's file changed -> version + 1 and a revision
+    (clean / fix_placeholders / upload). Never fails the pipeline step.
+    """
+    from app.crud.template_revision_crud import add_revision
+
+    try:
+        if source != "upload":
+            template.version = (template.version or 1) + 1
+        add_revision(db, template, source=source, file_path=path, created_by=user_id, docx_bytes=content)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Could not record a %s revision for template %s", source, template.id)
+
+
 def save_processed(db: Session, template: Template, processed_bytes: bytes) -> str:
     """
     Store a new processed copy. V1.7 P2.1: the superseded copy is kept, because

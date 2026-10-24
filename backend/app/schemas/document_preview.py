@@ -99,6 +99,8 @@ class PreviewGeneration(BaseModel):
     # V1.7 P2: the latest version's number and how many versions exist.
     version: int | None = None
     versions_count: int = 0
+    # V1.7 P2.1: "manual_edit" when the latest version was edited by hand.
+    source: str = "generated"
 
 
 class PreviewPermissions(BaseModel):

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import (
     read_stored,
+    record_file_revision,
     require_manage,
     save_processed,
 )
@@ -262,7 +263,8 @@ def fix_placeholders(
             status_code=422, detail="None of the placeholders to fix were found in the document"
         )
 
-    save_processed(db, template, fixed_bytes)
+    fixed_path = save_processed(db, template, fixed_bytes)
+    record_file_revision(db, template, fixed_path, fixed_bytes, "fix_placeholders", current_user.id)
     result = docx_parser.detect_placeholders(fixed_bytes)
     response = _persist_detection(db, template, result, False, "processed")
     logger.info(

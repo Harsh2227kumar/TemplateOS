@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import (
     read_stored,
+    record_file_revision,
     require_manage,
     save_processed,
 )
@@ -307,6 +308,7 @@ def clean_template(
         ) from None
 
     processed_path = save_processed(db, template, processed_bytes)
+    record_file_revision(db, template, processed_path, processed_bytes, "clean", current_user.id)
     template = get_template_by_id(db, template_id) or template
 
     # Upsert a field per MATCHED key (append_field skips existing keys).
