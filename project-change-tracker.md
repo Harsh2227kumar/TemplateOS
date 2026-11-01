@@ -3399,3 +3399,39 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Browser check with the real `onlyoffice/documentserver:8.3` container and real Gotenberg: faculty Customize for me -> typed "Date of meeting: ________" in ONLYOFFICE -> Done -> saved in about 10 s -> field changes (1 blank) -> clean -> Date of Meeting field -> v1 DOCX and PDF show 24-10-2026; edited v1 in ONLYOFFICE -> v2 "Edited manually from v1" with the added line in DOCX and PDF; closing without changes says "No changes were made"; a second user gets "Being edited by ... since <local time>"; 375 px: Done editing reachable, editor fits. Earlier stand-in run also covered Regenerate -> "Generate anyway" -> v3, revision restore, the admin's shared-template warning, and the admin's original staying unchanged.
 - Bundle: editor code is lazy; main chunk +7.2 kB raw / +2.0 kB gzip.
 - Merge order: data PR -> `backend`, retarget the API PR to `backend` and merge, frontend PR -> `frontend`, then `backend` and `frontend` into `dev`. Run `alembic upgrade head` (applies `b8e4c2a6d1f9`).
+
+### Checkpoint 0070
+
+- Date: 2026-11-01
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `fix/frontend-v17-p21-generated-card-ui` (from `frontend`, PR into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0069 -> 2026-11-01
+
+#### Summary
+
+- UI fixes on the document preview after V1.7 Phase 2.1, found from a screenshot of a real draft.
+
+#### Completed Tasks
+
+- The DOCX row wraps: in the narrow preview sidebar the label stays on one line and "Edit Word file" / "Download DOCX" move under it; on the wide edit page they stay on one line.
+- The generated document card says "Edited manually <time>" when the latest version was edited by hand (it said "Generated").
+- Manually edited versions no longer offer "Restore" (history row and version page): restore copies form values, which a manual edit does not change, so it could not bring the hand edits back.
+
+#### Code Changes
+
+- `frontend/src/features/documents/GenerationPanel.tsx`, `frontend/src/features/document-preview/GeneratedDocumentCard.tsx`, `frontend/src/features/document-versions/VersionHistoryPanel.tsx`, `version-model.ts`, `frontend/src/features/word-editor/word-editor-model.ts`, `frontend/src/pages/document-version-page.tsx`, tests `word-editor.test.ts`
+
+#### Features Added / Updated / Removed
+
+- Added: none.
+- Updated: generated-file rows, the generated document card wording, version restore rules.
+- Removed: "Restore" on manually edited versions.
+
+#### Issues Fixed
+
+- "Word document (DOCX)" squeezed into three lines and "Download DOCX" overflowing the card on the preview page since P2.1 added a second button.
+
+#### Notes For Next Push
+
+- tsc, 143/143 tests, build. Browser check on a scratch draft with a generated v1 and a hand-edited v2: no overflow at 1280 px (preview sidebar and edit page) and 375 px; card wording and Restore visibility as above.
