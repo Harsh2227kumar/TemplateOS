@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/toast";
 import { PreviewSectionCard } from "@/features/document-preview/PreviewSectionCard";
 import { previewTitle } from "@/features/document-preview/preview-model";
 import {
+  canRestoreVersion,
   changedFieldsText,
   manualEditLabel,
   PRUNED_DETAIL,
@@ -50,6 +51,7 @@ export function DocumentVersionPage() {
   const version = versionQuery.data ?? null;
   const document = documentQuery.data ?? null;
   const canRestore = !!document && EDITABLE_STATUSES.includes(document.status);
+  const restoreOffered = canRestore && !!versionQuery.data && canRestoreVersion(versionQuery.data);
 
   if (!documentId || !versionNumber) {
     return <DraftNotFound title="Version not found" description="This link is not valid." backTo="/" backLabel="Go to Dashboard" />;
@@ -196,7 +198,7 @@ export function DocumentVersionPage() {
                 </Link>
               </Button>
             )}
-            {canRestore && (
+            {restoreOffered && (
               <Button type="button" size="sm" onClick={() => setConfirming(true)} disabled={restore.isPending}>
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 Restore these values

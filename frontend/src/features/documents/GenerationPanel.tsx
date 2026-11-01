@@ -165,17 +165,20 @@ export interface DocxRowProps {
   editHref?: string | null;
 }
 
-/** The generated Word file row (shared with the V1.7 preview page). Render inside a <ul>. */
+/**
+ * The generated Word file row (shared with the V1.7 preview page). Render inside a <ul>.
+ * Wraps: in a narrow card (preview sidebar) the buttons move under the label.
+ */
 export function DocxRow({ downloading, downloadDisabled, onDownload, editHref = null }: DocxRowProps) {
   return (
-    <li className="flex flex-col gap-2 rounded-md border border-slate-200 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <span className="flex min-w-0 items-center gap-2 text-sm text-slate-700">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-slate-200 p-3">
+      <span className="flex flex-1 items-center gap-2 whitespace-nowrap text-sm text-slate-700">
         <FileText className="h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
         Word document (DOCX)
       </span>
-      <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+      <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:flex-initial">
         {editHref && (
-          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+          <Button asChild variant="outline" size="sm" className="flex-1 whitespace-nowrap">
             <Link to={editHref}>
               <FilePenLine className="h-4 w-4" aria-hidden="true" />
               Edit Word file
@@ -188,7 +191,7 @@ export function DocxRow({ downloading, downloadDisabled, onDownload, editHref = 
           size="sm"
           onClick={onDownload}
           disabled={downloadDisabled}
-          className="w-full shrink-0 sm:w-auto"
+          className="flex-1 whitespace-nowrap"
         >
           {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           Download DOCX
