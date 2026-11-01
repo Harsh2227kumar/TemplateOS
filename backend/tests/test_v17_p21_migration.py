@@ -164,12 +164,12 @@ def test_upgrade_backfills_and_round_trips(migration_db) -> None:
     assert len(_query(db_file, "SELECT id FROM template_revisions")) == 2
 
 
-def test_single_head_is_this_revision() -> None:
+def test_single_head() -> None:
+    # A later phase may add revisions on top; there must still be one head.
     environment = {
         **os.environ,
         "DATABASE_URL": "sqlite://",
         "JWT_SECRET_KEY": "test-secret-that-is-long-enough-for-migration-tests",
     }
     heads = _alembic(environment, "heads").stdout.split()
-    assert heads[0] == REVISION
     assert heads.count("(head)") == 1
