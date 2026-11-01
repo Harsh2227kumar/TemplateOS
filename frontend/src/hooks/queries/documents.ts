@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { serverTime } from "@/lib/dates";
 import { saveBlob } from "@/lib/download";
-import { documentKeys } from "@/lib/query/keys";
+import { documentKeys, historyKeys } from "@/lib/query/keys";
 import {
   fallbackDownloadFilename,
   filenameFromContentDisposition,
@@ -126,9 +126,14 @@ export interface DownloadRequest {
   name?: string | null;
 }
 
-/** Fetch a generated file with the session cookies and save it. */
+/**
+ * Fetch a generated file with the session cookies and save it. The server
+ * records each download (V1.7 P3), so the history lists refresh afterwards.
+ */
 export function useDownloadGenerated() {
+  const queryClient = useQueryClient();
   return useMutation<string, ApiError, DownloadRequest>({
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: historyKeys.all }),
     mutationFn: async ({ documentId, format, name }) => {
       const file = await documentsApi.download(documentId, format);
       const filename =
@@ -179,9 +184,11 @@ export interface VersionDownloadRequest extends DownloadRequest {
   version: number;
 }
 
-/** Fetch one version's file with the session cookies and save it. */
+/** Fetch one version's file with the session cookies and save it (recorded like any download). */
 export function useDownloadVersion() {
+  const queryClient = useQueryClient();
   return useMutation<string, ApiError, VersionDownloadRequest>({
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: historyKeys.all }),
     mutationFn: async ({ documentId, version, format, name }) => {
       const file = await documentsApi.downloadVersion(documentId, version, format);
       const plainName = fallbackDownloadFilename(name, documentId, format);

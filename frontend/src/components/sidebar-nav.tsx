@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Building2, CloudUpload, LayoutGrid, LayoutDashboard, User, UsersRound } from "lucide-react";
+import { Building2, CloudUpload, Download, LayoutGrid, LayoutDashboard, ScrollText, User, UsersRound } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
 import { isUserAdmin } from "@/lib/admin-permissions";
@@ -29,6 +29,11 @@ const navItems: NavItem[] = [
     icon: CloudUpload,
   },
   {
+    label: "Downloads",
+    to: "/downloads",
+    icon: Download,
+  },
+  {
     label: "Profile",
     to: "/profile",
     icon: User,
@@ -39,6 +44,7 @@ const navItems: NavItem[] = [
 const adminItems: NavItem[] = [
   { label: "Users", to: "/admin/users", icon: UsersRound },
   { label: "Organizations", to: "/admin/organizations", icon: Building2 },
+  { label: "Audit log", to: "/admin/audit-log", icon: ScrollText },
 ];
 
 interface SidebarNavProps {

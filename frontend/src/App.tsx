@@ -31,6 +31,13 @@ const TemplateFileEditorPage = lazy(() =>
 const DocumentFileEditorPage = lazy(() =>
   import("./pages/document-file-editor-page").then((module) => ({ default: module.DocumentFileEditorPage })),
 );
+// V1.7 P3: download history and the admin audit log load on demand.
+const DownloadsPage = lazy(() =>
+  import("./pages/downloads-page").then((module) => ({ default: module.DownloadsPage })),
+);
+const AdminAuditLogPage = lazy(() =>
+  import("./pages/admin-audit-log-page").then((module) => ({ default: module.AdminAuditLogPage })),
+);
 const TemplateFieldChangesPage = lazy(() =>
   import("./pages/template-field-changes-page").then((module) => ({ default: module.TemplateFieldChangesPage })),
 );
@@ -46,6 +53,14 @@ export function App() {
         <Route element={<DashboardLayout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/profile" element={<ProfilePage />} />
+          <Route
+            path="/downloads"
+            element={
+              <Suspense fallback={<DraftLoadingSkeleton />}>
+                <DownloadsPage />
+              </Suspense>
+            }
+          />
           <Route path="/upload-template" element={<UploadTemplatePage />} />
           <Route path="/templates" element={<TemplateLibraryPage />} />
           <Route path="/templates/:id" element={<TemplateDetailPage />} />
@@ -92,6 +107,14 @@ export function App() {
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/admin/organizations" element={<AdminOrganizationsPage />} />
+            <Route
+              path="/admin/audit-log"
+              element={
+                <Suspense fallback={<DraftLoadingSkeleton />}>
+                  <AdminAuditLogPage />
+                </Suspense>
+              }
+            />
           </Route>
         </Route>
       </Route>
