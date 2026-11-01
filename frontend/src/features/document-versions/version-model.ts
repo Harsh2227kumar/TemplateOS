@@ -71,6 +71,15 @@ export function versionDownloadState(
   return { enabled: false, reason: version.pdf_status === "converted" ? FILE_MISSING_NOTE : NO_PDF_NOTE };
 }
 
+/**
+ * Restore copies a version's form values. A manual edit did not change the
+ * values (they equal its base version's), so restoring it would only bring
+ * back the base version's values, not the hand edits: not offered.
+ */
+export function canRestoreVersion(version: Pick<DocumentVersion, "source">): boolean {
+  return version.source !== "manual_edit";
+}
+
 /** The confirm text before restoring. */
 export function restoreConfirmText(version: Pick<DocumentVersion, "version">): string {
   return `Replace the current values with ${versionLabel(version)}? Unsaved changes will be lost.`;
