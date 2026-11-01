@@ -13,6 +13,11 @@ export const MANAGER_EDIT_WARNING =
   "Everyone using this template will get your changes in documents they generate from now on. Continue?";
 export const VALUES_UNCHANGED_NOTE = "The form values were not changed by manual edits.";
 
+/** "Generated 5 minutes ago" vs "Edited manually 5 minutes ago" for the latest output. */
+export function outputVerb(source: string | null | undefined): string {
+  return source === "manual_edit" ? "Edited manually" : "Generated";
+}
+
 type TemplateAccess = Pick<TemplateResponse, "can_manage" | "is_personal_copy" | "visibility">;
 
 export interface TemplateEditorActions {

@@ -14,6 +14,7 @@ import {
   copyBadgeText,
   documentEditorPath,
   manualEditsConflict,
+  outputVerb,
   templateEditorActions,
 } from "../src/features/word-editor/word-editor-model.ts";
 import {
@@ -23,7 +24,7 @@ import {
   revisionSourceLabel,
 } from "../src/features/word-editor/editor-review-model.ts";
 import { docsApiScriptUrl } from "../src/features/word-editor/load-docs-api.ts";
-import { changedFieldsText, manualEditLabel } from "../src/features/document-versions/version-model.ts";
+import { canRestoreVersion, changedFieldsText, manualEditLabel } from "../src/features/document-versions/version-model.ts";
 import { templateKeys, wordEditorKeys, keyStartsWith } from "../src/lib/query/keys.ts";
 import type { FieldChanges } from "../src/lib/api/types.ts";
 
@@ -200,4 +201,12 @@ test("editor locked message uses the local time", () => {
   assert.equal(editorLockedMessage({ ...detail, since: "nope" }, format), "Being edited by Asha");
   assert.equal(editorLockedMessage({ code: "manual_edits" }), null);
   assert.equal(editorLockedMessage(undefined), null);
+});
+
+test("manual edits: output label and no value restore", () => {
+  assert.equal(outputVerb("manual_edit"), "Edited manually");
+  assert.equal(outputVerb("generated"), "Generated");
+  assert.equal(outputVerb(undefined), "Generated");
+  assert.equal(canRestoreVersion({ source: "generated" }), true);
+  assert.equal(canRestoreVersion({ source: "manual_edit" }), false);
 });

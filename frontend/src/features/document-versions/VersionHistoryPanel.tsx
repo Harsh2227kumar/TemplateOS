@@ -14,6 +14,7 @@ import { ApiError, type Document, type DocumentVersion } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import {
+  canRestoreVersion,
   changedFieldsText,
   manualEditLabel,
   restoreConfirmText,
@@ -208,7 +209,7 @@ export function VersionHistoryPanel({
                     </Link>
                   </Button>
                 )}
-                {canRestore && (
+                {canRestore && canRestoreVersion(version) && (
                   <Button
                     type="button"
                     variant="ghost"

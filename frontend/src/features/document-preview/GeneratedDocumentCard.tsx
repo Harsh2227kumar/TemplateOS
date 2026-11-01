@@ -12,7 +12,7 @@ import {
 } from "@/features/documents/generation";
 import type { DocumentPreview } from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
-import { VALUES_UNCHANGED_NOTE } from "@/features/word-editor/word-editor-model";
+import { outputVerb, VALUES_UNCHANGED_NOTE } from "@/features/word-editor/word-editor-model";
 
 import { PdfPreviewToggle } from "./PdfPreview";
 import { previewPdfState } from "./preview-model";
@@ -70,16 +70,11 @@ export function GeneratedDocumentCard({
           </h2>
           {generation && (
             <p className="text-sm text-slate-600">
-              Generated{" "}
+              {outputVerb(generation.source)}{" "}
               <span title={generatedDate ? generatedDate.toLocaleString() : undefined}>
                 {generatedDate ? formatDistanceToNow(generatedDate, { addSuffix: true }) : "earlier"}
               </span>
               {generation.template_version ? ` · template v${generation.template_version}` : null}
-              {generation.source === "manual_edit" && (
-                <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
-                  Edited manually
-                </span>
-              )}
             </p>
           )}
           {generation?.source === "manual_edit" && (
