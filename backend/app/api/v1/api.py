@@ -6,6 +6,7 @@ from app.api.v1.endpoints import (
     auth,
     document_versions,
     documents,
+    history,
     system,
     template_ai,
     template_cleaning,
@@ -36,4 +37,6 @@ api_router.include_router(
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 # V1.7 P2.1 Word file editor: routes under /system, /templates, /documents, /editor.
 api_router.include_router(word_editor.router)
+# V1.7 P3: /me/downloads, /documents/{id}/downloads, /admin/audit-logs*.
+api_router.include_router(history.router)
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])

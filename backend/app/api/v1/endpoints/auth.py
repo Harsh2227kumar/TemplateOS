@@ -27,6 +27,7 @@ from app.core.security import (
     verify_password,
 )
 from app.crud.refresh_token_crud import (
+    get_by_token,
     RotationStatus,
     delete_expired_refresh_tokens,
     issue_refresh_token,
@@ -34,6 +35,7 @@ from app.crud.refresh_token_crud import (
     rotate_refresh_token,
 )
 from app.models.user import User
+from app.services import audit_service
 from app.schemas.auth import LoginRequest, SignupRequest, Token
 from app.schemas.user import UserProfileRead, UserRead, UserSelfUpdate
 
@@ -82,6 +84,19 @@ def login(
     user = db.scalar(select(User).where(func.lower(User.email) == email))
     hashed_password = user.hashed_password if user is not None else None
     if not verify_password(payload.password, hashed_password) or user is None:
+        # The submitted email only: never the password.
+        audit_service.record_and_commit(
+            db,
+            request,
+            actor=None,
+            actor_email=email[:255],
+            action="auth.login_failed",
+            entity_type="user",
+            entity_id=user.id if user is not None else None,
+            summary="Failed login",
+            organization_id=user.organization_id if user is not None else None,
+            department_id=user.department_id if user is not None else None,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -90,6 +105,9 @@ def login(
 
     delete_expired_refresh_tokens(db)
     refresh = issue_refresh_token(db, user.id)
+    audit_service.record(
+        db, request, actor=user, action="auth.login", entity_type="user", entity_id=user.id, summary="Signed in"
+    )
     db.commit()
     access_token = create_access_token(str(user.id))
     set_auth_cookies(response, access_token, refresh.token)
@@ -150,7 +168,15 @@ def logout(request: Request, db: DbSession) -> Response:
     Revoke the presented refresh token (if any) and clear both cookies.
     Needs no valid access token, so it works after the access JWT expired.
     """
-    revoke_refresh_token(db, request.cookies.get(REFRESH_COOKIE_NAME))
+    token = request.cookies.get(REFRESH_COOKIE_NAME)
+    record = get_by_token(db, token)
+    user = db.get(User, record.user_id) if record is not None else None
+    revoke_refresh_token(db, token)
+    if user is not None:
+        audit_service.record_and_commit(
+            db, request, actor=user, action="auth.logout", entity_type="user", entity_id=user.id,
+            summary="Signed out",
+        )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_auth_cookies(response)
     return response

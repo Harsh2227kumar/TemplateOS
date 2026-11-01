@@ -161,12 +161,20 @@ class Settings(BaseSettings):
     )
     editor_max_file_mb: int = Field(default=20, ge=1, le=100, alias="EDITOR_MAX_FILE_MB")
 
+    # V1.7 Phase 3: comma-separated proxy IPs whose X-Forwarded-For is trusted
+    # for the client IP in audit / download rows (empty: never trusted).
+    trusted_proxy_ips: str = Field(default="", alias="TRUSTED_PROXY_IPS")
+
     # V1.7 Phase 3: retention of the audit trail and download history
     # (scripts/prune_audit_logs.py deletes older rows).
     audit_retention_days: int = Field(default=365, ge=30, alias="AUDIT_RETENTION_DAYS")
     download_history_retention_days: int = Field(
         default=730, ge=30, alias="DOWNLOAD_HISTORY_RETENTION_DAYS"
     )
+
+    @property
+    def trusted_proxies(self) -> frozenset[str]:
+        return frozenset(ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip())
 
     @property
     def onlyoffice_internal_base(self) -> str | None:

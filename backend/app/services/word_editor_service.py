@@ -66,7 +66,7 @@ from app.schemas.editor import (
     FieldChangesRead,
     TemplateRevisionRead,
 )
-from app.services import onlyoffice_service
+from app.services import audit_service, onlyoffice_service
 from app.services.document_generation import (
     convert_and_record,
     download_filename,
@@ -386,6 +386,27 @@ def serve_session_file(db: Session, session_key: str, token: str | None) -> File
     )
 
 
+def _audit_session(db: Session, session: EditorSession, action: str, summary: str, details: dict) -> None:
+    """
+    Audit an editor outcome. Callbacks come from the Document Server, not a
+    browser: the actor is the session's user and there is no IP. Never the
+    file contents.
+    """
+    target = session.template if session.target_type == "template" else session.document
+    template = session.template if session.target_type == "template" else getattr(target, "template", None)
+    audit_service.record_and_commit(
+        db,
+        None,
+        actor=session.user,
+        action=action,
+        entity_type=session.target_type,
+        entity_id=target.id if target is not None else None,
+        summary=summary,
+        details={"session_key": session.session_key, **details},
+        template=template,
+    )
+
+
 def _store_template_edit(db: Session, session: EditorSession, content: bytes) -> None:
     template = session.template
     stored = storage_service.save_bytes("templates_revisions", template.original_filename or "template.docx", content)
@@ -404,6 +425,23 @@ def _store_template_edit(db: Session, session: EditorSession, content: bytes) ->
         db.rollback()
         delete_stored_files([stored.path])
         raise
+    if error:
+        _audit_session(
+            db, session, "editor.save_failed",
+            f"Edit of '{template.name}' saved as revision {revision.revision} but not used",
+            {"reason": "template could not be read", "revision": revision.revision},
+        )
+    else:
+        _audit_session(
+            db, session, "template.file_edit",
+            f"Edited the Word file of '{template.name}' (revision {revision.revision})",
+            {
+                "revision": revision.revision,
+                "placeholders_added": len(revision.added_names),
+                "placeholders_removed": len(revision.removed_names),
+                "renderable": True,
+            },
+        )
     logger.info("Template %s: editor session %s saved revision %s", template.id, session.session_key, revision.revision)
 
 
@@ -439,6 +477,12 @@ def _store_document_edit(db: Session, session: EditorSession, content: bytes) ->
         db.rollback()
         delete_stored_files([stored.path])
         raise
+    _audit_session(
+        db, session, "document.file_edit",
+        f"Edited the Word file of '{document.name}': v{version.version}"
+        + (f" from v{base.version}" if base is not None else ""),
+        {"version": version.version, "base_version": base.version if base is not None else None},
+    )
     db.refresh(record)
     document_id = document.id
     try:
@@ -475,6 +519,8 @@ def handle_callback(db: Session, session_key: str, body: dict, authorization: st
     if callback_status in (STATUS_SAVE_ERROR, STATUS_FORCE_SAVE_ERROR):
         mark_failed(session, "The document editor could not save the file")
         db.commit()
+        _audit_session(db, session, "editor.save_failed", "The document editor could not save the file",
+                       {"reason": f"editor status {callback_status}"})
         return {"error": 0}
     if callback_status not in (STATUS_READY_FOR_SAVING, STATUS_FORCE_SAVE):
         return {"error": 0}
@@ -495,6 +541,8 @@ def handle_callback(db: Session, session_key: str, body: dict, authorization: st
         session = db.get(EditorSession, session_id)
         mark_failed(session, str(exc))
         db.commit()
+        _audit_session(db, session, "editor.save_failed", "The edited file was rejected",
+                       {"reason": str(exc)[:200]})
         return {"error": 1}
     except Exception:
         logger.exception("Storing the edited file of session %s failed", session_key)
@@ -502,5 +550,7 @@ def handle_callback(db: Session, session_key: str, body: dict, authorization: st
         session = db.get(EditorSession, session_id)
         mark_failed(session, "The edited file could not be stored")
         db.commit()
+        _audit_session(db, session, "editor.save_failed", "The edited file could not be stored",
+                       {"reason": "storage error"})
         return {"error": 1}
     return {"error": 0}

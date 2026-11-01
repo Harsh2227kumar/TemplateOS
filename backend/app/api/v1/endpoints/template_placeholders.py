@@ -5,7 +5,7 @@ and one-click fix of malformed placeholder tokens.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
@@ -32,7 +32,7 @@ from app.schemas.template_field import (
     PlaceholderDetectionResponse,
     TemplateFieldCreate,
 )
-from app.services import docx_parser
+from app.services import audit_service, docx_parser
 from app.services.docx_cleaner import fix_placeholder_tokens, get_renderable_path
 from app.services.field_inference import infer_field_meta
 
@@ -176,6 +176,7 @@ def detect_placeholders(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
     force: bool = Query(False, description="Rebuild the field set from a fresh scan"),
 ) -> PlaceholderDetectionResponse:
     """
@@ -220,6 +221,24 @@ def detect_placeholders(
         f"{len(result.duplicates)} duplicates, {len(response.added_fields)} added, "
         f"{len(response.stale_fields)} stale (already_detected={response.already_detected})"
     )
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.placeholders_detect",
+        entity_type="template",
+        entity_id=template_id,
+        summary=f"Detected placeholders in '{template.name}': {len(response.added_fields)} added",
+        details={
+            "force": force,
+            "source": source_file,
+            "valid": result.unique_valid,
+            "invalid": len(result.invalid_names),
+            "added": list(response.added_fields),
+            "stale": len(response.stale_fields),
+        },
+        template=template,
+    )
     return response
 
 
@@ -232,6 +251,7 @@ def fix_placeholders(
     request: FixPlaceholdersRequest,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> PlaceholderDetectionResponse:
     """
     One-click fix for malformed placeholders: every {{ raw }} token (any
@@ -270,5 +290,16 @@ def fix_placeholders(
     logger.info(
         f"Placeholder fix on template {template_id} by user {current_user.id}: "
         f"{sum(counts)} token(s) renamed"
+    )
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.placeholders_fix",
+        entity_type="template",
+        entity_id=template_id,
+        summary=f"Fixed {sum(counts)} placeholder(s) in '{template.name}'",
+        details={"renamed": {fix.raw: fix.key for fix in request.fixes}, "tokens": sum(counts)},
+        template=template,
     )
     return response
