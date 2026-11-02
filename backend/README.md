@@ -153,6 +153,7 @@ Settings (repository-root `.env`, restart the backend after a change):
 | `GOTENBERG_TIMEOUT_SECONDS` | `60` | Total conversion timeout (connect timeout 5 s) |
 | `PDF_CONVERTER` | `auto` | `auto` / `gotenberg` / `libreoffice` / `none` (`none` = disabled) |
 | `LIBREOFFICE_PATH`, `LIBREOFFICE_TIMEOUT_SECONDS` | unset, `120` | Local LibreOffice fallback |
+| `GENERATED_VERSIONS_KEEP_FILES` | `10` | Every Generate is a new version; files of versions older than the newest N are deleted (their values stay viewable and restorable) |
 
 Checks:
 
@@ -180,6 +181,73 @@ Troubleshooting:
   (known V1 limitation).
 - Tests never call a real Gotenberg (it is mocked with `httpx.MockTransport`).
   The one live test runs only with `GOTENBERG_LIVE_URL=http://localhost:3000`.
+
+## Word file editor (ONLYOFFICE Docs)
+
+Optional. Users edit the real Word file in the browser:
+
+- **Customize for me:** a private copy of a template (fields included).
+  Typing a blank such as `Date of meeting: ________` or `{{ field_name }}`
+  in the copy, then **Done editing**, leads to a "Field changes" page that
+  turns them into fields through the normal clean / detect / fields steps.
+- **Edit Word file** on a template (managers; a warning on shared
+  originals): every save is a template revision, restorable from the
+  template page. A file that no longer renders is kept but not used.
+- **Edit Word file** on a generated document: the save is a new version
+  marked "Edited manually" (DOCX and PDF); form values do not change.
+  Generating again afterwards asks first.
+
+It runs ONLYOFFICE Docs Community Edition (free, AGPL, unmodified, up to
+20 people editing at once) as its own container:
+
+```bash
+docker compose up -d onlyoffice    # ~3 GB image, first start takes a minute or two
+curl http://localhost:8082/healthcheck   # "true" when ready
+```
+
+Then, in the repository-root `.env` (the container reads the same secret):
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `ONLYOFFICE_ENABLED` | `false` | Shows the editor buttons |
+| `ONLYOFFICE_PUBLIC_URL` | unset | Where the browser reaches the Document Server, e.g. `http://localhost:8082` |
+| `ONLYOFFICE_INTERNAL_URL` | the public URL | Where the backend reaches it, if different |
+| `ONLYOFFICE_JWT_SECRET` | unset | 32+ characters; must equal the container's `JWT_SECRET` |
+| `BACKEND_URL_FOR_ONLYOFFICE` | `http://host.docker.internal:8000` | How the container reaches this backend |
+| `EDITOR_SESSION_TTL_MINUTES` | `240` | How long an editing session (and its lock) lasts |
+| `EDITOR_MAX_FILE_MB` | `20` | Largest edited file accepted back |
+
+The container calls the backend back to save, so start uvicorn with
+`--host 0.0.0.0` while editing. The compose service allows downloads from
+private addresses (`host.docker.internal`); without that the Document Server
+refuses to fetch files. One person edits a file at a time; others see
+"Being edited by ... since ...".
+
+## Download history and audit log
+
+- Every successful DOCX/PDF download (latest or a specific version) is
+  recorded; failed downloads are not. Users see theirs on the **Downloads**
+  page (`GET /api/v1/me/downloads`) and per document
+  (`GET /api/v1/documents/{id}/downloads`). Rows keep the document name and
+  version after the document is deleted.
+- Important actions write an append-only audit row: templates (upload,
+  access, clean, fields, Word edits, ...), documents (create, save, generate,
+  restore, download), the Word editor, AI, admin changes and sign-in. Rows
+  hold ids, names and counts, never field values, file contents or
+  passwords. If writing an audit row fails, the user's action still succeeds.
+- `GET /api/v1/admin/audit-logs` (+ `/actions`, `/export.csv`): super admins
+  see everything, organization admins their organization, department admins
+  their department; everyone else gets 403. The admin page is
+  **Admin > Audit log**.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `AUDIT_RETENTION_DAYS` | `365` | Audit rows older than this are removed by the prune script |
+| `DOWNLOAD_HISTORY_RETENTION_DAYS` | `730` | Same for download history |
+| `TRUSTED_PROXY_IPS` | empty | Behind a reverse proxy: its IP(s), so `X-Forwarded-For` gives the client IP |
+
+Pruning is manual: `python scripts/prune_audit_logs.py` prints what would be
+removed; add `--yes` to delete.
 
 ## Tests
 
@@ -209,3 +277,4 @@ Run from `backend/` after `alembic upgrade head`:
 | `scripts/verify_template_fields.py` | Check stored template fields for bad types and order gaps |
 | `scripts/verify_bedrock.py` | Check the AI settings (`--live` for real calls) |
 | `scripts/verify_gotenberg.py` | Check Gotenberg (`--live` converts a test DOCX) |
+| `scripts/prune_audit_logs.py` | Remove audit / download rows past their retention (dry run unless `--yes`) |

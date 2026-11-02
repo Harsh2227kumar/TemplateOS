@@ -3554,3 +3554,41 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 - Existing download buttons keep their own error handling (amber PDF row, retry); they are recorded by the server and refresh the history lists rather than being replaced by `DownloadButton`.
 - Bundle: new pages are lazy; main chunk +2.3 kB raw / +0.6 kB gzip.
 - Merge order: data PR -> `backend`, retarget the API PR to `backend` and merge, frontend PR -> `frontend`, then `backend` and `frontend` into `dev`. Run `alembic upgrade head` (applies `c3f7a9d2e6b1`).
+
+### Checkpoint 0074
+
+- Date: 2026-11-02
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `docs/readme-v17-p21-p3` (from `dev`, PR into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0073 -> 2026-11-02
+
+#### Summary
+
+- V1.7 integration: `backend` and `frontend` (Phase 3) go into `dev`, and the READMEs now describe what V1.7 Phases 2.1 and 3 added.
+
+#### Completed Tasks
+
+- Root README: features (preview, rich text and versions; Word file editor; download history and audit log), the `onlyoffice` compose service, quick-start step for the editor, `alembic upgrade head` after pulls.
+- Backend README: "Word file editor (ONLYOFFICE Docs)" and "Download history and audit log" sections with their settings, `GENERATED_VERSIONS_KEEP_FILES`, and `scripts/prune_audit_logs.py`.
+- Frontend README: features, test coverage and folder list brought up to date.
+- Integration PRs `backend` -> `dev` and `frontend` -> `dev` opened; `dev` + `backend` + `frontend` checked to merge without conflicts. This PR changes only documentation files that neither of them touches.
+
+#### Code Changes
+
+- `README.md`, `backend/README.md`, `frontend/README.md`, `project-change-tracker.md`
+
+#### Features Added / Updated / Removed
+
+- Added: none (documentation only).
+- Updated: READMEs.
+- Removed: none.
+
+#### Issues Fixed
+
+- The root README still called Gotenberg "the only Docker service".
+
+#### Notes For Next Push
+
+- After the integration PRs merge, V1.7 (Phases 1, 2, 2.1 and 3) is complete. Run `alembic upgrade head` (applies `c3f7a9d2e6b1`).
+- Next per `MD/version-plan.md`: V1.8 (optional approval workflow).
