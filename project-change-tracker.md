@@ -3506,11 +3506,11 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 
 #### Issues Fixed
 
-- None.
+- Pre-merge test pass: an organization-delete audit row was stamped with the acting super admin's own organization; it now has no scope. Added tests: deleting a template keeps its download history (shown as "(deleted)") and audit rows; organization delete has no scope.
 
 #### Notes For Next Push
 
-- 7 new API tests (including "audit failure never breaks the action" and "field values never reach the audit log"); full suite 784 passed, 1 skipped.
+- 7 new API tests (including "audit failure never breaks the action" and "field values never reach the audit log"); full suite 786 passed, 1 skipped (on dev + all three P3 branches merged).
 - Behind a reverse proxy set `TRUSTED_PROXY_IPS` to get the real client IP.
 
 ### Checkpoint 0073
@@ -3545,7 +3545,7 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 
 #### Issues Fixed
 
-- None.
+- Pre-merge live check: the Audit log's debounced search could undo a date filter changed within 300 ms (react-router's setSearchParams from an older render reads that render's params). Filter updates now merge into a ref holding the latest filters; verified live.
 
 #### Notes For Next Push
 
