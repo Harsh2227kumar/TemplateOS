@@ -320,7 +320,7 @@ def delete_organization_endpoint(
     audit_service.record_and_commit(
         db, request, actor=current_user, action="admin.organization_delete", entity_type="organization",
         entity_id=organization_id, summary=f"Deleted organization '{name}'",
-        organization_id=None, department_id=None,
+        actor_scope=False,
     )
     logger.info(f"Super admin {current_user.id} deleted organization {organization_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

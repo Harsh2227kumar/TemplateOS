@@ -66,14 +66,16 @@ def record(
     department_id: int | None = None,
     template: Template | None = None,
     actor_email: str | None = None,
+    actor_scope: bool = True,
 ) -> None:
     """
     Add an audit row (not committed). Scope comes from `template` when given,
-    else from the explicit ids, else from the actor's membership.
+    else from the explicit ids, else (unless actor_scope=False) from the
+    actor's membership.
     """
     if template is not None:
         organization_id, department_id = scope_for_template(template, actor)
-    elif organization_id is None and department_id is None and actor is not None:
+    elif organization_id is None and department_id is None and actor is not None and actor_scope:
         organization_id, department_id = actor.organization_id, actor.department_id
     try:
         with db.begin_nested():

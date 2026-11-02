@@ -479,3 +479,36 @@ def test_audit_log_scoping_filters_and_export():
     exported = _audit("admin.audit_export")
     assert json.loads(exported[-1].details)["rows"] == 2
     assert client.get(f"{API}/admin/audit-logs/export.csv", headers=_auth(faculty_token)).status_code == 403
+
+
+def test_deleting_a_template_keeps_download_history():
+    super_token, _, _ = _login("super_admin")
+    token, user_id, _ = _login()
+    template_id = _template(user_id)
+    document_id = _generated_document(token, template_id)
+    assert client.get(f"{API}/documents/{document_id}/download/pdf", headers=_auth(token)).status_code == 200
+
+    # The template delete cascades to the document and its versions.
+    assert client.delete(f"{API}/templates/{template_id}", headers=_auth(super_token)).status_code == 204
+    mine = client.get(f"{API}/me/downloads", headers=_auth(token)).json()
+    assert mine["total"] == 1
+    item = mine["items"][0]
+    assert (item["document_id"], item["document_exists"], item["document_name"], item["version"]) == (
+        None, False, "Budget", 1
+    )
+    assert len(_audit("document.download", document_id)) == 1  # entity_id is not a foreign key
+    deleted = _audit("template.delete", template_id)
+    assert len(deleted) == 1 and deleted[0].summary == "Deleted template 'MoM'"
+
+
+def test_organization_delete_has_no_scope():
+    org_id, _ = _org_and_dept()
+    with TestSession() as db:
+        from app.models.organization import Department as Dept
+        db.query(Dept).filter(Dept.organization_id == org_id).delete()
+        db.commit()
+    member_org, _ = _org_and_dept()
+    super_token, _, _ = _login("super_admin", member_org)  # a super admin who belongs to an organization
+    assert client.delete(f"{API}/admin/organizations/{org_id}", headers=_auth(super_token)).status_code == 204
+    row = _audit("admin.organization_delete", org_id)[0]
+    assert (row.organization_id, row.department_id) == (None, None)
