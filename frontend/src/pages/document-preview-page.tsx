@@ -8,7 +8,6 @@ import { GeneratedDocumentCard } from "@/features/document-preview/GeneratedDocu
 import { PdfPreview } from "@/features/document-preview/PdfPreview";
 import { PreviewHeader } from "@/features/document-preview/PreviewHeader";
 import { PreviewSectionCard } from "@/features/document-preview/PreviewSectionCard";
-import { LazyVersionHistoryPanel } from "@/features/document-versions/LazyVersionHistoryPanel";
 import { pdfPreviewKey, previewTitle } from "@/features/document-preview/preview-model";
 import { DraftLoadError, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import {
@@ -34,6 +33,11 @@ import {
 } from "@/hooks/queries";
 import { ApiError } from "@/lib/api";
 import { parseRouteId } from "@/lib/route-params";
+
+// V1.7 P3: versions + downloads of the document, loaded on demand.
+const DocumentHistory = lazy(() =>
+  import("@/features/document-preview/DocumentHistory").then((module) => ({ default: module.DocumentHistory })),
+);
 
 // V1.7 P2.1: loaded when generate asks about manual edits.
 const ManualEditsDialog = lazy(() =>
@@ -246,13 +250,15 @@ export function DocumentPreviewPage() {
             editFileHref={editFileHref}
           />
           {preview.generation && (
-            <LazyVersionHistoryPanel
-              documentId={documentId}
-              documentName={preview.document.name}
-              labelOf={(name) => labels.get(name) || name}
-              canRestore={preview.permissions.can_edit}
-              restoreDisabled={generating || retrying}
-            />
+            <Suspense fallback={<Skeleton className="h-40 bg-slate-100" aria-label="Loading the history" />}>
+              <DocumentHistory
+                documentId={documentId}
+                documentName={preview.document.name}
+                labelOf={(name) => labels.get(name) || name}
+                canRestore={preview.permissions.can_edit}
+                restoreDisabled={generating || retrying}
+              />
+            </Suspense>
           )}
         </aside>
       </div>

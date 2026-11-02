@@ -15,4 +15,5 @@ export { documentsApi } from "./documents";
 export { splitValidationErrors } from "./validation-errors";
 export { aiApi, MAX_AI_TEXT_CHARS } from "./ai";
 export { wordEditorApi } from "./word-editor";
+export { historyApi } from "./history";
 export { SESSION_EXPIRED_EVENT, clearLegacyAccessToken } from "./session";
