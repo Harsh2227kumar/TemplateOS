@@ -1,8 +1,9 @@
 # TemplateOS Frontend
 
 React 18 + TypeScript + Vite single-page app for TemplateOS: template upload
-and field setup, draft forms, document generation and preview, and admin
-pages. Server state is handled by TanStack Query, forms by react-hook-form +
+and field setup, draft forms with rich text, document generation, preview and
+versions, the Word file editor (ONLYOFFICE, loaded on demand), download
+history, and admin pages including the audit log. Server state is handled by TanStack Query, forms by react-hook-form +
 zod, and UI components are Tailwind CSS + Radix (shadcn/ui style).
 
 ## Run locally
@@ -50,7 +51,8 @@ The unit tests use Node's built-in test runner (`node --test`) with no extra
 framework. Node runs the TypeScript files directly, so **Node.js 22.18 or
 newer** is required. Tests cover pure logic only: validation rules, dates,
 query keys, the session refresh flow, the AI style state machine, list
-fields, audience and admin permissions. CI runs the type-check, the tests and
+fields, audience and admin permissions, rich text, versions, the Word
+editor rules, download history and audit log filters. CI runs the type-check, the tests and
 the build on every pull request.
 
 ## Folder structure
@@ -60,7 +62,8 @@ src/
   main.tsx, App.tsx    entry point and routes
   pages/               one component per route (dashboard, drafts, admin, ...)
   features/            larger flows split out of pages: documents, field-setup,
-                       template-cleaning, placeholder-review, document-preview, admin
+                       template-cleaning, placeholder-review, document-preview,
+                       document-versions, rich-text, word-editor, downloads, admin
   components/          shared UI: ui/ (base components), forms/ (dynamic draft
                        fields), fields/ (AI toolbar, field helpers), templates/, upload/
   hooks/queries/       TanStack Query hooks per resource

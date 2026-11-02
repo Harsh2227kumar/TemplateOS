@@ -17,6 +17,18 @@ original layout and formatting.
 - **AI writing (AWS Bedrock):** field suggestions while setting up a
   template, and per-field or whole-form rewrites (fix grammar, professional,
   concise, formal, expand).
+- **Preview, rich text and versions:** a read-only preview with
+  completeness; rich text (bold, lists, links) in paragraph fields that
+  reaches the DOCX/PDF; every Generate is a new version with its own files,
+  history, downloads and restore.
+- **Word file editor (optional, ONLYOFFICE Docs):** edit the real Word file
+  in the browser. "Customize for me" makes a private copy of a template
+  (for example to add a field), template files keep a revision history, and
+  a generated document can be fixed by hand as a new "Edited manually"
+  version.
+- **Download history and audit log:** every download is recorded (a
+  "Downloads" page and per-document history); admins get a searchable audit
+  log of who did what in their organization or department, with CSV export.
 - **Access control:** roles from super admin to student, organizations and
   departments, and templates scoped to an audience.
 
@@ -26,7 +38,7 @@ original layout and formatting.
 | --- | --- |
 | [`backend/`](backend/README.md) | FastAPI + SQLAlchemy + Alembic API (Python) |
 | [`frontend/`](frontend/README.md) | React + TypeScript + Vite app |
-| `docker-compose.yml` | Gotenberg for PDF conversion (the only Docker service) |
+| `docker-compose.yml` | Gotenberg for PDF conversion; optional ONLYOFFICE Docs for the Word editor (`editor` profile) |
 | `.env.example` | Every setting, documented; copy it to `.env` |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Branching, pull request and review rules |
 | [`project-change-tracker.md`](project-change-tracker.md) | Change log of every pushed checkpoint |
@@ -52,14 +64,18 @@ npm run dev:frontend                 # http://localhost:5173
 
 # 4. Optional: PDF conversion
 docker compose up -d gotenberg       # then set GOTENBERG_URL=http://localhost:3000
+
+# 5. Optional: Word file editor (large image; see the backend README)
+docker compose up -d onlyoffice      # then set ONLYOFFICE_* in .env
 ```
 
 Open the app at `http://localhost:5173` and point it at the API on
 `http://localhost:8000` (not `127.0.0.1`), so the session cookies work.
 `.env` is read when the backend starts: restart it after any change.
 
-Seeding demo users and templates, AI and PDF settings are described in the
-[backend README](backend/README.md).
+Seeding demo users and templates, AI, PDF, Word editor and audit settings
+are described in the [backend README](backend/README.md). After pulling new
+work, run `alembic upgrade head` again.
 
 ## Tests
 
