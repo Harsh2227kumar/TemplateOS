@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
 import { FileDown, Loader2, ScrollText, Search } from "lucide-react";
@@ -114,11 +114,14 @@ export function AdminAuditLogPage() {
   const [selected, setSelected] = useState<AuditLogItem | null>(null);
   const rangeError = dateRangeError(filters.from, filters.to);
 
-  // Built from the latest URL, so a debounced search never undoes a filter changed meanwhile.
+  // Merged into the LATEST filters (a ref), so the debounced search, whose
+  // timer holds an older render's closure, never undoes a filter changed meanwhile.
+  const latestFilters = useRef(filters);
+  latestFilters.current = filters;
   const setFilters = (next: Partial<AuditFilters>) => {
-    setSearchParams((current) => auditFiltersToQuery({ ...queryToAuditFilters(current), page: 1, ...next }), {
-      replace: true,
-    });
+    const merged = { ...latestFilters.current, page: 1, ...next };
+    latestFilters.current = merged;
+    setSearchParams(auditFiltersToQuery(merged), { replace: true });
   };
 
   // Debounced free-text search (summary or email).
