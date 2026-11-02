@@ -10,6 +10,8 @@ from app.models.template_revision import TemplateRevision
 from app.models.editor_session import EditorSession
 from app.models.refresh_token import RefreshToken
 from app.models.generated_file import GeneratedFile
+from app.models.download_history import DownloadHistory
+from app.models.audit_log import AuditLog
 
 # Remove generated DOCX/PDF files from storage when their rows are deleted.
 from app.services.generated_file_cleanup import register as _register_cleanup

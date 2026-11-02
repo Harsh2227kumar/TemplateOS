@@ -5,7 +5,7 @@ into placeholders, and preview / apply the replacements into a processed copy.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import (
@@ -28,7 +28,7 @@ from app.schemas.cleaning import (
     SuggestionContext,
 )
 from app.schemas.template_field import TemplateFieldCreate, check_validation_rule
-from app.services import docx_parser
+from app.services import audit_service, docx_parser
 from app.services.clean_suggester import HIGH_CONFIDENCE, suggest_cleaning
 from app.services.docx_cleaner import (
     apply_replacements_with_results,
@@ -258,6 +258,7 @@ def clean_template(
     request: CleanTemplateRequest,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> CleanTemplateResponse:
     """
     Convert owner-confirmed sample text / suggested spots into
@@ -335,6 +336,22 @@ def clean_template(
         f"{len(created_fields)} field(s) created, "
         f"{len(warnings.unmatched)} unmatched, {len(warnings.invalid_keys)} invalid key(s), "
         f"{len(warnings.stale_fields)} stale field(s)"
+    )
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.clean",
+        entity_type="template",
+        entity_id=template_id,
+        summary=f"Cleaned '{template.name}': {len(created_fields)} new field(s)",
+        details={
+            "replacements": len(request.replacements),
+            "matched": sum(1 for result in results if result.matched),
+            "fields_created": [field.field_name for field in created_fields],
+            "version": template.version,
+        },
+        template=template,
     )
 
     return CleanTemplateResponse(

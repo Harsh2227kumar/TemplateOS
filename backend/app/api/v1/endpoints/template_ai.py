@@ -5,7 +5,7 @@ Proposals only; nothing is written to template_fields.
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import read_stored, require_manage
@@ -14,7 +14,7 @@ from app.crud.ai_generation_crud import log_ai_generation
 from app.crud.template_crud import get_template_by_id
 from app.crud.template_field_crud import get_fields_by_template
 from app.schemas.ai import SuggestFieldsResponse
-from app.services import ai_service, docx_parser
+from app.services import ai_service, audit_service, docx_parser
 from app.services.ai_service import AiUnavailableError
 
 router = APIRouter()
@@ -32,6 +32,7 @@ def suggest_template_fields(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> SuggestFieldsResponse:
     """
     Ask Claude Sonnet on AWS Bedrock (via instructor, validated output) to
@@ -72,7 +73,7 @@ def suggest_template_fields(
     try:
         suggestions = ai_service.suggest_fields(document_text, existing_keys)
     except AiUnavailableError as e:
-        log_ai_generation(
+        generation = log_ai_generation(
             db,
             action_type="suggest_fields",
             model=settings.bedrock_model_suggestions,
@@ -82,10 +83,21 @@ def suggest_template_fields(
             suggestions_count=0,
             detail=str(e),
         )
+        audit_service.record_and_commit(
+            db,
+            http_request,
+            actor=current_user,
+            action="ai.suggest_fields",
+            entity_type="template",
+            entity_id=template_id,
+            summary=f"AI field suggestions for '{template.name}' failed",
+            details={"ai_generation_id": generation.id, "status": "error"},
+            template=template,
+        )
         logger.warning(f"AI unavailable for template {template_id}: {e}")
         raise HTTPException(status_code=503, detail=str(e)) from None
 
-    log_ai_generation(
+    generation = log_ai_generation(
         db,
         action_type="suggest_fields",
         model=settings.bedrock_model_suggestions,
@@ -93,6 +105,17 @@ def suggest_template_fields(
         created_by=current_user.id,
         status="success",
         suggestions_count=len(suggestions),
+    )
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="ai.suggest_fields",
+        entity_type="template",
+        entity_id=template_id,
+        summary=f"AI suggested {len(suggestions)} field(s) for '{template.name}'",
+        details={"ai_generation_id": generation.id, "status": "success", "suggestions_count": len(suggestions)},
+        template=template,
     )
     logger.info(
         f"AI field suggestion finished for template {template_id}: "

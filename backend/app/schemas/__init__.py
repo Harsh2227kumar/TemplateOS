@@ -31,6 +31,7 @@ from app.schemas.editor import (
     FieldChangesRead,
     TemplateRevisionRead,
 )
+from app.schemas.audit import AuditActionOption, AuditLogItem, DownloadHistoryItem, Paginated
 
 __all__ = [
     "LoginRequest",
@@ -63,4 +64,8 @@ __all__ = [
     "EditorStatusConfig",
     "FieldChangesRead",
     "TemplateRevisionRead",
+    "AuditActionOption",
+    "AuditLogItem",
+    "DownloadHistoryItem",
+    "Paginated",
 ]

@@ -16,7 +16,7 @@ Document Server only (no cookies; signed):
 - POST /editor/callback/{key}                     save callbacks (JWT verified)
 """
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
 from app.api.deps import CurrentUser, DbSession
@@ -31,6 +31,7 @@ from app.schemas.editor import (
     TemplateRevisionRead,
 )
 from app.schemas.template import TemplateResponse
+from app.services import audit_service
 from app.services import word_editor_service as editor
 from app.services.template_access import can_manage, user_can_view_template
 
@@ -56,9 +57,17 @@ def editor_config() -> EditorStatusConfig:
     status_code=status.HTTP_201_CREATED,
     tags=["templates"],
 )
-def customize_template(db: DbSession, current_user: CurrentUser, template_id: int) -> TemplateResponse:
+def customize_template(
+    db: DbSession, current_user: CurrentUser, request: Request, template_id: int
+) -> TemplateResponse:
     """Your own private copy of a template you can use (its fields included), to change freely."""
-    copy = editor.customize_template(db, current_user, _template(db, template_id))
+    source = _template(db, template_id)
+    copy = editor.customize_template(db, current_user, source)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="template.customize", entity_type="template",
+        entity_id=copy.id, summary=f"Made a personal copy of '{source.name}'",
+        details={"parent_template_id": source.id}, template=copy,
+    )
     return _template_response(copy, current_user)
 
 
@@ -69,9 +78,19 @@ def customize_template(db: DbSession, current_user: CurrentUser, template_id: in
                503: {"description": "Editor disabled"}},
     tags=["templates"],
 )
-def open_template_editor(db: DbSession, current_user: CurrentUser, template_id: int) -> EditorConfigResponse:
+def open_template_editor(
+    db: DbSession, current_user: CurrentUser, request: Request, template_id: int
+) -> EditorConfigResponse:
     """Open the template's fill-ready Word file in the document editor."""
-    return editor.open_template_session(db, current_user, _template(db, template_id))
+    template = _template(db, template_id)
+    opened = editor.open_template_session(db, current_user, template)
+    if not opened.reused:
+        audit_service.record_and_commit(
+            db, request, actor=current_user, action="editor.session_open", entity_type="template",
+            entity_id=template.id, summary=f"Opened the Word file of '{template.name}'",
+            details={"target": "template", "session_key": opened.session_key}, template=template,
+        )
+    return opened
 
 
 @router.get("/templates/{template_id}/revisions", response_model=list[TemplateRevisionRead], tags=["templates"])
@@ -88,9 +107,14 @@ def template_revisions(db: DbSession, current_user: CurrentUser, template_id: in
     tags=["templates"],
 )
 def restore_template_revision(
-    db: DbSession, current_user: CurrentUser, template_id: int, revision: int
+    db: DbSession, current_user: CurrentUser, request: Request, template_id: int, revision: int
 ) -> TemplateResponse:
     template = editor.restore_revision(db, current_user, _template(db, template_id), revision)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="template.revision_restore", entity_type="template",
+        entity_id=template.id, summary=f"Restored revision {revision} of '{template.name}'",
+        details={"restored_revision": revision, "version": template.version}, template=template,
+    )
     return _template_response(template, current_user)
 
 
@@ -113,6 +137,7 @@ def template_field_changes(db: DbSession, current_user: CurrentUser, template_id
 def open_document_editor(
     db: DbSession,
     current_user: CurrentUser,
+    request: Request,
     document_id: int,
     version: int | None = Query(default=None, ge=1),
 ) -> EditorConfigResponse:
@@ -120,7 +145,15 @@ def open_document_editor(
     document = get_document_by_id(db, document_id)
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    return editor.open_document_session(db, current_user, document, version)
+    opened = editor.open_document_session(db, current_user, document, version)
+    if not opened.reused:
+        audit_service.record_and_commit(
+            db, request, actor=current_user, action="editor.session_open", entity_type="document",
+            entity_id=document.id, summary=f"Opened the Word file of '{document.name}'",
+            details={"target": "document", "version": version, "session_key": opened.session_key},
+            template=document.template,
+        )
+    return opened
 
 
 @router.get("/editor/sessions/{session_key}", response_model=EditorSessionRead, tags=["editor"])
