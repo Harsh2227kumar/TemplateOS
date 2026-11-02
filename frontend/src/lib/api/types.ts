@@ -715,3 +715,70 @@ export interface FieldChanges {
   render_error: string | null;
   has_changes: boolean;
 }
+
+// --- V1.7 Phase 3: download history and audit log ---
+
+export interface Paginated<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+/** GET /me/downloads, GET /documents/{id}/downloads */
+export interface DownloadHistoryItem {
+  id: number;
+  downloaded_at: string;
+  format: "docx" | "pdf";
+  /** null once the document was deleted (document_name is a snapshot). */
+  document_id: number | null;
+  document_name: string;
+  version: number | null;
+  /** "generated" | "manual_edit" (P2.1) */
+  version_source: string | null;
+  file_name: string;
+  file_size: number | null;
+  document_exists: boolean;
+}
+
+export interface DownloadHistoryParams {
+  page?: number;
+  limit?: number;
+  format?: "docx" | "pdf";
+  document_id?: number;
+}
+
+/** GET /admin/audit-logs */
+export interface AuditLogItem {
+  id: number;
+  created_at: string;
+  /** null: the account was deleted, or no actor (failed login). */
+  actor_id: number | null;
+  actor_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: number | null;
+  summary: string;
+  details: Record<string, unknown> | null;
+  ip_address: string | null;
+}
+
+/** GET /admin/audit-logs/actions */
+export interface AuditActionOption {
+  action: string;
+  label: string;
+  area: string;
+}
+
+/** Query of GET /admin/audit-logs and /export.csv (dates YYYY-MM-DD, UTC days, "to" inclusive). */
+export interface AuditLogParams {
+  page?: number;
+  limit?: number;
+  action?: string;
+  actor_id?: number;
+  entity_type?: string;
+  entity_id?: number;
+  from?: string;
+  to?: string;
+  q?: string;
+}

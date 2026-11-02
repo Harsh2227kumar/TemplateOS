@@ -5,3 +5,4 @@ export * from "./ai";
 export * from "./combine";
 export * from "./admin";
 export * from "./word-editor";
+export * from "./history";

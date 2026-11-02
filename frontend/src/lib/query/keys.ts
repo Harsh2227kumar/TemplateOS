@@ -53,6 +53,27 @@ export const templateKeys = {
   fieldChanges: (id: number) => [...templateKeys.detail(id), "field-changes"] as const,
 };
 
+/**
+ * V1.7 P3:
+ *   ["history"]                                    every download-history list
+ *   ["history", "mine", {params}]
+ *   ["history", "document", id, {params}]
+ *   ["audit", "list", {params}] / ["audit", "actions"]
+ */
+export const historyKeys = {
+  all: ["history"] as const,
+  myDownloads: (params: object = {}) => [...historyKeys.all, "mine", compactParams(params)] as const,
+  documentDownloads: (id: number, params: object = {}) =>
+    [...historyKeys.all, "document", id, compactParams(params)] as const,
+};
+
+export const auditKeys = {
+  all: ["audit"] as const,
+  lists: () => [...auditKeys.all, "list"] as const,
+  list: (params: object = {}) => [...auditKeys.lists(), compactParams(params)] as const,
+  actions: () => [...auditKeys.all, "actions"] as const,
+};
+
 export const wordEditorKeys = {
   all: ["word-editor"] as const,
   config: () => [...wordEditorKeys.all, "config"] as const,
@@ -107,6 +128,8 @@ export const queryKeys = {
   documents: documentKeys,
   admin: adminKeys,
   wordEditor: wordEditorKeys,
+  history: historyKeys,
+  audit: auditKeys,
 };
 
 /** True when `key` starts with `prefix` (how TanStack matches invalidations). */
