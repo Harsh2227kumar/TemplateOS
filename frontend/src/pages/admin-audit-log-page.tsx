@@ -114,9 +114,11 @@ export function AdminAuditLogPage() {
   const [selected, setSelected] = useState<AuditLogItem | null>(null);
   const rangeError = dateRangeError(filters.from, filters.to);
 
+  // Built from the latest URL, so a debounced search never undoes a filter changed meanwhile.
   const setFilters = (next: Partial<AuditFilters>) => {
-    const merged = { ...filters, page: 1, ...next };
-    setSearchParams(auditFiltersToQuery(merged), { replace: true });
+    setSearchParams((current) => auditFiltersToQuery({ ...queryToAuditFilters(current), page: 1, ...next }), {
+      replace: true,
+    });
   };
 
   // Debounced free-text search (summary or email).
