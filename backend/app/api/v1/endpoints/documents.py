@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
@@ -38,7 +38,7 @@ from app.crud.document_crud import (
     get_document_for_preview,
     get_documents_by_user,
 )
-from app.crud.document_value_crud import get_values_by_document, upsert_values
+from app.crud.document_value_crud import _rich_text, get_values_by_document, upsert_values
 from app.crud.document_version_crud import count_versions, get_version, latest_version_number
 from app.crud.generated_file_crud import (
     get_generated_file,
@@ -67,7 +67,8 @@ from app.schemas.document_preview import (
     PreviewSection,
     PreviewTemplate,
 )
-from app.services import document_generation
+from app.services import audit_service, document_generation
+from app.services.file_delivery import deliver_file
 from app.services.document_permissions import (
     document_permissions,
     require_document_viewer,
@@ -191,6 +192,7 @@ def create_document_endpoint(
     db: DbSession,
     current_user: CurrentUser,
     payload: DocumentCreate,
+    http_request: Request,
 ):
     """
     Create a new document draft.
@@ -228,6 +230,17 @@ def create_document_endpoint(
         name=name,
         status="draft",
     )
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="document.create",
+        entity_type="document",
+        entity_id=document.id,
+        summary=f"Created draft '{document.name}' from '{template.name}'",
+        details={"template_id": template.id},
+        template=template,
+    )
 
     # Return with empty values (DocumentRead expects values field)
     return DocumentRead(
@@ -252,6 +265,7 @@ def save_document_values(
     current_user: CurrentUser,
     document_id: int,
     payload: DocumentValuesBulkUpsert,
+    http_request: Request,
 ):
     """
     Validate and upsert field values for a document draft.
@@ -312,6 +326,14 @@ def save_document_values(
         )
         raise
 
+    # Which fields change (names only: values never go to the audit log).
+    before = {value.field_name: (value.value, value.rich_content) for value in get_values_by_document(db, document_id)}
+    changed = sorted(
+        item["field_name"]
+        for item in values_to_save
+        if before.get(item["field_name"]) != (item.get("value"), _rich_text(item.get("rich_content")))
+    )
+
     # Upsert values (also bumps documents.updated_at)
     saved_values = upsert_values(db, document_id, values_to_save)
     logger.info(
@@ -319,6 +341,18 @@ def save_document_values(
         len(saved_values),
         document_id,
         current_user.id,
+    )
+
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="document.values_update",
+        entity_type="document",
+        entity_id=document_id,
+        summary=f"Saved '{document.name}': {len(changed)} field(s) changed",
+        details={"changed_fields": changed, "changed_count": len(changed), "saved_count": len(saved_values)},
+        template=template,
     )
 
     # Return saved values
@@ -597,6 +631,7 @@ def generate_document_endpoint(
     db: DbSession,
     current_user: CurrentUser,
     document_id: int,
+    http_request: Request,
     replace_manual_edits: bool = Query(False),
 ):
     """
@@ -641,6 +676,24 @@ def generate_document_endpoint(
     record = document_generation.generate_document(
         db, document, template, created_by=current_user.id
     )
+    replaced = latest is not None and latest.source == "manual_edit"
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="document.generate",
+        entity_type="document",
+        entity_id=document.id,
+        summary=f"Generated '{document.name}' v{record.version.version}"
+        + (f" (replacing manual edits of v{latest.version})" if replaced else ""),
+        details={
+            "version": record.version.version,
+            "pdf_status": record.pdf_status,
+            "template_version": record.template_version,
+            **({"replaced_manual_edits": True, "replaced_version": latest.version} if replaced else {}),
+        },
+        template=template,
+    )
     return document_generation.generation_response(db, document, record)
 
 
@@ -658,6 +711,7 @@ def retry_pdf_endpoint(
     db: DbSession,
     current_user: CurrentUser,
     document_id: int,
+    http_request: Request,
 ):
     """
     Convert the latest version's DOCX to PDF again (owner only).
@@ -670,11 +724,31 @@ def retry_pdf_endpoint(
       is missing on disk
     """
     document = _get_owned_document(db, document_id, current_user)
-    record = document_generation.retry_pdf(db, document)
+
+    def audit(result: str, reason: str | None = None) -> None:
+        audit_service.record_and_commit(
+            db,
+            http_request,
+            actor=current_user,
+            action="document.pdf_retry",
+            entity_type="document",
+            entity_id=document.id,
+            summary=f"Retried the PDF of '{document.name}': {result}",
+            details={"result": result, **({"reason": reason[:200]} if reason else {})},
+            template=document.template,
+        )
+
+    try:
+        record = document_generation.retry_pdf(db, document)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            audit("failed", str(exc.detail))
+        raise
+    audit(record.pdf_status)
     return document_generation.generation_response(db, document, record)
 
 
-def _send_generated_file(db, current_user: User, document_id: int, file_format: str):
+def _send_generated_file(db, request: Request, current_user: User, document_id: int, file_format: str):
     document = _get_owned_document(db, document_id, current_user)
     record = get_generated_file(db, document.id)
     if record is None:
@@ -709,13 +783,16 @@ def _send_generated_file(db, current_user: User, document_id: int, file_format: 
                 detail="The PDF is not available for this document. Use Retry PDF.",
             ) from None
     filename = document_generation.download_filename(document, file_format)
-    return FileResponse(
-        path,
-        media_type=MEDIA_TYPES[file_format],
-        headers={
-            "Content-Disposition": document_generation.content_disposition(filename),
-            "Cache-Control": "no-store",
-        },
+    # V1.7 P3: recorded (history + audit) only now that the file is there.
+    return deliver_file(
+        db,
+        request,
+        user=current_user,
+        document=document,
+        version=record.version,
+        fmt=file_format,
+        path=path,
+        filename=filename,
     )
 
 
@@ -732,6 +809,7 @@ def _send_generated_file(db, current_user: User, document_id: int, file_format: 
 def download_pdf(
     db: DbSession,
     current_user: CurrentUser,
+    request: Request,
     document_id: int,
 ):
     """
@@ -740,7 +818,7 @@ def download_pdf(
     pdf_status / pdf_error, use Retry PDF); 410 when the stored PDF is
     missing on disk.
     """
-    return _send_generated_file(db, current_user, document_id, "pdf")
+    return _send_generated_file(db, request, current_user, document_id, "pdf")
 
 
 @router.get(
@@ -751,6 +829,7 @@ def download_pdf(
 def download_document(
     db: DbSession,
     current_user: CurrentUser,
+    request: Request,
     document_id: int,
     format: Literal["docx", "pdf"] = Query("docx"),
 ):
@@ -760,4 +839,4 @@ def download_document(
     file is missing. PDF (same as /download/pdf): 409 when there is no PDF,
     410 when the stored PDF is missing on disk.
     """
-    return _send_generated_file(db, current_user, document_id, format)
+    return _send_generated_file(db, request, current_user, document_id, format)

@@ -7,7 +7,7 @@ original route order.
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -37,7 +37,7 @@ from app.schemas.template_field import (
     VALIDATION_RULE_HELP,
     check_validation_rule,
 )
-from app.services import docx_parser
+from app.services import audit_service, docx_parser
 from app.services.field_inference import infer_field_meta
 
 router = APIRouter()
@@ -117,6 +117,23 @@ def _field_value_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=422, detail=message)
 
 
+def _audit_fields(
+    db: Session, request: Request, user: User, template: Template, summary: str, details: dict
+) -> None:
+    """One template.fields_update audit event (names and counts, never values)."""
+    audit_service.record_and_commit(
+        db,
+        request,
+        actor=user,
+        action="template.fields_update",
+        entity_type="template",
+        entity_id=template.id,
+        summary=f"{summary} on '{template.name}'",
+        details=details,
+        template=template,
+    )
+
+
 def _ensure_contiguous_order(db: Session, template_id: int) -> list[TemplateField]:
     """
     Renumber a template's fields to contiguous display_order 0..n-1 if an
@@ -139,6 +156,7 @@ def create_template_field(
     request: TemplateFieldCreate,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> TemplateField:
     """
     Add one field to a template (field editor). Owner-only; locked templates
@@ -146,7 +164,7 @@ def create_template_field(
     explicit value is honored and the set is renumbered to stay contiguous
     0..n-1. Duplicate field_name -> 409; invalid field_type -> 422.
     """
-    _require_owner_editable(db, template_id, current_user)
+    template = _require_owner_editable(db, template_id, current_user)
 
     request = _normalized_create_request(request)
 
@@ -180,6 +198,8 @@ def create_template_field(
         f"Field '{field.field_name}' (id={field.id}) created on template "
         f"{template_id} by user {current_user.id} (total_fields={total})"
     )
+    _audit_fields(db, http_request, current_user, template, f"Added field '{field.field_name}'",
+                  {"created": [field.field_name], "total": total})
     return field
 
 
@@ -189,6 +209,7 @@ def reorder_template_fields(
     request: FieldReorderRequest,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> list[TemplateField]:
     """
     Reorder a template's fields. `ordered_ids` must be the full permutation
@@ -196,7 +217,7 @@ def reorder_template_fields(
     else (missing, extra, duplicated ids) -> 422. Owner-only; locked
     templates reject writes. Returns the fresh ordered field set.
     """
-    _require_owner_editable(db, template_id, current_user)
+    template = _require_owner_editable(db, template_id, current_user)
 
     try:
         fields = reorder_fields(db, template_id, request.ordered_ids)
@@ -207,6 +228,7 @@ def reorder_template_fields(
         f"Fields reordered on template {template_id} by user {current_user.id}: "
         f"{len(fields)} field(s)"
     )
+    _audit_fields(db, http_request, current_user, template, "Reordered fields", {"reordered": len(fields)})
     return fields
 
 
@@ -217,6 +239,7 @@ def update_template_field(
     request: TemplateFieldUpdate,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> TemplateField:
     """
     Partially update one field's metadata (label, type, required, help text,
@@ -224,7 +247,7 @@ def update_template_field(
     applied. Renaming to a key that exists on another field -> 409; invalid
     field_type -> 422. Owner-only; locked templates reject writes.
     """
-    _require_owner_editable(db, template_id, current_user)
+    template = _require_owner_editable(db, template_id, current_user)
 
     field = get_field_by_id(db, field_id)
     if field is None or field.template_id != template_id:
@@ -264,6 +287,8 @@ def update_template_field(
         f"Field {field_id} ('{field.field_name}') updated on template "
         f"{template_id} by user {current_user.id}"
     )
+    _audit_fields(db, http_request, current_user, template, f"Updated field '{field.field_name}'",
+                  {"updated": [field.field_name], "attributes": sorted(request.model_fields_set)})
     return field
 
 
@@ -276,13 +301,14 @@ def delete_template_field(
     field_id: int,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> None:
     """
     Remove one field. The template's remaining fields are reindexed to
     contiguous display_order 0..n-1 (no gaps, no duplicates). Owner-only;
     locked templates reject writes.
     """
-    _require_owner_editable(db, template_id, current_user)
+    template = _require_owner_editable(db, template_id, current_user)
 
     field = get_field_by_id(db, field_id)
     if field is None or field.template_id != template_id:
@@ -295,6 +321,8 @@ def delete_template_field(
         f"Field '{field_name}' (id={field_id}) deleted from template {template_id} "
         f"by user {current_user.id} ({remaining} field(s) remain)"
     )
+    _audit_fields(db, http_request, current_user, template, f"Removed field '{field_name}'",
+                  {"deleted": [field_name], "total": remaining})
 
 
 @router.put("/{template_id}/fields", response_model=list[TemplateFieldRead])
@@ -303,6 +331,7 @@ def sync_template_fields(
     request: FieldSyncRequest,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> list[TemplateField]:
     """
     BULK SYNC — the field editor's "Save all" (full-sync semantics).
@@ -365,5 +394,19 @@ def sync_template_fields(
         f"{created_count} created, {len(request.fields) - created_count} updated, "
         f"{len(existing_ids - kept_ids)} deleted -> {len(fields)} total "
         f"(status={template.status})"
+    )
+    _audit_fields(
+        db,
+        http_request,
+        current_user,
+        template,
+        "Saved fields",
+        {
+            "created": created_count,
+            "updated": len(request.fields) - created_count,
+            "deleted": len(existing_ids - kept_ids),
+            "total": len(fields),
+            "status": template.status,
+        },
     )
     return fields

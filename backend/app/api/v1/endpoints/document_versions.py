@@ -20,11 +20,11 @@ import logging
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from app.api.deps import CurrentUser, DbSession
-from app.api.v1.endpoints.documents import MEDIA_TYPES, annotate_sections, document_read
+from app.api.v1.endpoints.documents import annotate_sections, document_read
 from app.crud.document_crud import get_document_by_id
 from app.crud.document_version_crud import (
     changed_fields_by_version,
@@ -41,7 +41,8 @@ from app.models.document_version import DocumentVersion
 from app.models.user import User
 from app.schemas.document import DocumentRead
 from app.schemas.document_version import DocumentVersionDetail, DocumentVersionRead
-from app.services import document_generation
+from app.services import audit_service, document_generation
+from app.services.file_delivery import deliver_file
 from app.services.document_permissions import document_permissions, require_document_viewer
 from app.services.document_preview import build_sections
 from app.services.generation_service import format_field_value
@@ -206,6 +207,7 @@ def get_document_version(db: DbSession, current_user: CurrentUser, document_id: 
 def download_document_version(
     db: DbSession,
     current_user: CurrentUser,
+    request: Request,
     document_id: int,
     version: int,
     file_format: Literal["docx", "pdf"],
@@ -216,7 +218,8 @@ def download_document_version(
     viewable) or the file is missing on disk; 409 when it has no PDF.
     """
     document = _viewable_document(db, document_id, current_user)
-    record = _version_or_404(db, document, version).generated_file
+    version_row = _version_or_404(db, document, version)
+    record = version_row.generated_file
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Version {version} has no generated files"
@@ -242,13 +245,16 @@ def download_document_version(
             detail=f"The {file_format.upper()} of version {version} is missing on the server",
         )
     filename = document_generation.version_filename(document, version, file_format)
-    return FileResponse(
-        storage_service.file_path(stored),
-        media_type=MEDIA_TYPES[file_format],
-        headers={
-            "Content-Disposition": document_generation.content_disposition(filename),
-            "Cache-Control": "no-store",
-        },
+    # V1.7 P3: recorded (history + audit) only now that the file is there.
+    return deliver_file(
+        db,
+        request,
+        user=current_user,
+        document=document,
+        version=version_row,
+        fmt=file_format,
+        path=storage_service.file_path(stored),
+        filename=filename,
     )
 
 
@@ -262,7 +268,9 @@ def download_document_version(
     },
     summary="Replace the draft's values with a version's values",
 )
-def restore_document_version(db: DbSession, current_user: CurrentUser, document_id: int, version: int):
+def restore_document_version(
+    db: DbSession, current_user: CurrentUser, request: Request, document_id: int, version: int
+):
     """
     Copy the version's snapshot into the draft's current values (fields not
     in the snapshot are cleared) and return the document. Does not
@@ -275,5 +283,16 @@ def restore_document_version(db: DbSession, current_user: CurrentUser, document_
     record = _version_or_404(db, document, version)
     restore_values(db, document, record)
     db.commit()
+    audit_service.record_and_commit(
+        db,
+        request,
+        actor=current_user,
+        action="document.version_restore",
+        entity_type="document",
+        entity_id=document.id,
+        summary=f"Restored the values of v{version} into '{document.name}'",
+        details={"version": version},
+        template=document.template,
+    )
     logger.info("Restored version %s into document %s by user %s", version, document.id, current_user.id)
     return document_read(db, get_document_by_id(db, document.id, include_values=True))

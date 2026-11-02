@@ -30,11 +30,12 @@ Unsafe cookie requests need the CSRF header (app/core/csrf.py middleware).
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.organization import Department, Organization
+from app.services import audit_service
 from app.models.user import USER_ROLES, User
 from app.schemas.organization import (
     DepartmentCreate,
@@ -137,6 +138,7 @@ def update_user(
     payload: AdminUserUpdate,
     current_user: CurrentUser,
     db: DbSession,
+    request: Request,
 ) -> AdminUserRead:
     try:
         require_user_admin(current_user)
@@ -147,6 +149,7 @@ def update_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     changes = payload.model_dump(exclude_unset=True)
+    before = {key: getattr(target, key) for key in _AUDITED_USER_KEYS}
     try:
         apply_user_update(db, current_user, target, changes)
     except (UserAdminError, DirectoryError) as exc:
@@ -154,11 +157,32 @@ def update_user(
         raise _http(exc) from None
     db.commit()
     db.refresh(target)
+    diff = {
+        key: [before[key], getattr(target, key)]
+        for key in _AUDITED_USER_KEYS
+        if before[key] != getattr(target, key)
+    }
+    audit_service.record_and_commit(
+        db,
+        request,
+        actor=current_user,
+        action="admin.user_update",
+        entity_type="user",
+        entity_id=target.id,
+        summary=f"Updated user {target.email}" + (f": {', '.join(diff)}" if diff else ""),
+        details={"changed": diff, "fields": sorted(changes)},
+        organization_id=target.organization_id,
+        department_id=target.department_id,
+    )
     logger.info(
         f"User {current_user.id} updated user {target.id}: "
         f"role={target.role}, org={target.organization_id}, dept={target.department_id}"
     )
     return AdminUserRead.model_validate(target)
+
+
+# Only ids and the role are recorded with old -> new values (no names, no personal data).
+_AUDITED_USER_KEYS = ("role", "organization_id", "department_id")
 
 
 # ── organizations ────────────────────────────────────────────────────
@@ -228,7 +252,7 @@ def list_organizations(current_user: CurrentUser, db: DbSession) -> list[Organiz
     status_code=status.HTTP_201_CREATED,
 )
 def create_organization_endpoint(
-    payload: OrganizationCreate, current_user: CurrentUser, db: DbSession
+    payload: OrganizationCreate, current_user: CurrentUser, db: DbSession, request: Request
 ) -> OrganizationRead:
     _require_super_admin(current_user, "create")
     try:
@@ -238,6 +262,11 @@ def create_organization_endpoint(
         raise _http(exc) from None
     db.commit()
     db.refresh(organization)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.organization_create", entity_type="organization",
+        entity_id=organization.id, summary=f"Created organization '{organization.name}'",
+        organization_id=organization.id,
+    )
     return _organization_read(db, organization)
 
 
@@ -247,11 +276,13 @@ def rename_organization_endpoint(
     payload: OrganizationUpdate,
     current_user: CurrentUser,
     db: DbSession,
+    request: Request,
 ) -> OrganizationRead:
     _require_super_admin(current_user, "rename")
     organization = db.get(Organization, organization_id)
     if organization is None:
         raise HTTPException(status_code=404, detail="Organization not found")
+    old_name = organization.name
     try:
         rename_organization(db, organization, payload.name)
     except DirectoryError as exc:
@@ -259,6 +290,11 @@ def rename_organization_endpoint(
         raise _http(exc) from None
     db.commit()
     db.refresh(organization)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.organization_update", entity_type="organization",
+        entity_id=organization.id, summary=f"Renamed organization '{old_name}' to '{organization.name}'",
+        details={"name": [old_name, organization.name]}, organization_id=organization.id,
+    )
     return _organization_read(db, organization)
 
 
@@ -266,7 +302,7 @@ def rename_organization_endpoint(
     "/organizations/{organization_id}", status_code=status.HTTP_204_NO_CONTENT
 )
 def delete_organization_endpoint(
-    organization_id: int, current_user: CurrentUser, db: DbSession
+    organization_id: int, current_user: CurrentUser, db: DbSession, request: Request
 ) -> Response:
     _require_super_admin(current_user, "delete")
     organization = db.get(Organization, organization_id)
@@ -277,8 +313,15 @@ def delete_organization_endpoint(
         raise HTTPException(
             status_code=409, detail=in_use_detail("organization", users, templates)
         )
+    name = organization.name
     db.delete(organization)  # its (unused) departments cascade
     db.commit()
+    # The organization is gone, so the row has no organization scope (super admins see it).
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.organization_delete", entity_type="organization",
+        entity_id=organization_id, summary=f"Deleted organization '{name}'",
+        actor_scope=False,
+    )
     logger.info(f"Super admin {current_user.id} deleted organization {organization_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -364,7 +407,7 @@ def list_departments(
     "/departments", response_model=DepartmentRead, status_code=status.HTTP_201_CREATED
 )
 def create_department_endpoint(
-    payload: DepartmentCreate, current_user: CurrentUser, db: DbSession
+    payload: DepartmentCreate, current_user: CurrentUser, db: DbSession, request: Request
 ) -> DepartmentRead:
     organization_id = payload.organization_id
     if organization_id is None and current_user.role == "org_admin":
@@ -384,6 +427,11 @@ def create_department_endpoint(
         raise _http(exc) from None
     db.commit()
     db.refresh(department)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.department_create", entity_type="department",
+        entity_id=department.id, summary=f"Created department '{department.name}' in '{organization.name}'",
+        organization_id=department.organization_id, department_id=department.id,
+    )
     return _department_read(db, department)
 
 
@@ -400,9 +448,11 @@ def rename_department_endpoint(
     payload: DepartmentUpdate,
     current_user: CurrentUser,
     db: DbSession,
+    request: Request,
 ) -> DepartmentRead:
     department = _get_department_or_404(db, department_id)
     _require_department_admin_for(current_user, department.organization_id)
+    old_name = department.name
     try:
         rename_department(db, department, payload.name)
     except DirectoryError as exc:
@@ -410,12 +460,18 @@ def rename_department_endpoint(
         raise _http(exc) from None
     db.commit()
     db.refresh(department)
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.department_update", entity_type="department",
+        entity_id=department.id, summary=f"Renamed department '{old_name}' to '{department.name}'",
+        details={"name": [old_name, department.name]},
+        organization_id=department.organization_id, department_id=department.id,
+    )
     return _department_read(db, department)
 
 
 @router.delete("/departments/{department_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_department_endpoint(
-    department_id: int, current_user: CurrentUser, db: DbSession
+    department_id: int, current_user: CurrentUser, db: DbSession, request: Request
 ) -> Response:
     department = _get_department_or_404(db, department_id)
     _require_department_admin_for(current_user, department.organization_id)
@@ -424,7 +480,13 @@ def delete_department_endpoint(
         raise HTTPException(
             status_code=409, detail=in_use_detail("department", users, templates)
         )
+    name, organization_id = department.name, department.organization_id
     db.delete(department)
     db.commit()
+    audit_service.record_and_commit(
+        db, request, actor=current_user, action="admin.department_delete", entity_type="department",
+        entity_id=department_id, summary=f"Deleted department '{name}'",
+        organization_id=organization_id, department_id=None,
+    )
     logger.info(f"User {current_user.id} deleted department {department_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

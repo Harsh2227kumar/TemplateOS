@@ -17,7 +17,7 @@ Rules:
 
 import logging
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from app.api.deps import CurrentUser, DbSession
 from app.crud.ai_generation_crud import log_ai_generation
@@ -25,7 +25,7 @@ from app.crud.document_crud import get_document_by_id
 from app.crud.template_crud import get_template_by_id
 from app.crud.template_field_crud import get_fields_by_template
 from app.schemas.ai import ImproveTextRequest, ImproveTextResponse
-from app.services import ai_service
+from app.services import ai_service, audit_service
 from app.services.ai_service import AiUnavailableError
 from app.services.template_access import user_can_view_template
 
@@ -36,6 +36,27 @@ logger = logging.getLogger(__name__)
 AI_TEXT_FIELD_TYPES = ("text", "textarea", "list")
 
 
+def _audit_improve(db, request: Request, user, template, payload: ImproveTextRequest, generation_id: int, result: str):
+    """ai.improve_text audit event: action, field and outcome, never the text."""
+    audit_service.record_and_commit(
+        db,
+        request,
+        actor=user,
+        action="ai.improve_text",
+        entity_type="document" if payload.document_id is not None else "template",
+        entity_id=payload.document_id if payload.document_id is not None else template.id,
+        summary=f"AI {payload.action_type} on field '{payload.field_name}' ({result})",
+        details={
+            "action": payload.action_type,
+            "field_key": payload.field_name,
+            "template_id": template.id,
+            "ai_generation_id": generation_id,
+            "status": result,
+        },
+        template=template,
+    )
+
+
 @router.post(
     "/improve-text", response_model=ImproveTextResponse, response_model_exclude_none=True
 )
@@ -43,6 +64,7 @@ def improve_text(
     payload: ImproveTextRequest,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> ImproveTextResponse:
     """
     Improve one field's text with an AI action.
@@ -139,7 +161,7 @@ def improve_text(
             improved_items = None
             improved = ai_service.improve_text(payload.action_type, payload.original_text)
     except AiUnavailableError as e:
-        log_ai_generation(
+        generation = log_ai_generation(
             db,
             action_type=payload.action_type,
             model=model or "unconfigured",
@@ -150,6 +172,7 @@ def improve_text(
             status="error",
             detail=str(e),
         )
+        _audit_improve(db, http_request, current_user, template, payload, generation.id, "error")
         logger.warning(
             f"AI improve-text unavailable for template {template.id} "
             f"field {payload.field_name}: {e}"
@@ -158,7 +181,7 @@ def improve_text(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)
         ) from None
 
-    log_ai_generation(
+    generation = log_ai_generation(
         db,
         action_type=payload.action_type,
         model=model,
@@ -168,6 +191,7 @@ def improve_text(
         field_key=payload.field_name,
         status="success",
     )
+    _audit_improve(db, http_request, current_user, template, payload, generation.id, "success")
     logger.info(
         f"AI improve-text finished: action={payload.action_type} "
         f"template={template.id} field={payload.field_name} "

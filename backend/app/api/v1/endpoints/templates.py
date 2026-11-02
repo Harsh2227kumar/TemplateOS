@@ -17,11 +17,12 @@ import logging
 import zipfile
 from io import BytesIO
 
-from fastapi import APIRouter, Form, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Form, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy import false, func, select
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.endpoints._template_common import record_file_revision, require_manage
+from app.services import audit_service
 from app.services.storage_service import StorageError, storage_service
 from app.services.template_access import (
     ASSIGNABLE_ROLES,
@@ -258,6 +259,7 @@ def update_template_access(
     request: TemplateAccessUpdate,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> TemplateResponse:
     """
     Change who can see / use a template: visibility, scope and role
@@ -268,6 +270,12 @@ def update_template_access(
     if template is None:
         raise HTTPException(status_code=404, detail="Template not found")
     require_manage(template, current_user, "change access to")
+    before = {
+        "visibility": template.visibility,
+        "scope_organization_id": template.scope_organization_id,
+        "scope_department_id": template.scope_department_id,
+        "allowed_roles": template.allowed_roles,
+    }
 
     try:
         resolved = resolve_publish_access(
@@ -288,6 +296,23 @@ def update_template_access(
     template.allowed_roles = resolved.allowed_roles
     db.commit()
     db.refresh(template)
+    after = {
+        "visibility": template.visibility,
+        "scope_organization_id": template.scope_organization_id,
+        "scope_department_id": template.scope_department_id,
+        "allowed_roles": template.allowed_roles,
+    }
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.access_update",
+        entity_type="template",
+        entity_id=template.id,
+        summary=f"Changed access of '{template.name}' to {template.visibility}",
+        details={key: [before[key], after[key]] for key in after if before[key] != after[key]},
+        template=template,
+    )
     logger.info(
         f"Access for template {template_id} set to {resolved.visibility} "
         f"(org={resolved.scope_organization_id}, dept={resolved.scope_department_id}, "
@@ -301,6 +326,7 @@ def delete_template(
     template_id: int,
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
 ) -> None:
     """
     Permanently delete a template: the DB record (fields cascade) and every
@@ -320,11 +346,24 @@ def delete_template(
 
     original_path = template.original_file_path
     processed_path = template.processed_file_path
+    name = template.name
+    scope = audit_service.scope_for_template(template, current_user)
 
     # DB first (fields cascade via ORM); file deletion is best-effort afterwards
     # so a storage hiccup can never leave a template row pointing at deleted files.
     db.delete(template)
     db.commit()
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.delete",
+        entity_type="template",
+        entity_id=template_id,
+        summary=f"Deleted template '{name}'",
+        organization_id=scope[0],
+        department_id=scope[1],
+    )
 
     for relative_path in (original_path, processed_path):
         if not relative_path:
@@ -374,6 +413,7 @@ def get_template_fields(
 def upload_template(
     current_user: CurrentUser,
     db: DbSession,
+    http_request: Request,
     file: UploadFile = File(...),
     name: str = Form(default=""),
     description: str | None = Form(default=None),
@@ -488,4 +528,15 @@ def upload_template(
         ) from None
 
     record_file_revision(db, template, stored.path, content, "upload", current_user.id)
+    audit_service.record_and_commit(
+        db,
+        http_request,
+        actor=current_user,
+        action="template.upload",
+        entity_type="template",
+        entity_id=template.id,
+        summary=f"Uploaded template '{template.name}'",
+        details={"category": template.category, "visibility": template.visibility, "file_size": len(content)},
+        template=template,
+    )
     return _template_response(template, current_user)
