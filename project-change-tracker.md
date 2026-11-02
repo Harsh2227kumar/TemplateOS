@@ -3435,3 +3435,122 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 #### Notes For Next Push
 
 - tsc, 143/143 tests, build. Browser check on a scratch draft with a generated v1 and a hand-edited v2: no overflow at 1280 px (preview sidebar and edit page) and 375 px; card wording and Restore visibility as above.
+
+### Checkpoint 0071
+
+- Date: 2026-11-01
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `feature/backend-v17-p3-history-audit-data` (from `backend`, PR into `backend`); tracker on `docs/project-change-tracker-v17-p3` (into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0070 -> 2026-11-01
+
+#### Summary
+
+- V1.7 Phase 3 data layer: `download_history` and an append-only `audit_logs` trail, scoped admin queries, retention.
+
+#### Completed Tasks
+
+- Migration `c3f7a9d2e6b1` (after `b8e4c2a6d1f9`): `download_history` (user / document / version SET NULL, snapshots of name, version and `version_source`, format CHECK, file name and size, IP, user agent; user and document time indexes) and `audit_logs` (actor SET NULL + email snapshot, action, entity, organization / department scope SET NULL, summary, JSON details, IP; indexes on action, created_at, scope and entity).
+- Action catalog with labels and areas (templates, documents, editor, AI, admin, sign-in), including the P2.1 editor actions and `admin.audit_export`.
+- CRUD: `record_download`, user and document listings, `add_audit_log` (catalog and entity checks, 4 KB details cap, summary clip), scoped `search_audit_logs` (filters, escaped LIKE search, date range) and the CSV row iterator.
+- `audit_scope`: SQL filter and Python twin (parity-tested), `can_view_audit` (super admin all, org admin their organization, department admin their department).
+- `AUDIT_RETENTION_DAYS` (365) and `DOWNLOAD_HISTORY_RETENTION_DAYS` (730), `scripts/prune_audit_logs.py` (dry run unless `--yes`, batches of 1000).
+
+#### Code Changes
+
+- `backend/alembic/versions/c3f7a9d2e6b1_download_history_audit_logs.py` (new), `backend/app/models/download_history.py`, `audit_log.py` (new), `__init__.py`, `backend/app/services/audit_catalog.py`, `audit_scope.py` (new), `backend/app/crud/download_history_crud.py`, `audit_log_crud.py` (new), `backend/app/schemas/audit.py` (new), `__init__.py`, `backend/app/core/config.py`, `.env.example`, `backend/scripts/prune_audit_logs.py` (new), tests `test_v17_p3_migration.py`, `test_download_history_data.py`, `test_audit_logs_data.py`, `test_audit_scope_parity.py` (new), `test_v17_p21_migration.py`
+
+#### Features Added / Updated / Removed
+
+- Added: download history and audit log tables, action catalog, scoped audit queries, retention script.
+- Updated: none.
+- Removed: none.
+
+#### Issues Fixed
+
+- None.
+
+#### Notes For Next Push
+
+- 10 new tests; full suite 777 passed, 1 skipped (SQLite).
+- After merging run `alembic upgrade head` (applies `c3f7a9d2e6b1`).
+
+### Checkpoint 0072
+
+- Date: 2026-11-01
+- Member: Member 2 (AI - Backend/Service Developer)
+- Branch: `feature/backend-v17-p3-history-audit-api` (stacked on `feature/backend-v17-p3-history-audit-data`; retarget to `backend` after the data PR merges)
+- Push status: before push
+- Range covered: after Checkpoint 0071 -> 2026-11-01
+
+#### Summary
+
+- V1.7 Phase 3 services and API: every download recorded, important actions audited, history and audit endpoints.
+
+#### Completed Tasks
+
+- `file_delivery.deliver_file()`: all three download routes keep their own checks and messages, then record the download and a `document.download` event, commit, and stream. Failed downloads are not recorded; the ONLYOFFICE file fetch is not a download.
+- `audit_service.record()`: writes in a SAVEPOINT, so an audit error is logged and never fails the action; client IP (X-Forwarded-For only from `TRUSTED_PROXY_IPS`); scope from the template, else the actor.
+- Hooks: template upload, access change, delete, placeholder detect / fix, clean, field changes, AI field suggestions; document create, values save (field names only), generate (`replaced_manual_edits`), PDF retry, version restore; AI improve-text; admin user, organization and department changes; sign-in, failed sign-in (email only), sign-out; P2.1 customize, editor open (not for a reused session), revision restore, template / document file edits, save failures (actor = session user, no IP).
+- Endpoints: `GET /me/downloads`, `GET /documents/{id}/downloads`, `GET /admin/audit-logs`, `/admin/audit-logs/actions`, `/admin/audit-logs/export.csv` (same scope and filters, max 10,000 rows, formula-safe cells, export audited); date range checked (422).
+
+#### Code Changes
+
+- `backend/app/services/audit_service.py`, `file_delivery.py` (new), `backend/app/api/v1/endpoints/history.py` (new), `api.py`, `documents.py`, `document_versions.py`, `templates.py`, `template_cleaning.py`, `template_placeholders.py`, `template_fields.py`, `template_ai.py`, `ai.py`, `admin.py`, `auth.py`, `word_editor.py`, `backend/app/services/word_editor_service.py`, `backend/app/core/config.py`, `.env.example`, tests `test_v17_p3_api.py` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: download recording, audit hooks, download history and audit log APIs, CSV export.
+- Updated: download routes (one recording path), all audited endpoints.
+- Removed: none.
+
+#### Issues Fixed
+
+- Pre-merge test pass: an organization-delete audit row was stamped with the acting super admin's own organization; it now has no scope. Added tests: deleting a template keeps its download history (shown as "(deleted)") and audit rows; organization delete has no scope.
+
+#### Notes For Next Push
+
+- 7 new API tests (including "audit failure never breaks the action" and "field values never reach the audit log"); full suite 786 passed, 1 skipped (on dev + all three P3 branches merged).
+- Behind a reverse proxy set `TRUSTED_PROXY_IPS` to get the real client IP.
+
+### Checkpoint 0073
+
+- Date: 2026-11-01
+- Member: Member 1 (AI - Frontend Developer)
+- Branch: `feature/frontend-v17-p3-history-audit-ui` (from `frontend`, PR into `frontend`)
+- Push status: before push
+- Range covered: after Checkpoint 0072 -> 2026-11-01
+
+#### Summary
+
+- V1.7 Phase 3 UI: "Downloads" page, a document History card with downloads, and the admin Audit log. V1.7 is complete once the three PRs are merged.
+
+#### Completed Tasks
+
+- `/downloads` (sidebar "Downloads"): when, document (link, or "(deleted)"), version with "Edited manually", format, file, size; format and document filters; pagination; "Download again"; cards below 640 px.
+- Preview: "History" card with Versions (P2 / P2.1 panel) and Downloads tabs, loaded on demand.
+- `/admin/audit-log` (sidebar Admin > "Audit log"): action filter grouped by area from the server catalog, entity type, UTC date range (default last 30 days, max 366), debounced search; filters in the URL; details dialog with the details JSON; CSV export; 403 shown as "no access".
+- `DownloadButton` with messages per status; every download (all existing buttons included) refreshes the history lists.
+- `historyApi`, hooks, query keys; pure helpers `history-model.ts`, `audit-model.ts`.
+
+#### Code Changes
+
+- `frontend/src/lib/api/history.ts`, `query-string.ts` (new), `types.ts`, `index.ts`, `frontend/src/hooks/queries/history.ts` (new), `documents.ts`, `index.ts`, `frontend/src/lib/query/keys.ts`, `frontend/src/features/downloads/*` (new), `frontend/src/features/admin/audit-model.ts` (new), `frontend/src/features/document-preview/DocumentHistory.tsx` (new), `frontend/src/pages/downloads-page.tsx`, `admin-audit-log-page.tsx` (new), `document-preview-page.tsx`, `App.tsx`, `frontend/src/components/sidebar-nav.tsx`, tests `history-model.test.ts`, `audit-model.test.ts` (new)
+
+#### Features Added / Updated / Removed
+
+- Added: Downloads page, document download history, admin Audit log with export.
+- Updated: preview history card, sidebar, download hooks.
+- Removed: none.
+
+#### Issues Fixed
+
+- Pre-merge live check: the Audit log's debounced search could undo a date filter changed within 300 ms (react-router's setSearchParams from an older render reads that render's params). Filter updates now merge into a ref holding the latest filters; verified live.
+
+#### Notes For Next Push
+
+- Integration check (M3 + M2 + M1, scratch SQLite, real Gotenberg): backend 784 passed; frontend tsc, 155/155 tests, build; types vs backend schemas (23 pairs, 0 differences).
+- Browser: downloads from the preview card (DOCX, PDF), a history row (v1 PDF) and the dashboard -> 4 rows on /downloads and in the History tab; org admin sees their organization's events (create, save, generate, downloads, sign-in/out) but not another college's; filters from a shared URL; details dialog; CSV export (4 rows, audited); faculty gets "no access"; 375 px without horizontal scroll.
+- Existing download buttons keep their own error handling (amber PDF row, retry); they are recorded by the server and refresh the history lists rather than being replaced by `DownloadButton`.
+- Bundle: new pages are lazy; main chunk +2.3 kB raw / +0.6 kB gzip.
+- Merge order: data PR -> `backend`, retarget the API PR to `backend` and merge, frontend PR -> `frontend`, then `backend` and `frontend` into `dev`. Run `alembic upgrade head` (applies `c3f7a9d2e6b1`).
