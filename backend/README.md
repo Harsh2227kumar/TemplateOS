@@ -2,6 +2,9 @@
 
 ## Run locally
 
+Full per-OS setup (Windows, macOS, Ubuntu) and the one-shot setup scripts
+in `scripts/` are in the [root README](../README.md#setup). Backend only:
+
 1. Copy `.env.example` to `.env` in the repository root.
 2. Set a valid `DATABASE_URL` for Neon PostgreSQL.
 3. Use `backend/alembic.ini` as provided, or recreate it from `backend/alembic.ini.example`.
@@ -32,6 +35,20 @@ python scripts/seed_user.py --email admin@example.com --password "change-this-pa
 
 Set a long, random `JWT_SECRET_KEY` in the repository root `.env` outside local
 throwaway development.
+
+### EkLink single sign-on
+
+With `EKLINK_URL`, `EKLINK_CLIENT_ID`, `EKLINK_CLIENT_SECRET` and
+`EKLINK_REDIRECT_URI` set, the login page shows "Sign in with EkLink", and
+opening TemplateOS from the EkLink dashboard signs in automatically
+(`app/services/eklink.py`). The redirect URI is the SPA page
+`http://localhost:5173/auth/callback` and must match the callback registered
+in EkLink. Users are matched by email; a first-time user is created with a
+role mapped from the EkLink role (student→student, faculty/hod→faculty,
+director→approver, admin→org_admin, staff/finance→normal_user) and joins
+`EKLINK_ORGANIZATION` (and the department with the EkLink department's name)
+when that is set. Existing users keep the role and membership set in
+TemplateOS.
 
 
 ## Development/demo profiles
@@ -149,7 +166,7 @@ Settings (repository-root `.env`, restart the backend after a change):
 | Setting | Default | Meaning |
 |---|---|---|
 | `PDF_CONVERSION_ENABLED` | `true` | Kill switch. `false` skips conversion and records "PDF conversion is disabled on this server" |
-| `GOTENBERG_URL` | unset | e.g. `http://localhost:3000`. Unset: a local LibreOffice is used if found |
+| `GOTENBERG_URL` | unset | e.g. `http://localhost:3005` (host port 3000 is EkLink). Unset: a local LibreOffice is used if found |
 | `GOTENBERG_TIMEOUT_SECONDS` | `60` | Total conversion timeout (connect timeout 5 s) |
 | `PDF_CONVERTER` | `auto` | `auto` / `gotenberg` / `libreoffice` / `none` (`none` = disabled) |
 | `LIBREOFFICE_PATH`, `LIBREOFFICE_TIMEOUT_SECONDS` | unset, `120` | Local LibreOffice fallback |
