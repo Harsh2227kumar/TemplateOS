@@ -22,6 +22,31 @@ services:
       timeout: 5s
       retries: 3
 
+  # Local PostgreSQL (optional; the default setup uses Neon). Used by the
+  # setup scripts when you pick "local database". Host port 5433 so it does
+  # not clash with a PostgreSQL already installed on 5432. Start it with:
+  #   docker compose --profile db up -d postgres
+  # and set in .env:
+  #   DATABASE_URL=postgresql+psycopg://templateos:templateos@localhost:5433/templateos
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["db"]
+    container_name: templateos-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: templateos
+      POSTGRES_PASSWORD: templateos
+      POSTGRES_DB: templateos
+    volumes:
+      - templateos-pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U templateos -d templateos"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   # Word file editor (V1.7 Phase 2.1): ONLYOFFICE Docs Community Edition
   # (free, AGPL v3, run unmodified; up to 20 simultaneous editors). Start it
   # yourself (large image, first start takes a few minutes):
@@ -55,3 +80,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
+
+volumes:
+  templateos-pgdata:
