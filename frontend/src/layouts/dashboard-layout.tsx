@@ -30,6 +30,8 @@ export function DashboardLayout() {
     if (location.pathname === "/upload-template") return "Upload Template";
     if (location.pathname === "/admin/users") return "Users";
     if (location.pathname === "/admin/organizations") return "Organizations";
+    if (location.pathname === "/admin/approvers") return "Approvers";
+    if (location.pathname === "/admin/sync") return "EkLink sync";
     return "Dashboard";
   };
 
