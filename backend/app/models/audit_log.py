@@ -40,6 +40,9 @@ class AuditLog(Base):
     department_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("departments.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    institute_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("institutes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
