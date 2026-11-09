@@ -247,7 +247,7 @@ def unavailable_reason() -> str:
 
 
 _NOT_CONFIGURED_HINT = (
-    "PDF conversion is not set up: set GOTENBERG_URL (e.g. http://localhost:3000) "
+    "PDF conversion is not set up: set GOTENBERG_URL (e.g. http://localhost:3005) "
     "in the repository-root .env, or install LibreOffice, then restart the backend"
 )
 
