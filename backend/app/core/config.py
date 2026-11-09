@@ -89,6 +89,29 @@ class Settings(BaseSettings):
     cookie_secure_override: bool | None = Field(default=None, alias="COOKIE_SECURE")
     # None/"" -> host-only cookies (the safest default).
     cookie_domain_setting: str | None = Field(default=None, alias="COOKIE_DOMAIN")
+    # --- EkLink single sign-on, see app/services/eklink.py ---
+    # Off until EKLINK_URL, EKLINK_CLIENT_ID, EKLINK_CLIENT_SECRET and
+    # EKLINK_REDIRECT_URI are all set. EKLINK_ISSUER defaults to EKLINK_URL.
+    eklink_url: str | None = Field(default=None, alias="EKLINK_URL")
+    eklink_issuer_setting: str | None = Field(default=None, alias="EKLINK_ISSUER")
+    eklink_client_id: str | None = Field(default=None, alias="EKLINK_CLIENT_ID")
+    eklink_client_secret: str | None = Field(default=None, alias="EKLINK_CLIENT_SECRET")
+    eklink_redirect_uri: str | None = Field(default=None, alias="EKLINK_REDIRECT_URI")
+    # Organization (by name) that first-time EkLink users join; their EkLink
+    # department is matched by name inside it. Unset: no membership.
+    eklink_organization: str | None = Field(default=None, alias="EKLINK_ORGANIZATION")
+    # --- EkLink change sync, see app/services/eklink_sync.py ---
+    # On when EKLINK_URL, EKLINK_CLIENT_ID and EKLINK_CLIENT_SECRET are set,
+    # unless EKLINK_SYNC_ENABLED=false. Pulls changes every N minutes and a
+    # full snapshot daily at EKLINK_SYNC_FULL_AT (HH:MM, server local time).
+    eklink_sync_enabled_setting: bool = Field(default=True, alias="EKLINK_SYNC_ENABLED")
+    eklink_sync_interval_minutes: int = Field(
+        default=15, ge=1, le=1440, alias="EKLINK_SYNC_INTERVAL_MINUTES"
+    )
+    eklink_sync_full_at: str = Field(default="02:00", alias="EKLINK_SYNC_FULL_AT")
+    # Public self sign-up (POST /auth/signup). Off by default: accounts come
+    # from EkLink sign-in or from an administrator.
+    allow_public_signup: bool = Field(default=False, alias="ALLOW_PUBLIC_SIGNUP")
     # In-memory login throttling (per client IP and per email).
     login_rate_limit_enabled: bool = Field(default=True, alias="LOGIN_RATE_LIMIT_ENABLED")
     login_rate_limit_attempts: int = Field(
@@ -226,6 +249,30 @@ class Settings(BaseSettings):
         return domain or None
 
     @property
+    def eklink_issuer(self) -> str | None:
+        return self.eklink_issuer_setting or self.eklink_url
+
+    @property
+    def eklink_enabled(self) -> bool:
+        return all(
+            (
+                self.eklink_url,
+                self.eklink_client_id,
+                self.eklink_client_secret,
+                self.eklink_redirect_uri,
+            )
+        )
+
+    @property
+    def eklink_sync_configured(self) -> bool:
+        return all((self.eklink_url, self.eklink_client_id, self.eklink_client_secret))
+
+    @property
+    def eklink_sync_enabled(self) -> bool:
+        """EkLink owns people / directory / approvers and changes are synced."""
+        return self.eklink_sync_enabled_setting and self.eklink_sync_configured
+
+    @property
     def storage_root(self) -> Path:
         path = Path(self.storage_base_path)
         if not path.is_absolute():
@@ -248,6 +295,39 @@ class Settings(BaseSettings):
             return None
         value = str(value).strip().rstrip("/")
         return value or None
+
+    @field_validator(
+        "eklink_url",
+        "eklink_issuer_setting",
+        "eklink_client_id",
+        "eklink_client_secret",
+        "eklink_redirect_uri",
+        "eklink_organization",
+        mode="before",
+    )
+    @classmethod
+    def normalize_eklink(cls, value: str | None, info) -> str | None:
+        """Blank -> None (not set); trailing slashes removed from the base URLs."""
+        if value is None:
+            return None
+        value = str(value).strip()
+        if info.field_name in ("eklink_url", "eklink_issuer_setting"):
+            value = value.rstrip("/")
+        return value or None
+
+    @field_validator("eklink_sync_full_at", mode="before")
+    @classmethod
+    def normalize_sync_full_at(cls, value: str | None) -> str:
+        """HH:MM (24h); blank -> 02:00."""
+        text = str(value or "").strip() or "02:00"
+        hours, _, minutes = text.partition(":")
+        try:
+            h, m = int(hours), int(minutes)
+        except ValueError:
+            raise ValueError("EKLINK_SYNC_FULL_AT must look like HH:MM") from None
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError("EKLINK_SYNC_FULL_AT must look like HH:MM")
+        return f"{h:02d}:{m:02d}"
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -10,6 +10,8 @@ Rule: an unsafe request (POST/PUT/PATCH/DELETE) must carry
 unless it carries an `Authorization: Bearer ...` header (browsers never
 attach that cross-site without a CORS preflight, so it is not CSRF-able).
 /auth/login and /auth/signup are exempt: there is no session to ride yet.
+/sync/eklink/events is exempt too: EkLink calls it server to server and the
+signed JWT body is the authentication (it ignores cookies).
 
 A cross-site form or `fetch(..., {mode: "no-cors"})` cannot set a custom
 header, and a cross-origin `fetch` that sets one triggers a preflight that
@@ -42,7 +44,13 @@ def _auth_path(name: str) -> str:
 class CSRFMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self.exempt_paths = frozenset({_auth_path("login"), _auth_path("signup")})
+        self.exempt_paths = frozenset(
+            {
+                _auth_path("login"),
+                _auth_path("signup"),
+                f"{settings.api_v1_prefix}/sync/eklink/events",
+            }
+        )
         self.always_protected_paths = frozenset(
             {_auth_path("refresh"), _auth_path("logout")}
         )

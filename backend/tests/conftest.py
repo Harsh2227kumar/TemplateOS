@@ -1,4 +1,15 @@
+import os
+
 import pytest
+
+# Most suites create their users through POST /auth/signup. Public sign-up is
+# off by default in the app (accounts come from EkLink or an admin), so turn
+# it on for the test process before any test module imports the app.
+os.environ.setdefault("ALLOW_PUBLIC_SIGNUP", "true")
+# EkLink sync makes people / directory / approvers read-only. Off for the
+# suites (the developer's .env may configure EkLink); tests/test_eklink_sync.py
+# switches it on where it is needed.
+os.environ.setdefault("EKLINK_SYNC_ENABLED", "false")
 
 
 @pytest.fixture(autouse=True)
