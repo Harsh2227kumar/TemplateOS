@@ -65,6 +65,7 @@ def add_audit_log(
     details: dict[str, Any] | None = None,
     organization_id: int | None = None,
     department_id: int | None = None,
+    institute_id: int | None = None,
     ip: str | None = None,
     actor_email: str | None = None,
 ) -> AuditLog:
@@ -80,6 +81,7 @@ def add_audit_log(
         entity_id=entity_id,
         organization_id=organization_id,
         department_id=department_id,
+        institute_id=institute_id,
         summary=(summary or action)[:SUMMARY_MAX_LENGTH],
         details=encode_details(details),
         ip_address=ip[:45] if ip else None,

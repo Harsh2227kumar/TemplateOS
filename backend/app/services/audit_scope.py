@@ -1,8 +1,9 @@
 """
-Who may read which audit rows (V1.7 Phase 3).
+Who may read which audit rows.
 
 - super_admin: every row
 - org_admin (with an organization): rows of their organization
+- institute_admin (with an institute): rows of their institute
 - department_admin (with a department): rows of their department
 - everyone else, or an admin without that membership: nothing
 
@@ -15,35 +16,30 @@ from sqlalchemy import ColumnElement, false
 
 from app.models.audit_log import AuditLog
 from app.models.user import User
+from app.services import scopes
 
 
 def can_view_audit(user: User) -> bool:
-    if user.role == "super_admin":
-        return True
-    if user.role == "org_admin":
-        return user.organization_id is not None
-    if user.role == "department_admin":
-        return user.department_id is not None
-    return False
+    return scopes.scope_of(user) is not None
 
 
 def audit_scope_filter(user: User) -> ColumnElement[bool] | None:
     """WHERE clause for the rows `user` may read; None means every row."""
-    if user.role == "super_admin":
+    scope = scopes.scope_of(user)
+    if scope is None:
+        return false()
+    if scope.level == "platform":
         return None
-    if user.role == "org_admin" and user.organization_id is not None:
-        return AuditLog.organization_id == user.organization_id
-    if user.role == "department_admin" and user.department_id is not None:
-        return AuditLog.department_id == user.department_id
-    return false()
+    column = {
+        "organization": AuditLog.organization_id,
+        "institute": AuditLog.institute_id,
+        "department": AuditLog.department_id,
+    }[scope.level]
+    return column == scope.id
 
 
 def row_visible_to(user: User, row: AuditLog) -> bool:
     """Python twin of audit_scope_filter (parity-tested)."""
-    if user.role == "super_admin":
-        return True
-    if user.role == "org_admin" and user.organization_id is not None:
-        return row.organization_id == user.organization_id
-    if user.role == "department_admin" and user.department_id is not None:
-        return row.department_id == user.department_id
-    return False
+    return scopes.contains(
+        scopes.scope_of(user), row.organization_id, row.institute_id, row.department_id
+    )
