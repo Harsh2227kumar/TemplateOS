@@ -64,7 +64,7 @@ PEOPLE = {
     "cs_stu": ("student", "uni", "cs"),
     "me_fac": ("faculty", "uni", "me"),
     "law_fac": ("faculty", "other", "law"),
-    "newbie": ("normal_user", None, None),
+    "newbie": ("normal_user", None, None),  # legacy role still stored
 }
 
 
@@ -225,7 +225,9 @@ def test_super_admin_rules(ids):
 
     # Can grant and then revoke super_admin (two exist at that point).
     assert _patch_user(ids, "super", "newbie", {"role": "super_admin"}).status_code == 200
-    assert _patch_user(ids, "super", "newbie", {"role": "normal_user"}).status_code == 200
+    assert _patch_user(ids, "super", "newbie", {"role": "staff"}).status_code == 200
+    # legacy roles can no longer be assigned
+    assert _patch_user(ids, "super", "newbie", {"role": "normal_user"}).status_code == 422
 
     # Department must belong to the user's organization.
     mismatch = _patch_user(ids, "super", "cs_fac", {"department_id": ids["law"]})
@@ -282,7 +284,7 @@ def test_last_super_admin_cannot_be_demoted(ids):
 def test_org_admin_rules(ids):
     ok = _patch_user(ids, "uni_admin", "cs_fac", {"role": "department_admin"})
     assert ok.status_code == 200, ok.json()
-    for role in ("faculty", "student", "approver", "normal_user"):
+    for role in ("faculty", "student", "staff"):
         assert _patch_user(ids, "uni_admin", "cs_stu", {"role": role}).status_code == 200
 
     for role in ("org_admin", "super_admin"):
@@ -328,7 +330,7 @@ def test_org_admin_rules(ids):
 
 
 def test_department_admin_rules(ids):
-    for role in ("student", "approver", "normal_user", "faculty"):
+    for role in ("student", "staff", "faculty"):
         assert _patch_user(ids, "cs_admin", "cs_fac", {"role": role}).status_code == 200
     for role in ("department_admin", "org_admin", "super_admin"):
         assert _patch_user(ids, "cs_admin", "cs_fac", {"role": role}).status_code == 403, role
@@ -362,7 +364,7 @@ def test_non_admins_and_bad_payloads(ids):
     assert _patch_user(ids, "super", "cs_fac", {"role": "wizard"}).status_code == 422
     assert _patch_user(ids, "super", "cs_fac", {"role": None}).status_code == 422
     assert _patch_user(ids, "super", "cs_fac", {"email": "x@y.z"}).status_code == 422
-    assert _patch_user(ids, "super", "cs_fac", {"is_active": False}).status_code == 422
+    assert _patch_user(ids, "super", "cs_fac", {"is_active": None}).status_code == 422
     missing = client.patch(
         "/api/v1/admin/users/999999", json={"role": "faculty"}, headers=_auth(ids, "super")
     )

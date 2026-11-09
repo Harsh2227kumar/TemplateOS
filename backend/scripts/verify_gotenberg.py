@@ -10,7 +10,7 @@ Where the URL comes from (first match wins):
   1. --url
   2. the GOTENBERG_URL environment variable
   3. GOTENBERG_URL in the repository-root .env (only that key is read)
-  4. the default http://localhost:3000
+  4. the default http://localhost:3005
 
 What it checks (in order):
   1. GET {url}/health answers 200
@@ -33,7 +33,7 @@ import httpx
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ENV = BACKEND_DIR.parent / ".env"
-DEFAULT_URL = "http://localhost:3000"
+DEFAULT_URL = "http://localhost:3005"
 DOCX_MEDIA_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )

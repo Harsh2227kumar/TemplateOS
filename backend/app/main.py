@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 
@@ -7,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.csrf import CSRFMiddleware
+from app.services.eklink_scheduler import run_scheduler, scheduler_enabled
 from app.services.pdf_service import get_pdf_converter
 from app.services.storage_service import storage_service
 
@@ -28,7 +31,18 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.warning("PDF conversion uses %s", converter.name)
-    yield
+    # EkLink change sync (pull every N minutes + daily full resync); off
+    # without EkLink settings, with EKLINK_SYNC_ENABLED=false and in tests.
+    stop = asyncio.Event()
+    sync_task = asyncio.create_task(run_scheduler(stop)) if scheduler_enabled() else None
+    try:
+        yield
+    finally:
+        if sync_task is not None:
+            stop.set()
+            sync_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await sync_task
 
 
 def create_application() -> FastAPI:

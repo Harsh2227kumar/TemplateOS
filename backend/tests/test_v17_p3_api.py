@@ -380,10 +380,10 @@ def test_hooks_record_safe_details(monkeypatch):
 
     super_token, _, _ = _login("super_admin")
     target_token, target_id, _ = _login("faculty")
-    updated = client.patch(f"{API}/admin/users/{target_id}", json={"role": "approver"}, headers=_auth(super_token))
+    updated = client.patch(f"{API}/admin/users/{target_id}", json={"role": "staff"}, headers=_auth(super_token))
     assert updated.status_code == 200, updated.text
     change = _audit("admin.user_update", target_id)
-    assert json.loads(change[0].details)["changed"] == {"role": ["faculty", "approver"]}
+    assert json.loads(change[0].details)["changed"] == {"role": ["faculty", "staff"], "member_type": ["student", "staff"]}
 
     logins = _audit("auth.login", user_id)
     assert logins and logins[0].actor_email == email

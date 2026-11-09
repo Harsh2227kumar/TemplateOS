@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     document_versions,
     documents,
     history,
+    sync,
     system,
     template_ai,
     template_cleaning,
@@ -40,3 +41,6 @@ api_router.include_router(word_editor.router)
 # V1.7 P3: /me/downloads, /documents/{id}/downloads, /admin/audit-logs*.
 api_router.include_router(history.router)
 api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+# EkLink change sync: the signed push endpoint and the admin status / run.
+api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
+api_router.include_router(sync.admin_router, prefix="/admin", tags=["admin"])

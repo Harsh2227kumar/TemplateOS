@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
 from app.models.organization import Department, Organization
-from app.models.user import USER_ROLES, User
+from app.models.user import MEMBER_TYPES, USER_ROLES, User
 from app.services.org_directory import (
     clean_name,
     create_department,
@@ -87,7 +87,7 @@ DEMO_USER_DEFINITIONS = (
     DemoUserDefinition(
         "SIT_APPROVER",
         "Demo Approver",
-        "approver",
+        "staff",
         "Academic Affairs",
         "TemplateOS Demo Institute",
         "Document Approver",
@@ -95,7 +95,7 @@ DEMO_USER_DEFINITIONS = (
     DemoUserDefinition(
         "SIT_NORMAL_USER",
         "Demo User",
-        "normal_user",
+        "staff",
         None,
         "TemplateOS Demo Institute",
         None,
@@ -173,6 +173,8 @@ def seed_demo_users(db: Session, seeds: Sequence[DemoUserSeed]) -> list[User]:
 
         user.full_name = seed.full_name.strip()
         user.role = seed.role
+        if seed.role in MEMBER_TYPES:
+            user.member_type = seed.role
         organization = _get_or_create_organization(db, seed.organization)
         department = (
             _get_or_create_department(db, organization, seed.department)

@@ -14,12 +14,13 @@ from app.models.user import USER_ROLES
 UserRole = Literal[
     "super_admin",
     "org_admin",
+    "institute_admin",
     "department_admin",
     "faculty",
+    "staff",
     "student",
-    "approver",
-    "normal_user",
 ]
+MemberType = Literal["faculty", "staff", "student"]
 if set(get_args(UserRole)) != set(USER_ROLES):  # pragma: no cover - guard
     raise RuntimeError("UserRole is out of sync with app.models.user.USER_ROLES")
 
@@ -39,10 +40,15 @@ class ProfilePreferences(BaseModel):
 
 
 class UserMembershipMixin(BaseModel):
-    """Organization / department ids plus display names from the linked rows."""
+    """Organization / institute / department ids plus display names from the linked rows."""
 
     organization_id: int | None = None
+    institute_id: int | None = None
     department_id: int | None = None
+    institute: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("institute_name", "institute"),
+    )
     # Read from User.organization_name / department_name (the linked rows),
     # not from the legacy free-text columns.
     organization: str | None = Field(
@@ -56,11 +62,19 @@ class UserMembershipMixin(BaseModel):
 
 
 class UserProfileRead(UserMembershipMixin, UserRead):
+    login_id: str | None = None
+    member_type: str | None = None
+    batch: str | None = None
+    section: str | None = None
+    semester: int | None = None
     job_title: str | None = None
     phone: str | None = None
     avatar_url: str | None = None
     signature_path: str | None = None
     preferences: ProfilePreferences | None = None
+    is_demo: bool = False
+    # Linked to EkLink: name, email, placement and member type come from there.
+    managed_by_eklink: bool = False
 
 
 def _optional_text(value: object, max_length: int, what: str) -> object:
@@ -117,6 +131,18 @@ class AdminUserRead(UserMembershipMixin, UserRead):
     email: str
     job_title: str | None = None
     phone: str | None = None
+    login_id: str | None = None
+    member_type: str | None = None
+    is_active: bool = True
+    batch: str | None = None
+    section: str | None = None
+    semester: int | None = None
+    # True for accounts that sign in through EkLink (no local password).
+    sso: bool = False
+    is_demo: bool = False
+    # Linked to EkLink (eklink_sub): placement, member type and the active
+    # flag are read-only here ("Managed in EkLink").
+    managed_by_eklink: bool = False
 
 
 class AdminUserList(BaseModel):
@@ -136,11 +162,21 @@ class AdminUserUpdate(BaseModel):
 
     role: UserRole | None = None
     organization_id: int | None = None
+    institute_id: int | None = None
     department_id: int | None = None
+    member_type: MemberType | None = None
+    is_active: bool | None = None
 
     @field_validator("role")
     @classmethod
     def _role_not_null(cls, value: str | None) -> str:
         if value is None:
             raise ValueError("role cannot be null")
+        return value
+
+    @field_validator("is_active")
+    @classmethod
+    def _active_not_null(cls, value: bool | None) -> bool:
+        if value is None:
+            raise ValueError("is_active cannot be null")
         return value

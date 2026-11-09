@@ -82,7 +82,7 @@ def test_profile_fields_persist_and_optional_fields_remain_nullable(engine) -> N
 
         stored_minimal = db.get(User, minimal_id)
         assert stored_minimal is not None
-        assert stored_minimal.role == "normal_user"
+        assert stored_minimal.role == "student"
         assert stored_minimal.department is None
         assert stored_minimal.organization is None
         assert stored_minimal.job_title is None
@@ -155,8 +155,11 @@ def test_configured_demo_accounts_cover_supported_roles() -> None:
 
     seeds = build_demo_user_seeds(values)
 
-    assert len(seeds) == len(USER_ROLES)
-    assert tuple(seed.role for seed in seeds) == USER_ROLES
+    # One demo account per role except institute_admin (the demo directory has
+    # a single institute); the former approver / normal_user demo accounts are
+    # now staff members, so their environment variables keep working.
+    assert len(seeds) == 7
+    assert set(seed.role for seed in seeds) == set(USER_ROLES) - {"institute_admin"}
 
     assert all(
         definition.environment_prefix.startswith("SIT_")

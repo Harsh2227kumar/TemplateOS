@@ -49,7 +49,7 @@ def test_signup_login_and_profile_flow() -> None:
     )
     assert signup.status_code == 201
     assert signup.json()["email"] == "test@example.com"
-    assert signup.json()["role"] == "normal_user"
+    assert signup.json()["role"] == "student"
     assert "hashed_password" not in signup.json()
 
     with Session(test_engine) as db:
@@ -102,16 +102,25 @@ def test_signup_login_and_profile_flow() -> None:
         "id": user.id,
         "email": "test@example.com",
         "full_name": "Test User",
-        "role": "normal_user",
+        "role": "student",
         "department": None,
         "department_id": None,
+        "institute": None,
+        "institute_id": None,
         "organization": None,
         "organization_id": None,
+        "login_id": None,
+        "member_type": "student",
+        "batch": None,
+        "section": None,
+        "semester": None,
         "job_title": None,
         "phone": None,
         "avatar_url": None,
         "signature_path": None,
         "preferences": None,
+        "is_demo": False,
+        "managed_by_eklink": False,
     }
     assert "hashed_password" not in profile_body
 

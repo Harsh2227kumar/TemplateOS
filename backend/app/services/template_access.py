@@ -7,10 +7,11 @@ predicate `user_can_view_template` and the SQL filter
 the SAME rule and are checked against each other by a parity test
 (tests/test_template_access_scopes.py). Change both together.
 
-Organizations and departments are rows (app/models/organization.py); every
-comparison below is by id: User.organization_id / department_id against
-Template.scope_organization_id / scope_department_id. A NULL id never
-matches anything. The legacy name columns are never read here.
+Organizations, institutes and departments are rows
+(app/models/organization.py); every comparison below is by id:
+User.organization_id / institute_id / department_id against
+Template.scope_organization_id / scope_institute_id / scope_department_id.
+A NULL id never matches anything. The legacy name columns are never read.
 
 View rule
 ---------
@@ -18,22 +19,21 @@ View rule
 - private: owner only.
 - public: everyone.
 - organization: user.organization_id == template.scope_organization_id.
-- department: user.department_id == template.scope_department_id. (A
-  department belongs to exactly one organization and the services keep a
-  user's / template's department inside its organization, so the
-  organization is implied.)
+- institute: user.institute_id == template.scope_institute_id.
+- department: user.department_id == template.scope_department_id.
 - group: unchanged legacy rule (uploader's role == user's role).
-- public / organization / department: a non-empty `allowed_roles` list also
-  requires user.role to be in the list. Scope managers (an org_admin of the
-  template's organization, a department_admin of its department) can always
-  view organization / department templates.
+- public / organization / institute / department: a non-empty
+  `allowed_roles` list also requires user.role to be in the list. Scope
+  managers (below) can always view the templates they manage.
 
 Manage rule (`can_manage`)
 --------------------------
-super_admin; the owner; an org_admin whose organization_id matches
-scope_organization_id (organization and department templates); a
-department_admin whose department_id matches scope_department_id
-(department templates).
+super_admin; the owner; a scope manager: an admin whose scope
+(app/services/scopes.py) contains the template's scope AND is at the same
+level or above it. So an org_admin manages every organization / institute /
+department template of their organization, an institute_admin the institute
+and department templates of their institute, a department_admin the
+department templates of their department.
 
 Deleting a template stays super_admin-only (see DELETE /templates/{id}):
 it is irreversible and cascades every user's documents, so it is not a
@@ -50,31 +50,35 @@ from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.models.organization import Department, Organization
+from app.models.organization import Department, Institute, Organization
 from app.models.template import Template
 from app.models.user import USER_ROLES, User
+from app.services import scopes
 from app.services.org_directory import (
     clean_name,
     find_department_by_name,
+    find_institute_by_name,
     find_organization_by_name,
     get_department,
+    get_institute,
     get_organization,
 )
 
-SCOPED_VISIBILITIES = ("organization", "department")
+SCOPED_VISIBILITIES = ("organization", "institute", "department")
 # Roles a template can be restricted to. super_admin always sees everything,
 # so listing it would be meaningless.
 ASSIGNABLE_ROLES = tuple(role for role in USER_ROLES if role != "super_admin")
-ROLE_LABELS = {
-    "org_admin": "Organization admin",
-    "department_admin": "Department admin",
-    "faculty": "Faculty",
-    "student": "Student",
-    "approver": "Approver",
-    "normal_user": "Staff / other",
-}
+ROLE_LABELS = {role: scopes.ROLE_LABELS[role] for role in ASSIGNABLE_ROLES}
 ORG_PUBLISHERS = ("super_admin", "org_admin")
-DEPARTMENT_PUBLISHERS = ("super_admin", "org_admin", "department_admin")
+INSTITUTE_PUBLISHERS = ("super_admin", "org_admin", "institute_admin")
+DEPARTMENT_PUBLISHERS = ("super_admin", "org_admin", "institute_admin", "department_admin")
+PUBLISHERS = {
+    "organization": ORG_PUBLISHERS,
+    "institute": INSTITUTE_PUBLISHERS,
+    "department": DEPARTMENT_PUBLISHERS,
+}
+# Visibility level -> how deep it sits (lower = wider).
+_LEVEL_RANK = {"platform": 0, "organization": 1, "institute": 2, "department": 3}
 
 
 # ── helpers ──────────────────────────────────────────────────────────
@@ -131,19 +135,21 @@ def _sql_role_allowed(role: str | None) -> ColumnElement:
     return or_(unrestricted, column.like(f'%"{escaped}"%', escape="\\"))
 
 
-def _department_scope_matches(user: User, template: Template) -> bool:
-    return _same_id(user.department_id, template.scope_department_id)
-
-
 def is_scope_manager(user: User, template: Template) -> bool:
-    """org_admin / department_admin who administers the template's scope."""
+    """An admin whose scope contains the template's scope, at or above its level."""
     if template.visibility not in SCOPED_VISIBILITIES:
         return False
-    if user.role == "org_admin":
-        return _same_id(user.organization_id, template.scope_organization_id)
-    if user.role == "department_admin" and template.visibility == "department":
-        return _department_scope_matches(user, template)
-    return False
+    scope = scopes.scope_of(user)
+    if scope is None or scope.level == "platform":
+        return False
+    if _LEVEL_RANK[scope.level] > _LEVEL_RANK[template.visibility]:
+        return False
+    return scopes.contains(
+        scope,
+        template.scope_organization_id,
+        template.scope_institute_id,
+        template.scope_department_id,
+    )
 
 
 # ── view / manage ────────────────────────────────────────────────────
@@ -159,18 +165,15 @@ def user_can_view_template(user: User, template: Template) -> bool:
     visibility = template.visibility
     if visibility == "public":
         return _role_allowed(template, user.role)
-    if visibility == "organization":
+    if visibility in SCOPED_VISIBILITIES:
         if is_scope_manager(user, template):
             return True
-        return _same_id(
-            user.organization_id, template.scope_organization_id
-        ) and _role_allowed(template, user.role)
-    if visibility == "department":
-        if is_scope_manager(user, template):
-            return True
-        return _department_scope_matches(user, template) and _role_allowed(
-            template, user.role
-        )
+        member_of = {
+            "organization": _same_id(user.organization_id, template.scope_organization_id),
+            "institute": _same_id(user.institute_id, template.scope_institute_id),
+            "department": _same_id(user.department_id, template.scope_department_id),
+        }[visibility]
+        return member_of and _role_allowed(template, user.role)
     if visibility == "group":
         return bool(user.role) and template.uploader.role == user.role
     return False
@@ -185,6 +188,27 @@ def can_manage(user: User, template: Template) -> bool:
     return is_scope_manager(user, template)
 
 
+def _sql_scope_manager(user: User) -> ColumnElement | None:
+    """SQL twin of `is_scope_manager`; None when the user manages no scope."""
+    scope = scopes.scope_of(user)
+    if scope is None or scope.level == "platform":
+        return None
+    if scope.level == "organization":
+        return and_(
+            Template.visibility.in_(SCOPED_VISIBILITIES),
+            Template.scope_organization_id == scope.id,
+        )
+    if scope.level == "institute":
+        return and_(
+            Template.visibility.in_(("institute", "department")),
+            Template.scope_institute_id == scope.id,
+        )
+    return and_(
+        Template.visibility == "department",
+        Template.scope_department_id == scope.id,
+    )
+
+
 def library_visibility_filter(user: User) -> ColumnElement | None:
     """
     SQL twin of `user_can_view_template` for the library listing.
@@ -194,34 +218,40 @@ def library_visibility_filter(user: User) -> ColumnElement | None:
         return None
 
     role = user.role
-    user_org = user.organization_id
-    user_dept = user.department_id
     role_ok = _sql_role_allowed(role)
 
     conditions: list[ColumnElement] = [
         Template.uploaded_by == user.id,
         and_(Template.visibility == "public", role_ok),
     ]
+    manager = _sql_scope_manager(user)
+    if manager is not None:
+        conditions.append(manager)
 
-    if user_org is not None:
-        org_match = Template.scope_organization_id == user_org
-        org_template = and_(Template.visibility == "organization", org_match)
-        if role == "org_admin":
-            # Scope manager: every org and department template of their org.
-            conditions.append(org_template)
-            conditions.append(and_(Template.visibility == "department", org_match))
-        else:
-            conditions.append(and_(org_template, role_ok))
-
-    if user_dept is not None:
-        dept_scope = and_(
-            Template.visibility == "department",
-            Template.scope_department_id == user_dept,
+    if user.organization_id is not None:
+        conditions.append(
+            and_(
+                Template.visibility == "organization",
+                Template.scope_organization_id == user.organization_id,
+                role_ok,
+            )
         )
-        if role == "department_admin":
-            conditions.append(dept_scope)
-        else:
-            conditions.append(and_(dept_scope, role_ok))
+    if user.institute_id is not None:
+        conditions.append(
+            and_(
+                Template.visibility == "institute",
+                Template.scope_institute_id == user.institute_id,
+                role_ok,
+            )
+        )
+    if user.department_id is not None:
+        conditions.append(
+            and_(
+                Template.visibility == "department",
+                Template.scope_department_id == user.department_id,
+                role_ok,
+            )
+        )
 
     if role:
         conditions.append(
@@ -250,10 +280,15 @@ class ResolvedAccess:
     organization: Organization | None
     department: Department | None
     allowed_roles: str | None  # JSON text, as stored
+    institute: Institute | None = None
 
     @property
     def scope_organization_id(self) -> int | None:
         return self.organization.id if self.organization else None
+
+    @property
+    def scope_institute_id(self) -> int | None:
+        return self.institute.id if self.institute else None
 
     @property
     def scope_department_id(self) -> int | None:
@@ -302,6 +337,29 @@ def _lookup_organization(
     return None
 
 
+def _lookup_institute(
+    db: Session,
+    institute_id: int | None,
+    institute_name: str | None,
+    organization: Organization | None,
+) -> Institute | None:
+    if institute_id is not None:
+        institute = get_institute(db, institute_id)
+        if institute is None:
+            raise PublishRuleError(422, f"Institute {institute_id} does not exist")
+        return institute
+    if clean_name(institute_name) is not None:
+        institute = (
+            find_institute_by_name(db, organization.id, institute_name)
+            if organization is not None
+            else None
+        )
+        if institute is None:
+            raise PublishRuleError(422, f"Unknown institute '{clean_name(institute_name)}'")
+        return institute
+    return None
+
+
 def _lookup_department(
     db: Session,
     department_id: int | None,
@@ -328,6 +386,13 @@ def _lookup_department(
     return None
 
 
+_TARGET_WORDS = {
+    "organization": "an organization",
+    "institute": "an institute",
+    "department": "a department",
+}
+
+
 def resolve_publish_access(
     db: Session,
     user: User,
@@ -338,6 +403,8 @@ def resolve_publish_access(
     *,
     scope_organization_name: str | None = None,
     scope_department_name: str | None = None,
+    scope_institute_id: int | None = None,
+    scope_institute_name: str | None = None,
 ) -> ResolvedAccess:
     """
     Apply the publish rules for `user` and return the values to store.
@@ -346,15 +413,13 @@ def resolve_publish_access(
     Ids win; the *_name arguments are a case-insensitive fallback for older
     clients and must name an existing row.
 
-    - organization / department visibility: super_admin, org_admin,
-      department_admin only (department_admin: department visibility only).
-    - org_admin: organization forced to their own (a different explicit
-      organization -> 403); a department must belong to it (else 403).
-    - department_admin: scope forced to their own department and its
-      organization (a different explicit value -> 403).
-    - super_admin: must name an organization (or, for department visibility,
-      a department, whose organization is then used).
-    - department visibility needs a department of the scope organization.
+    - organization visibility: super_admin, org_admin.
+    - institute visibility: super_admin, org_admin, institute_admin.
+    - department visibility: those plus department_admin.
+    - Non-super admins are confined to their own scope: an explicit
+      organization / institute / department outside it -> 403.
+    - super_admin must name the target (organization, institute or
+      department; the parents are derived from the child).
     - private / public / group: scope cleared; allowed_roles kept for public
       only (it has no meaning for private / group).
     """
@@ -370,27 +435,40 @@ def resolve_publish_access(
             ),
         )
 
-    publishers = ORG_PUBLISHERS if visibility == "organization" else DEPARTMENT_PUBLISHERS
-    if user.role not in publishers:
-        if visibility == "organization" and user.role == "department_admin":
+    if user.role not in PUBLISHERS[visibility]:
+        if user.role == "department_admin":
+            target = (
+                "the whole organization" if visibility == "organization" else "the whole institute"
+            )
             raise PublishRuleError(
                 403,
-                "Department admins can publish to their department only, "
+                f"Department admins can publish to their department only, not to {target}",
+            )
+        if user.role == "institute_admin":
+            raise PublishRuleError(
+                403,
+                "Institute admins can publish to their institute or its departments only, "
                 "not to the whole organization",
             )
-        target = "an organization" if visibility == "organization" else "a department"
         raise PublishRuleError(
-            403, f"Only administrators can publish templates to {target}"
+            403, f"Only administrators can publish templates to {_TARGET_WORDS[visibility]}"
         )
 
     explicit_org = _lookup_organization(db, scope_organization_id, scope_organization_name)
 
-    if user.role == "org_admin":
-        own_org = (
-            get_organization(db, user.organization_id)
-            if user.organization_id is not None
-            else None
-        )
+    if user.role == "super_admin":
+        org = explicit_org
+        inst = _lookup_institute(db, scope_institute_id, scope_institute_name, org)
+        dept = _lookup_department(db, scope_department_id, scope_department_name, org)
+        if dept is not None and visibility == "department":
+            if org is None:
+                org = dept.organization
+            if inst is None:
+                inst = dept.institute
+        if inst is not None and org is None:
+            org = inst.organization
+    else:
+        own_org = get_organization(db, user.organization_id) if user.organization_id else None
         if own_org is None:
             raise PublishRuleError(
                 422, "Your profile has no organization; ask an administrator to set it"
@@ -400,67 +478,85 @@ def resolve_publish_access(
                 403, f"You can only publish to your own organization ({own_org.name})"
             )
         org = own_org
+        inst = _lookup_institute(db, scope_institute_id, scope_institute_name, org)
         dept = _lookup_department(db, scope_department_id, scope_department_name, org)
+        if user.role == "institute_admin":
+            own_inst = get_institute(db, user.institute_id) if user.institute_id else None
+            if own_inst is None:
+                raise PublishRuleError(
+                    422, "Your profile has no institute; ask an administrator to set it"
+                )
+            if inst is not None and inst.id != own_inst.id:
+                raise PublishRuleError(
+                    403, f"You can only publish to your own institute ({own_inst.name})"
+                )
+            inst = own_inst
+        if user.role == "department_admin":
+            own_dept = get_department(db, user.department_id) if user.department_id else None
+            if own_dept is None:
+                raise PublishRuleError(
+                    422, "Your profile has no department; ask an administrator to set it"
+                )
+            if dept is not None and dept.id != own_dept.id:
+                raise PublishRuleError(
+                    403, f"You can only publish to your own department ({own_dept.name})"
+                )
+            if inst is not None and inst.id != own_dept.institute_id:
+                raise PublishRuleError(
+                    403, f"You can only publish to your own department ({own_dept.name})"
+                )
+            dept = own_dept
+            inst = own_dept.institute
         if dept is not None and dept.organization_id != org.id:
             raise PublishRuleError(
                 403,
-                "You can only publish to departments of your own organization "
-                f"({own_org.name})",
+                f"You can only publish to departments of your own organization ({org.name})",
             )
-    elif user.role == "department_admin":
-        own_dept = (
-            get_department(db, user.department_id)
-            if user.department_id is not None
-            else None
+        if dept is not None and inst is not None and dept.institute_id not in (None, inst.id):
+            raise PublishRuleError(
+                403, f"Department '{dept.name}' is not part of {inst.name}"
+            )
+        if user.role == "institute_admin" and dept is not None and dept.institute_id != inst.id:
+            raise PublishRuleError(
+                403, f"You can only publish to departments of your own institute ({inst.name})"
+            )
+
+    if org is None:
+        raise PublishRuleError(
+            422,
+            "scope_organization_id is required for organization/institute/department "
+            "visibility",
         )
-        if own_dept is None:
-            raise PublishRuleError(
-                422, "Your profile has no department; ask an administrator to set it"
-            )
-        own_dept_org = own_dept.organization
-        if explicit_org is not None and explicit_org.id != own_dept_org.id:
-            raise PublishRuleError(
-                403,
-                f"You can only publish to your own organization ({own_dept_org.name})",
-            )
-        explicit_dept = _lookup_department(
-            db, scope_department_id, scope_department_name, own_dept_org
+    if inst is not None and inst.organization_id != org.id:
+        raise PublishRuleError(
+            422, f"Institute '{inst.name}' does not belong to organization '{org.name}'"
         )
-        if explicit_dept is not None and explicit_dept.id != own_dept.id:
-            raise PublishRuleError(
-                403, f"You can only publish to your own department ({own_dept.name})"
-            )
-        org = own_dept_org
-        dept = own_dept
-    else:  # super_admin
-        org = explicit_org
-        dept = _lookup_department(db, scope_department_id, scope_department_name, org)
-        if org is None and dept is not None and visibility == "department":
-            org = dept.organization
-        if org is None:
-            raise PublishRuleError(
-                422,
-                "scope_organization_id is required for organization/department "
-                "visibility",
-            )
-        if dept is not None and dept.organization_id != org.id:
-            raise PublishRuleError(
-                422,
-                f"Department '{dept.name}' does not belong to organization "
-                f"'{org.name}'",
-            )
+    if dept is not None and dept.organization_id != org.id:
+        raise PublishRuleError(
+            422,
+            f"Department '{dept.name}' does not belong to organization '{org.name}'",
+        )
 
     if visibility == "department":
         if dept is None:
             raise PublishRuleError(
                 422, "scope_department_id is required for department visibility"
             )
+        inst = dept.institute if dept.institute_id is not None else inst
+    elif visibility == "institute":
+        dept = None
+        if inst is None:
+            raise PublishRuleError(
+                422, "scope_institute_id is required for institute visibility"
+            )
     else:
         dept = None
+        inst = None
 
     return ResolvedAccess(
         visibility=visibility,
         organization=org,
         department=dept,
         allowed_roles=serialize_allowed_roles(roles),
+        institute=inst,
     )

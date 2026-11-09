@@ -27,6 +27,7 @@ from app.services.storage_service import StorageError, storage_service
 from app.services.template_access import (
     ASSIGNABLE_ROLES,
     DEPARTMENT_PUBLISHERS,
+    INSTITUTE_PUBLISHERS,
     ORG_PUBLISHERS,
     ROLE_LABELS,
     PublishRuleError,
@@ -51,7 +52,7 @@ from app.schemas.template import (
     TemplateLibraryResponse,
 )
 from app.schemas.template_field import TemplateFieldRead
-from app.models.organization import Department, Organization
+from app.models.organization import Department, Institute, Organization
 from app.models.template import Template
 from app.models.template_field import TemplateField
 from app.models.user import User
@@ -71,7 +72,7 @@ ALLOWED_CATEGORIES = {
     "invoice",
     "custom",
 }
-ALLOWED_VISIBILITY = {"private", "public", "organization", "department", "group"}
+ALLOWED_VISIBILITY = {"private", "public", "organization", "institute", "department", "group"}
 ALLOWED_STATUSES = {
     "uploaded",
     "placeholder_detected",
@@ -203,16 +204,25 @@ def get_access_options(
     """
     see_all = current_user.role == "super_admin"
     org_query = select(Organization).order_by(func.lower(Organization.name))
+    inst_query = select(Institute).order_by(func.lower(Institute.name))
     dept_query = select(Department).order_by(func.lower(Department.name))
     if not see_all:
         own_org = current_user.organization_id
         if own_org is None:
             org_query = org_query.where(false())
+            inst_query = inst_query.where(false())
             dept_query = dept_query.where(false())
         else:
             org_query = org_query.where(Organization.id == own_org)
+            inst_query = inst_query.where(Institute.organization_id == own_org)
             dept_query = dept_query.where(Department.organization_id == own_org)
+            # Institute / department admins only ever publish inside their institute.
+            if current_user.role in ("institute_admin", "department_admin"):
+                own_inst = current_user.institute_id
+                inst_query = inst_query.where(Institute.id == own_inst)
+                dept_query = dept_query.where(Department.institute_id == own_inst)
     organizations = db.scalars(org_query).all()
+    institutes = db.scalars(inst_query).all()
     departments = db.scalars(dept_query).all()
 
     return TemplateAccessOptions(
@@ -221,16 +231,27 @@ def get_access_options(
             for role in ASSIGNABLE_ROLES
         ],
         organizations=[{"id": org.id, "name": org.name} for org in organizations],
+        institutes=[
+            {"id": inst.id, "organization_id": inst.organization_id, "name": inst.name}
+            for inst in institutes
+        ],
         departments=[
-            {"id": dept.id, "organization_id": dept.organization_id, "name": dept.name}
+            {
+                "id": dept.id,
+                "organization_id": dept.organization_id,
+                "institute_id": dept.institute_id,
+                "name": dept.name,
+            }
             for dept in departments
         ],
         can_publish={
             "organization": current_user.role in ORG_PUBLISHERS,
+            "institute": current_user.role in INSTITUTE_PUBLISHERS,
             "department": current_user.role in DEPARTMENT_PUBLISHERS,
         },
         defaults={
             "organization_id": current_user.organization_id,
+            "institute_id": current_user.institute_id,
             "department_id": current_user.department_id,
         },
     )
@@ -273,6 +294,7 @@ def update_template_access(
     before = {
         "visibility": template.visibility,
         "scope_organization_id": template.scope_organization_id,
+        "scope_institute_id": template.scope_institute_id,
         "scope_department_id": template.scope_department_id,
         "allowed_roles": template.allowed_roles,
     }
@@ -287,18 +309,22 @@ def update_template_access(
             request.allowed_roles,
             scope_organization_name=request.scope_organization,
             scope_department_name=request.scope_department,
+            scope_institute_id=request.scope_institute_id,
         )
     except PublishRuleError as exc:
         raise _publish_error(exc) from None
 
     template.visibility = resolved.visibility
-    set_template_scope(template, resolved.organization, resolved.department)
+    set_template_scope(
+        template, resolved.organization, resolved.department, resolved.institute
+    )
     template.allowed_roles = resolved.allowed_roles
     db.commit()
     db.refresh(template)
     after = {
         "visibility": template.visibility,
         "scope_organization_id": template.scope_organization_id,
+        "scope_institute_id": template.scope_institute_id,
         "scope_department_id": template.scope_department_id,
         "allowed_roles": template.allowed_roles,
     }
@@ -421,6 +447,7 @@ def upload_template(
     visibility: str = Form(...),
     scope_organization_id: int | None = Form(default=None),
     scope_department_id: int | None = Form(default=None),
+    scope_institute_id: int | None = Form(default=None),
     scope_organization: str | None = Form(
         default=None, description="Fallback: organization name (ignored when the id is set)"
     ),
@@ -482,6 +509,7 @@ def upload_template(
             parse_roles_csv(allowed_roles),
             scope_organization_name=scope_organization,
             scope_department_name=scope_department,
+            scope_institute_id=scope_institute_id,
         )
     except PublishRuleError as exc:
         raise _publish_error(exc) from None
@@ -510,6 +538,7 @@ def upload_template(
         uploaded_by=current_user.id,
         scope_organization_id=access.scope_organization_id,
         scope_department_id=access.scope_department_id,
+        scope_institute_id=access.scope_institute_id,
         scope_organization=access.organization.name if access.organization else None,
         scope_department=access.department.name if access.department else None,
         allowed_roles=access.allowed_roles,
