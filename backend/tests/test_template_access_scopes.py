@@ -79,7 +79,7 @@ USERS = {
     "me_dept_admin": ("department_admin", "uni", "uni_me"),
     "cs_faculty": ("faculty", "uni", "uni_cs"),
     "cs_student": ("student", "uni", "uni_cs"),
-    "cs_staff": ("normal_user", "uni", "uni_cs"),
+    "cs_staff": ("staff", "uni", "uni_cs"),
     "me_faculty": ("faculty", "uni", "uni_me"),
     "other_cs_faculty": ("faculty", "other", "other_cs"),
     "no_org_student": ("student", None, None),
@@ -150,7 +150,7 @@ TEMPLATE_SPECS = [
     ("public_faculty_only", "uni_org_admin", "public", None, None, ["faculty"]),
     ("uni_letterhead", "uni_org_admin", "organization", "uni", None, None),
     ("uni_letterhead_2", "super", "organization", "uni", None, None),
-    ("uni_staff_only", "uni_org_admin", "organization", "uni", None, ["faculty", "normal_user"]),
+    ("uni_staff_only", "uni_org_admin", "organization", "uni", None, ["faculty", "staff"]),
     ("other_letterhead", "other_org_admin", "organization", "other", None, None),
     ("cs_dept", "cs_dept_admin", "department", "uni", "uni_cs", None),
     (
@@ -159,7 +159,7 @@ TEMPLATE_SPECS = [
         "department",
         "uni",
         "uni_cs",
-        ["faculty", "normal_user", "department_admin"],
+        ["department_admin", "faculty", "staff"],
     ),
     # Inconsistent legacy row: department set, organization not.
     ("cs_dept_org_unset", "super", "department", None, "uni_cs", None),
@@ -549,7 +549,7 @@ def test_upload_department_template_by_department_admin(users, directory):
     response = _upload(
         _token(users, "cs_dept_admin"),
         visibility="department",
-        allowed_roles="faculty, normal_user",
+        allowed_roles="faculty, staff",
     )
     assert response.status_code == 201, response.json()
     body = response.json()
@@ -557,7 +557,7 @@ def test_upload_department_template_by_department_admin(users, directory):
     assert body["scope_department"] == "Computer Science"
     assert body["scope_organization_id"] == directory["uni"]
     assert body["scope_department_id"] == directory["uni_cs"]
-    assert body["allowed_roles"] == ["faculty", "normal_user"]
+    assert body["allowed_roles"] == ["faculty", "staff"]
     assert body["can_manage"] is True
 
     # The legacy name columns are written as copies of the linked names.
@@ -650,7 +650,7 @@ def test_library_items_carry_audience(users, directory):
     staff_only = items["uni_staff_only"]
     assert staff_only["scope_organization"] == UNI
     assert staff_only["scope_organization_id"] == directory["uni"]
-    assert staff_only["allowed_roles"] == ["faculty", "normal_user"]
+    assert staff_only["allowed_roles"] == ["faculty", "staff"]
     assert staff_only["can_manage"] is True
     assert items["public"]["can_manage"] is False
     assert items["me_dept"]["scope_department"] == "Mechanical"
@@ -734,7 +734,8 @@ def test_access_options(users, directory):
     body = response.json()
     role_values = [role["value"] for role in body["roles"]]
     assert "super_admin" not in role_values
-    assert {"faculty", "student", "normal_user"} <= set(role_values)
+    assert {"faculty", "staff", "student", "institute_admin"} <= set(role_values)
+    assert not {"normal_user", "approver"} & set(role_values)
     assert all(role["label"] for role in body["roles"])
     assert body["organizations"] == [
         {"id": directory["other"], "name": OTHER},
@@ -746,15 +747,20 @@ def test_access_options(users, directory):
     assert departments[(directory["uni"], "Computer Science")] == directory["uni_cs"]
     assert departments[(directory["other"], "Computer Science")] == directory["other_cs"]
     assert len(departments) == len(DEPARTMENTS)
-    assert body["can_publish"] == {"organization": True, "department": True}
-    assert body["defaults"] == {"organization_id": None, "department_id": None}
+    assert body["can_publish"] == {"organization": True, "institute": True, "department": True}
+    assert body["defaults"] == {
+        "organization_id": None,
+        "institute_id": None,
+        "department_id": None,
+    }
 
     dept_admin = client.get(
         "/api/v1/templates/access-options", headers=_token(users, "cs_dept_admin")
     ).json()
-    assert dept_admin["can_publish"] == {"organization": False, "department": True}
+    assert dept_admin["can_publish"] == {"organization": False, "institute": False, "department": True}
     assert dept_admin["defaults"] == {
         "organization_id": directory["uni"],
+        "institute_id": None,  # this test directory predates institutes
         "department_id": directory["uni_cs"],
     }
     assert dept_admin["organizations"] == [{"id": directory["uni"], "name": UNI}]
@@ -763,7 +769,7 @@ def test_access_options(users, directory):
     faculty = client.get(
         "/api/v1/templates/access-options", headers=_token(users, "cs_faculty")
     ).json()
-    assert faculty["can_publish"] == {"organization": False, "department": False}
+    assert faculty["can_publish"] == {"organization": False, "institute": False, "department": False}
 
     no_org = client.get(
         "/api/v1/templates/access-options", headers=_token(users, "no_org_student")

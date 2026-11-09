@@ -18,7 +18,7 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
-from app.models.organization import Department, Organization
+from app.models.organization import Department, Institute, Organization
 from app.models.template import Template
 from app.models.user import User
 
@@ -72,17 +72,64 @@ def find_organization_by_name(db: Session, name: str | None) -> Organization | N
 
 
 def find_department_by_name(
-    db: Session, organization_id: int, name: str | None
+    db: Session,
+    organization_id: int,
+    name: str | None,
+    institute_id: int | None = None,
 ) -> Department | None:
+    """Department by name inside an organization (and institute, when given).
+    Names are unique per institute, so without an institute the first match
+    (lowest id) is returned."""
+    cleaned = clean_name(name)
+    if cleaned is None:
+        return None
+    query = select(Department).where(
+        Department.organization_id == organization_id,
+        func.lower(Department.name) == cleaned.lower(),
+    )
+    if institute_id is not None:
+        query = query.where(Department.institute_id == institute_id)
+    return db.scalars(query.order_by(Department.id)).first()
+
+
+def get_institute(db: Session, institute_id: int) -> Institute | None:
+    return db.get(Institute, institute_id)
+
+
+def find_institute_by_name(
+    db: Session, organization_id: int, name: str | None
+) -> Institute | None:
     cleaned = clean_name(name)
     if cleaned is None:
         return None
     return db.scalar(
-        select(Department).where(
-            Department.organization_id == organization_id,
-            func.lower(Department.name) == cleaned.lower(),
+        select(Institute).where(
+            Institute.organization_id == organization_id,
+            func.lower(Institute.name) == cleaned.lower(),
         )
     )
+
+
+def find_by_code(db: Session, model, code: str | None, **parent):
+    """Row of `model` with this code (case-insensitive) under the given parent ids."""
+    if not code or not str(code).strip():
+        return None
+    query = select(model).where(func.upper(model.code) == str(code).strip().upper())
+    for column, value in parent.items():
+        query = query.where(getattr(model, column) == value)
+    return db.scalars(query.order_by(model.id)).first()
+
+
+def clean_code(value: str | None) -> str | None:
+    """Codes are stored upper-case without spaces; blank -> None."""
+    if value is None:
+        return None
+    code = "".join(str(value).split()).upper()
+    if not code:
+        return None
+    if len(code) > 32 or not all(ch.isalnum() or ch == "-" for ch in code):
+        raise DirectoryError(422, "Codes may contain only letters, digits and '-' (max 32)")
+    return code
 
 
 def require_organization(db: Session, organization_id: int) -> Organization:
@@ -103,17 +150,38 @@ def require_department(db: Session, department_id: int) -> Department:
 
 
 def set_user_membership(
-    user: User, organization: Organization | None, department: Department | None
+    user: User,
+    organization: Organization | None,
+    department: Department | None,
+    institute: Institute | None = None,
 ) -> None:
+    """
+    Place a user. A department implies its institute; an institute must be
+    inside the organization; a department must be inside the institute.
+    """
     if department is not None and (
         organization is None or department.organization_id != organization.id
     ):
         raise DirectoryError(
             422, "The department must belong to the user's organization"
         )
+    if department is not None and department.institute_id is not None:
+        if institute is not None and institute.id != department.institute_id:
+            raise DirectoryError(
+                422, "The department must belong to the user's institute"
+            )
+        institute = department.institute
+    if institute is not None and (
+        organization is None or institute.organization_id != organization.id
+    ):
+        raise DirectoryError(
+            422, "The institute must belong to the user's organization"
+        )
     user.organization_id = organization.id if organization else None
+    user.institute_id = institute.id if institute else None
     user.department_id = department.id if department else None
     user.organization_ref = organization
+    user.institute_ref = institute
     user.department_ref = department
     user.organization = organization.name if organization else None
     user.department = department.name if department else None
@@ -123,6 +191,7 @@ def set_template_scope(
     template: Template,
     organization: Organization | None,
     department: Department | None,
+    institute: Institute | None = None,
 ) -> None:
     if department is not None and (
         organization is None or department.organization_id != organization.id
@@ -130,9 +199,19 @@ def set_template_scope(
         raise DirectoryError(
             422, "The department must belong to the template's organization"
         )
+    if department is not None and department.institute_id is not None:
+        institute = department.institute
+    if institute is not None and (
+        organization is None or institute.organization_id != organization.id
+    ):
+        raise DirectoryError(
+            422, "The institute must belong to the template's organization"
+        )
     template.scope_organization_id = organization.id if organization else None
+    template.scope_institute_id = institute.id if institute else None
     template.scope_department_id = department.id if department else None
     template.scope_organization_ref = organization
+    template.scope_institute_ref = institute
     template.scope_department_ref = department
     template.scope_organization = organization.name if organization else None
     template.scope_department = department.name if department else None
@@ -171,16 +250,82 @@ def rename_organization(db: Session, organization: Organization, name: str | Non
     )
 
 
+def create_institute(
+    db: Session, organization: Organization, name: str | None, code: str | None = None
+) -> Institute:
+    cleaned = require_name(name, "Institute")
+    if find_institute_by_name(db, organization.id, cleaned) is not None:
+        raise DirectoryError(
+            409, f"An institute named '{cleaned}' already exists in {organization.name}"
+        )
+    code = clean_code(code)
+    if code and find_by_code(db, Institute, code, organization_id=organization.id):
+        raise DirectoryError(409, f"An institute with code '{code}' already exists")
+    institute = Institute(organization_id=organization.id, name=cleaned, code=code)
+    db.add(institute)
+    db.flush()
+    return institute
+
+
+def rename_institute(db: Session, institute: Institute, name: str | None) -> None:
+    cleaned = require_name(name, "Institute")
+    existing = find_institute_by_name(db, institute.organization_id, cleaned)
+    if existing is not None and existing.id != institute.id:
+        raise DirectoryError(409, f"An institute named '{cleaned}' already exists")
+    institute.name = cleaned
+
+
+def default_institute(db: Session, organization: Organization) -> Institute:
+    """The organization's only institute, created on demand for callers that
+    create a department without naming an institute (older clients)."""
+    institutes = db.scalars(
+        select(Institute)
+        .where(Institute.organization_id == organization.id)
+        .order_by(Institute.id)
+    ).all()
+    if len(institutes) == 1:
+        return institutes[0]
+    if not institutes:
+        return create_institute(db, organization, organization.name, "MAIN")
+    raise DirectoryError(
+        422, "institute_id is required: this organization has several institutes"
+    )
+
+
 def create_department(
-    db: Session, organization: Organization, name: str | None
+    db: Session,
+    organization: Organization,
+    name: str | None,
+    institute: Institute | None = None,
+    code: str | None = None,
 ) -> Department:
     cleaned = require_name(name, "Department")
-    if find_department_by_name(db, organization.id, cleaned) is not None:
+    if institute is None:
+        institute = default_institute(db, organization)
+    if institute.organization_id != organization.id:
+        raise DirectoryError(422, "The institute must belong to the organization")
+    duplicate = find_department_by_name(db, organization.id, cleaned, institute.id)
+    if duplicate is None:
+        # Departments created before institutes existed have no institute yet.
+        legacy = find_department_by_name(db, organization.id, cleaned)
+        if legacy is not None and legacy.institute_id is None:
+            duplicate = legacy
+    if duplicate is not None:
         raise DirectoryError(
             409,
-            f"A department named '{cleaned}' already exists in {organization.name}",
+            f"A department named '{cleaned}' already exists in {institute.name}",
         )
-    department = Department(organization_id=organization.id, name=cleaned)
+    code = clean_code(code)
+    if code and find_by_code(db, Department, code, institute_id=institute.id):
+        raise DirectoryError(
+            409, f"A department with code '{code}' already exists in {institute.name}"
+        )
+    department = Department(
+        organization_id=organization.id,
+        institute_id=institute.id,
+        name=cleaned,
+        code=code,
+    )
     db.add(department)
     db.flush()
     return department
@@ -188,10 +333,12 @@ def create_department(
 
 def rename_department(db: Session, department: Department, name: str | None) -> None:
     cleaned = require_name(name, "Department")
-    existing = find_department_by_name(db, department.organization_id, cleaned)
+    existing = find_department_by_name(
+        db, department.organization_id, cleaned, department.institute_id
+    )
     if existing is not None and existing.id != department.id:
         raise DirectoryError(
-            409, f"A department named '{cleaned}' already exists in this organization"
+            409, f"A department named '{cleaned}' already exists in this institute"
         )
     department.name = cleaned
     db.execute(
@@ -226,6 +373,25 @@ def organization_usage(db: Session, organization_id: int) -> tuple[int, int]:
         select(func.count(Template.id)).where(
             or_(
                 Template.scope_organization_id == organization_id,
+                Template.scope_department_id.in_(dept_ids),
+            )
+        )
+    )
+    return users or 0, templates or 0
+
+
+def institute_usage(db: Session, institute_id: int) -> tuple[int, int]:
+    """(users, templates) linked to the institute or any of its departments."""
+    dept_ids = select(Department.id).where(Department.institute_id == institute_id)
+    users = db.scalar(
+        select(func.count(User.id)).where(
+            or_(User.institute_id == institute_id, User.department_id.in_(dept_ids))
+        )
+    )
+    templates = db.scalar(
+        select(func.count(Template.id)).where(
+            or_(
+                Template.scope_institute_id == institute_id,
                 Template.scope_department_id.in_(dept_ids),
             )
         )

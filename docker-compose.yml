@@ -3,13 +3,13 @@
 # local dev servers. Start it with:
 #   docker compose up -d gotenberg
 #   python backend/scripts/verify_gotenberg.py --live
-# Port 3000 busy? Change the left side of the port mapping and GOTENBERG_URL.
+# Host port 3005 (3000 is used by EkLink). Change the left side and GOTENBERG_URL together.
 services:
   gotenberg:
     image: gotenberg/gotenberg:8
     container_name: templateos-gotenberg
     ports:
-      - "3000:3000"
+      - "3005:3000"
     command:
       - "gotenberg"
       - "--api-timeout=60s"

@@ -23,3 +23,16 @@ class LoginRequest(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class EklinkConfig(BaseModel):
+    enabled: bool
+    # EkLink's origin, so the SPA can tell a launch from the EkLink dashboard.
+    eklink_url: str | None = None
+    # Whether the login page should offer "Create an account".
+    signup_enabled: bool = False
+
+
+class EklinkCallbackRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=512)
+    state: str = Field(min_length=1, max_length=512)

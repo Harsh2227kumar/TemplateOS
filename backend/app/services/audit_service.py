@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.crud.audit_log_crud import add_audit_log
+from app.models.organization import Department
 from app.models.template import Template
 from app.models.user import User
 
@@ -67,16 +68,29 @@ def record(
     template: Template | None = None,
     actor_email: str | None = None,
     actor_scope: bool = True,
+    institute_id_hint: int | None = None,
 ) -> None:
     """
     Add an audit row (not committed). Scope comes from `template` when given,
     else from the explicit ids, else (unless actor_scope=False) from the
     actor's membership.
     """
+    institute_id = institute_id_hint
     if template is not None:
         organization_id, department_id = scope_for_template(template, actor)
+        if template.scope_organization_id is not None:
+            institute_id = template.scope_institute_id
+        elif actor is not None:
+            institute_id = actor.institute_id
     elif organization_id is None and department_id is None and actor is not None and actor_scope:
         organization_id, department_id = actor.organization_id, actor.department_id
+        institute_id = institute_id if institute_id is not None else actor.institute_id
+    if institute_id is None and department_id is not None:
+        try:
+            department = db.get(Department, department_id)
+            institute_id = department.institute_id if department is not None else None
+        except Exception:  # pragma: no cover - auditing must never break a request
+            institute_id = None
     try:
         with db.begin_nested():
             add_audit_log(
@@ -89,6 +103,7 @@ def record(
                 details=details,
                 organization_id=organization_id,
                 department_id=department_id,
+                institute_id=institute_id,
                 ip=client_ip(request),
                 actor_email=actor_email,
             )

@@ -43,7 +43,16 @@ AUDIT_ACTIONS: dict[str, tuple[str, str]] = {
     "admin.department_create": ("Department created", "admin"),
     "admin.department_update": ("Department updated", "admin"),
     "admin.department_delete": ("Department deleted", "admin"),
+    "admin.institute_create": ("Institute created", "admin"),
+    "admin.institute_update": ("Institute updated", "admin"),
+    "admin.institute_delete": ("Institute deleted", "admin"),
+    "admin.user_deactivate": ("User deactivated", "admin"),
+    "admin.user_reactivate": ("User reactivated", "admin"),
+    "admin.approver_assign": ("Approver assigned", "admin"),
+    "admin.approver_end": ("Approver assignment ended", "admin"),
     "admin.audit_export": ("Audit log exported", "admin"),
+    "admin.eklink_sync": ("EkLink sync run", "admin"),
+    "admin.eklink_full_resync": ("EkLink full resync", "admin"),
     # Auth
     "auth.login": ("Signed in", "auth"),
     "auth.logout": ("Signed out", "auth"),
@@ -58,8 +67,11 @@ ENTITY_TYPES = (
     "editor_session",
     "user",
     "organization",
+    "institute",
     "department",
+    "approver_assignment",
     "audit_log",
+    "sync",
 )
 
 
