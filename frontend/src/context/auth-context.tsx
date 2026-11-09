@@ -17,6 +17,8 @@ interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  /** Finish EkLink sign-in with the code and state from its callback. */
+  loginWithEklink: (code: string, state: string) => Promise<void>;
   signup: (fullName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   /** Re-read GET /auth/me (e.g. after an admin changed the current user's role). */
@@ -81,6 +83,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(currentUser);
   }, [queryClient]);
 
+  const loginWithEklink = useCallback(async (code: string, state: string) => {
+    await authApi.eklinkCallback({ code, state });
+    const currentUser = await authApi.me();
+    queryClient.clear();
+    setUser(currentUser);
+  }, [queryClient]);
+
   const signup = useCallback(async (fullName: string, email: string, password: string) => {
     await authApi.signup({ full_name: fullName, email, password });
   }, []);
@@ -109,8 +118,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setCurrentUser = useCallback((next: User) => setUser(next), []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isLoading, login, signup, logout, refreshUser, setCurrentUser }),
-    [isLoading, user, login, signup, logout, refreshUser, setCurrentUser],
+    () => ({ user, isLoading, login, loginWithEklink, signup, logout, refreshUser, setCurrentUser }),
+    [isLoading, user, login, loginWithEklink, signup, logout, refreshUser, setCurrentUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

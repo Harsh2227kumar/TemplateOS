@@ -4,6 +4,7 @@ import { ProtectedRoute, PublicOnlyRoute } from "./components/protected-route";
 import { DashboardLayout } from "./layouts/dashboard-layout";
 import { DashboardPage } from "./pages/dashboard-page";
 import { LoginPage } from "./pages/login-page";
+import { EklinkCallbackPage } from "./pages/eklink-callback-page";
 import { ProfilePage } from "./pages/profile-page";
 import { UploadTemplatePage } from "./pages/upload-template-page";
 import { SignupPage } from "./pages/signup-page";
@@ -19,6 +20,8 @@ import { AdminRoute } from "./features/admin/AdminRoute";
 import { DraftLoadingSkeleton } from "./features/documents/DraftLoadStates";
 import { AdminUsersPage } from "./pages/admin-users-page";
 import { AdminOrganizationsPage } from "./pages/admin-organizations-page";
+import { AdminApproversPage } from "./pages/admin-approvers-page";
+import { AdminSyncPage } from "./pages/admin-sync-page";
 
 // V1.7 P2: the version view loads on demand.
 const DocumentVersionPage = lazy(() =>
@@ -45,6 +48,8 @@ const TemplateFieldChangesPage = lazy(() =>
 export function App() {
   return (
     <Routes>
+      {/* Not public-only: an EkLink launch may replace another signed-in account. */}
+      <Route path="/auth/callback" element={<EklinkCallbackPage />} />
       <Route element={<PublicOnlyRoute />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
@@ -102,11 +107,13 @@ export function App() {
               </Suspense>
             }
           />
-          {/* super_admin / org_admin / department_admin only */}
+          {/* super_admin / org_admin / institute_admin / department_admin only */}
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<Navigate to="/admin/users" replace />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
             <Route path="/admin/organizations" element={<AdminOrganizationsPage />} />
+            <Route path="/admin/approvers" element={<AdminApproversPage />} />
+            <Route path="/admin/sync" element={<AdminSyncPage />} />
             <Route
               path="/admin/audit-log"
               element={

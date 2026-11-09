@@ -13,15 +13,26 @@ export interface User {
   full_name: string;
   role: string;
   organization_id: number | null;
+  institute_id?: number | null;
   department_id: number | null;
-  /** Names of the linked organization / department (read-only for the user). */
+  /** Names of the linked organization / institute / department (read-only for the user). */
   department: string | null;
+  institute?: string | null;
   organization: string | null;
+  /** EkLink identity (PRN / staff ID); null for local accounts. */
+  login_id?: string | null;
+  member_type?: string | null;
+  batch?: string | null;
+  section?: string | null;
+  semester?: number | null;
   job_title: string | null;
   phone: string | null;
   avatar_url: string | null;
   signature_path: string | null;
   preferences: UserPreferences | null;
+  is_demo?: boolean;
+  /** Linked to EkLink: name, email, placement and member type come from there. */
+  managed_by_eklink?: boolean;
 }
 
 /** PATCH /auth/me: the only fields a user may change on themselves. */
@@ -35,6 +46,14 @@ export interface ProfileUpdate {
 export interface TokenResponse {
   access_token: string;
   token_type: string;
+}
+
+/** GET /auth/eklink: whether "Sign in with EkLink" is available. */
+export interface EklinkConfig {
+  enabled: boolean;
+  eklink_url: string | null;
+  /** Whether the login page should offer "Create an account". */
+  signup_enabled?: boolean;
 }
 
 export interface TemplateListItem extends TemplateAudience {
@@ -73,11 +92,19 @@ export interface TemplateResponse extends TemplateAudience {
 
 // --- Template audience: organization / department scope + role restriction ---
 
-export type TemplateVisibility = "private" | "public" | "organization" | "department" | "group";
+export type TemplateVisibility =
+  | "private"
+  | "public"
+  | "organization"
+  | "institute"
+  | "department"
+  | "group";
 
 export interface TemplateAudience {
   scope_organization_id: number | null;
+  scope_institute_id?: number | null;
   scope_department_id: number | null;
+  scope_institute?: string | null;
   /** Display names of the linked organization / department rows. */
   scope_organization: string | null;
   scope_department: string | null;
@@ -94,6 +121,7 @@ export interface TemplateAudience {
 export interface TemplateAccessUpdate {
   visibility: TemplateVisibility;
   scope_organization_id?: number | null;
+  scope_institute_id?: number | null;
   scope_department_id?: number | null;
   allowed_roles?: string[] | null;
 }
@@ -103,18 +131,30 @@ export interface OrganizationOption {
   name: string;
 }
 
+export interface InstituteOption {
+  id: number;
+  organization_id: number;
+  name: string;
+}
+
 export interface DepartmentOption {
   id: number;
   organization_id: number;
+  institute_id?: number | null;
   name: string;
 }
 
 export interface TemplateAccessOptions {
   roles: { value: string; label: string }[];
   organizations: OrganizationOption[];
+  institutes?: InstituteOption[];
   departments: DepartmentOption[];
-  can_publish: { organization: boolean; department: boolean };
-  defaults: { organization_id: number | null; department_id: number | null };
+  can_publish: { organization: boolean; department: boolean; institute?: boolean };
+  defaults: {
+    organization_id: number | null;
+    department_id: number | null;
+    institute_id?: number | null;
+  };
 }
 
 // --- Administration: users, organizations, departments ---
@@ -126,10 +166,23 @@ export interface AdminUser {
   role: string;
   organization_id: number | null;
   organization: string | null;
+  institute_id?: number | null;
+  institute?: string | null;
   department_id: number | null;
   department: string | null;
   job_title: string | null;
   phone: string | null;
+  login_id?: string | null;
+  member_type?: string | null;
+  is_active?: boolean;
+  batch?: string | null;
+  section?: string | null;
+  semester?: number | null;
+  /** Signs in through EkLink (no local password). */
+  sso?: boolean;
+  is_demo?: boolean;
+  /** Linked to EkLink: placement, member type and the active flag are read-only here. */
+  managed_by_eklink?: boolean;
 }
 
 export interface AdminUserList {
@@ -143,7 +196,10 @@ export interface AdminUserListParams {
   search?: string;
   role?: string;
   organization_id?: number;
+  institute_id?: number;
   department_id?: number;
+  member_type?: string;
+  is_active?: boolean;
   page?: number;
   limit?: number;
 }
@@ -152,12 +208,34 @@ export interface AdminUserListParams {
 export interface AdminUserUpdate {
   role?: string;
   organization_id?: number | null;
+  institute_id?: number | null;
   department_id?: number | null;
+  member_type?: string | null;
+  is_active?: boolean;
 }
 
 export interface Organization {
   id: number;
   name: string;
+  code?: string | null;
+  is_active?: boolean;
+  is_demo?: boolean;
+  /** Has a code: mirrored from EkLink, read-only here. */
+  managed_by_eklink?: boolean;
+  created_at: string;
+  institute_count?: number;
+  department_count: number;
+  user_count: number;
+}
+
+export interface Institute {
+  id: number;
+  organization_id: number;
+  name: string;
+  code: string | null;
+  is_active: boolean;
+  is_demo?: boolean;
+  managed_by_eklink?: boolean;
   created_at: string;
   department_count: number;
   user_count: number;
@@ -166,9 +244,104 @@ export interface Organization {
 export interface Department {
   id: number;
   organization_id: number;
+  institute_id?: number | null;
   name: string;
+  code?: string | null;
+  is_active?: boolean;
+  is_demo?: boolean;
+  managed_by_eklink?: boolean;
   created_at: string;
   user_count: number;
+}
+
+/** Name / code / active edits for organizations, institutes and departments. */
+export interface DirectoryUpdate {
+  name?: string;
+  code?: string | null;
+  is_active?: boolean;
+}
+
+export type ApproverScopeLevel = "organization" | "institute" | "department";
+
+export interface ApproverAssignment {
+  id: number;
+  user_id: number;
+  user_name: string | null;
+  user_email: string | null;
+  user_login_id: string | null;
+  title: string;
+  scope_level: ApproverScopeLevel;
+  organization_id: number;
+  institute_id: number | null;
+  department_id: number | null;
+  scope_name: string | null;
+  scope_key: string | null;
+  valid_from: string;
+  valid_to: string | null;
+  is_current: boolean;
+  created_at: string;
+  /** "eklink": mirrored from EkLink (ended there); "local": made in TemplateOS. */
+  source?: "local" | "eklink";
+  eklink_id?: string | null;
+  managed_by_eklink?: boolean;
+}
+
+export interface ApproverAssignmentList {
+  assignments: ApproverAssignment[];
+  total: number;
+  titles: string[];
+  /** False while EkLink sync is on (approvers are assigned in EkLink). */
+  can_create?: boolean;
+}
+
+// --- EkLink sync ---
+
+export interface SyncLinks {
+  admin: string | null;
+  users: string | null;
+  directory: string | null;
+  approvers: string | null;
+}
+
+/** GET /admin/sync/status (any admin). */
+export interface SyncStatus {
+  /** Sync configured and on: EkLink-owned data is read-only. */
+  enabled: boolean;
+  configured: boolean;
+  eklink_url: string | null;
+  eklink_admin_url: string | null;
+  links: SyncLinks;
+  interval_minutes: number;
+  full_at: string;
+  /** The caller may run "Sync now" / "Full resync" (super admin). */
+  can_run: boolean;
+  last_event_id: number;
+  last_pull_at: string | null;
+  last_push_at: string | null;
+  last_full_sync_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  last_result: Record<string, unknown> | null;
+  pending_count: number;
+}
+
+/** POST /admin/sync/run and /admin/sync/full. */
+export interface SyncRunResult {
+  last_event_id: number;
+  result: Record<string, unknown> | null;
+  status: SyncStatus;
+}
+
+export interface ApproverAssignmentCreate {
+  user_id: number;
+  title: string;
+  scope_level: ApproverScopeLevel;
+  organization_id?: number | null;
+  institute_id?: number | null;
+  department_id?: number | null;
+  scope_key?: string | null;
+  valid_from?: string | null;
+  valid_to?: string | null;
 }
 
 

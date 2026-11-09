@@ -24,6 +24,7 @@ export interface TemplateUploadPayload {
   category: string;
   visibility: string;
   scope_organization_id?: number;
+  scope_institute_id?: number;
   scope_department_id?: number;
   allowed_roles?: string[];
 }
@@ -65,6 +66,9 @@ export const templateCatalogApi = {
     formData.append("visibility", payload.visibility);
     if (payload.scope_organization_id != null) {
       formData.append("scope_organization_id", String(payload.scope_organization_id));
+    }
+    if (payload.scope_institute_id != null) {
+      formData.append("scope_institute_id", String(payload.scope_institute_id));
     }
     if (payload.scope_department_id != null) {
       formData.append("scope_department_id", String(payload.scope_department_id));

@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
-import { ApiError } from "@/lib/api";
+import { ApiError, authApi } from "@/lib/api";
 
 // Only same-app paths: "//host" and "/\\host" would leave the site.
 function safeRedirectPath(path: string | undefined): string {
@@ -32,7 +32,22 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [eklinkEnabled, setEklinkEnabled] = useState(false);
+  const [signupEnabled, setSignupEnabled] = useState(false);
   const routeState = location.state as { from?: { pathname?: string }; signedUp?: boolean } | null;
+
+  useEffect(() => {
+    authApi
+      .eklinkConfig()
+      .then((config) => {
+        setEklinkEnabled(config.enabled);
+        setSignupEnabled(Boolean(config.signup_enabled));
+      })
+      .catch(() => {
+        setEklinkEnabled(false);
+        setSignupEnabled(false);
+      });
+  }, []);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -89,12 +104,31 @@ export function LoginPage() {
             {isSubmitting ? "Logging in…" : "Log in"}
           </Button>
         </form>
-        <p className="mt-6 text-center text-sm text-slate-600">
-          New to TemplateOS?{" "}
-          <Link className="font-medium text-slate-900 underline" to="/signup">
-            Create an account
-          </Link>
-        </p>
+        {eklinkEnabled && (
+          <>
+            <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              or
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            <Button asChild className="w-full" variant="outline">
+              <a href={authApi.eklinkLoginUrl}>Sign in with EkLink</a>
+            </Button>
+          </>
+        )}
+        {signupEnabled ? (
+          <p className="mt-6 text-center text-sm text-slate-600">
+            New to TemplateOS?{" "}
+            <Link className="font-medium text-slate-900 underline" to="/signup">
+              Create an account
+            </Link>
+          </p>
+        ) : (
+          <p className="mt-6 text-center text-sm text-slate-500">
+            New here? Sign in with your college EkLink account, or ask your administrator for
+            access.
+          </p>
+        )}
       </div>
     </div>
   );
