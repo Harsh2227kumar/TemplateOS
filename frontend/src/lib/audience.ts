@@ -6,6 +6,7 @@
  */
 import type {
   DepartmentOption,
+  InstituteOption,
   TemplateAccessOptions,
   TemplateAccessUpdate,
   TemplateAudience,
@@ -15,6 +16,7 @@ import type {
 export interface AudienceValue {
   visibility: TemplateVisibility | "";
   scope_organization_id: number | null;
+  scope_institute_id?: number | null;
   scope_department_id: number | null;
   role_mode: "all" | "selected";
   allowed_roles: string[];
@@ -25,6 +27,7 @@ export type AudienceErrors = Partial<Record<keyof AudienceValue, string>>;
 export const EMPTY_AUDIENCE: AudienceValue = {
   visibility: "",
   scope_organization_id: null,
+  scope_institute_id: null,
   scope_department_id: null,
   role_mode: "all",
   allowed_roles: [],
@@ -34,11 +37,12 @@ export const VISIBILITY_VALUES: TemplateVisibility[] = [
   "private",
   "public",
   "organization",
+  "institute",
   "department",
   "group",
 ];
-const SCOPED: TemplateVisibility[] = ["organization", "department"];
-const ROLE_RESTRICTABLE: TemplateVisibility[] = ["public", "organization", "department"];
+const SCOPED: TemplateVisibility[] = ["organization", "institute", "department"];
+const ROLE_RESTRICTABLE: TemplateVisibility[] = ["public", "organization", "institute", "department"];
 
 export function isScoped(visibility: AudienceValue["visibility"]): boolean {
   return SCOPED.includes(visibility as TemplateVisibility);
@@ -51,6 +55,7 @@ export function supportsRoleRestriction(visibility: AudienceValue["visibility"])
 export function allowedVisibilities(options: TemplateAccessOptions | null): TemplateVisibility[] {
   return VISIBILITY_VALUES.filter((value) => {
     if (value === "organization") return Boolean(options?.can_publish.organization);
+    if (value === "institute") return Boolean(options?.can_publish.institute);
     if (value === "department") return Boolean(options?.can_publish.department);
     return true;
   });
@@ -64,6 +69,17 @@ export function departmentChoices(
   if (!options || organizationId === null) return [];
   return options.departments
     .filter((department) => department.organization_id === organizationId)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Institutes of one organization, sorted by name. */
+export function instituteChoices(
+  options: TemplateAccessOptions | null,
+  organizationId: number | null,
+): InstituteOption[] {
+  if (!options || organizationId === null) return [];
+  return (options.institutes ?? [])
+    .filter((institute) => institute.organization_id === organizationId)
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -88,6 +104,22 @@ export function validateAudience(
         role === "super_admin"
           ? "Choose an organization"
           : "Your profile has no organization. Ask an administrator to set it.";
+    }
+    if (value.visibility === "institute") {
+      if ((value.scope_institute_id ?? null) === null) {
+        errors.scope_institute_id =
+          role === "institute_admin"
+            ? "Your profile has no institute. Ask an administrator to set it."
+            : "Choose an institute";
+      } else if (
+        options &&
+        value.scope_organization_id !== null &&
+        !instituteChoices(options, value.scope_organization_id).some(
+          (institute) => institute.id === value.scope_institute_id,
+        )
+      ) {
+        errors.scope_institute_id = "Choose an institute of the selected organization";
+      }
     }
     if (value.visibility === "department") {
       if (value.scope_department_id === null) {
@@ -124,6 +156,7 @@ export function toAccessPayload(value: AudienceValue): TemplateAccessUpdate {
   return {
     visibility,
     scope_organization_id: scoped ? value.scope_organization_id : null,
+    scope_institute_id: visibility === "institute" ? (value.scope_institute_id ?? null) : null,
     scope_department_id: visibility === "department" ? value.scope_department_id : null,
     allowed_roles: restricted && value.allowed_roles.length ? value.allowed_roles : null,
   };
@@ -132,13 +165,14 @@ export function toAccessPayload(value: AudienceValue): TemplateAccessUpdate {
 export function audienceFromTemplate(
   template: Pick<
     TemplateAudience,
-    "scope_organization_id" | "scope_department_id" | "allowed_roles"
+    "scope_organization_id" | "scope_institute_id" | "scope_department_id" | "allowed_roles"
   > & { visibility: string },
 ): AudienceValue {
   const roles = template.allowed_roles ?? [];
   return {
     visibility: template.visibility as TemplateVisibility,
     scope_organization_id: template.scope_organization_id ?? null,
+    scope_institute_id: template.scope_institute_id ?? null,
     scope_department_id: template.scope_department_id ?? null,
     role_mode: roles.length ? "selected" : "all",
     allowed_roles: roles,
@@ -157,8 +191,25 @@ export function withScopeDefaults(
   if (!isScoped(value.visibility) || !options) return value;
   const next = { ...value };
   const { defaults } = options;
-  if (role === "org_admin" || role === "department_admin" || next.scope_organization_id === null) {
+  const scopedAdmin =
+    role === "org_admin" || role === "institute_admin" || role === "department_admin";
+  if (scopedAdmin || next.scope_organization_id === null) {
     next.scope_organization_id = defaults.organization_id ?? next.scope_organization_id;
+  }
+  if (value.visibility === "institute") {
+    if (role === "institute_admin" || role === "department_admin" || (next.scope_institute_id ?? null) === null) {
+      next.scope_institute_id = defaults.institute_id ?? next.scope_institute_id ?? null;
+    }
+    if (
+      next.scope_institute_id != null &&
+      !instituteChoices(options, next.scope_organization_id).some(
+        (institute) => institute.id === next.scope_institute_id,
+      )
+    ) {
+      next.scope_institute_id = null;
+    }
+  } else {
+    next.scope_institute_id = null;
   }
   if (value.visibility === "department") {
     if (role === "department_admin" || next.scope_department_id === null) {
@@ -188,11 +239,23 @@ export function withOrganization(
   const keepDepartment = departmentChoices(options, organizationId).some(
     (department) => department.id === value.scope_department_id,
   );
+  const keepInstitute = instituteChoices(options, organizationId).some(
+    (institute) => institute.id === value.scope_institute_id,
+  );
   return {
     ...value,
     scope_organization_id: organizationId,
+    scope_institute_id: keepInstitute ? (value.scope_institute_id ?? null) : null,
     scope_department_id: keepDepartment ? value.scope_department_id : null,
   };
+}
+
+export function instituteName(
+  options: TemplateAccessOptions | null,
+  id: number | null | undefined,
+): string | null {
+  if (id == null) return null;
+  return options?.institutes?.find((institute) => institute.id === id)?.name ?? null;
 }
 
 export function organizationName(

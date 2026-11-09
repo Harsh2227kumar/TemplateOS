@@ -23,6 +23,11 @@ const nameSchema = z.object({
     .trim()
     .min(1, "A name is required")
     .max(255, "Must be 255 characters or fewer"),
+  code: z
+    .string()
+    .trim()
+    .max(32, "Must be 32 characters or fewer")
+    .regex(/^[A-Za-z0-9-]*$/, "Use letters, digits and '-' only"),
 });
 
 type NameValues = z.infer<typeof nameSchema>;
@@ -35,10 +40,13 @@ interface NameDialogProps {
   label: string;
   initialName?: string;
   submitLabel: string;
-  onSubmit: (name: string) => Promise<unknown>;
+  /** Show a short code field (e.g. SIU / SIT / CSE, shared with EkLink). */
+  withCode?: boolean;
+  initialCode?: string | null;
+  onSubmit: (name: string, code: string | null) => Promise<unknown>;
 }
 
-/** Create / rename an organization or department. */
+/** Create / rename an organization, institute or department (with an optional code). */
 export function NameDialog({
   open,
   onOpenChange,
@@ -47,21 +55,24 @@ export function NameDialog({
   label,
   initialName = "",
   submitLabel,
+  withCode = false,
+  initialCode = null,
   onSubmit,
 }: NameDialogProps) {
   const form = useForm<NameValues>({
     resolver: zodResolver(nameSchema),
-    defaultValues: { name: initialName },
+    defaultValues: { name: initialName, code: initialCode ?? "" },
   });
   const { isSubmitting, errors } = form.formState;
 
   useEffect(() => {
-    if (open) form.reset({ name: initialName });
-  }, [open, initialName, form]);
+    if (open) form.reset({ name: initialName, code: initialCode ?? "" });
+  }, [open, initialName, initialCode, form]);
 
   const submit = async (values: NameValues) => {
     try {
-      await onSubmit(values.name.replace(/\s+/g, " "));
+      const code = values.code.trim().toUpperCase();
+      await onSubmit(values.name.replace(/\s+/g, " "), code || null);
       onOpenChange(false);
     } catch (caught) {
       form.setError("root", {
@@ -92,6 +103,24 @@ export function NameDialog({
                 </FormItem>
               )}
             />
+            {withCode && (
+              <FormField
+                control={form.control}
+                name="code"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Code (optional)</FormLabel>
+                    <FormControl>
+                      <Input maxLength={32} placeholder="e.g. SIT" className="uppercase" {...field} />
+                    </FormControl>
+                    <p className="text-xs text-slate-500">
+                      Short code that EkLink uses to place users here on sign-in.
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             {errors.root?.message && (
               <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{errors.root.message}</p>
             )}

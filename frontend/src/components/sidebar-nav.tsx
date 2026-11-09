@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { Building2, CloudUpload, Download, LayoutGrid, LayoutDashboard, ScrollText, User, UsersRound } from "lucide-react";
+import { BadgeCheck, Building2, CloudUpload, Download, LayoutGrid, LayoutDashboard, RefreshCw, ScrollText, User, UsersRound } from "lucide-react";
 
 import { useAuth } from "@/context/auth-context";
 import { isUserAdmin } from "@/lib/admin-permissions";
@@ -44,7 +44,10 @@ const navItems: NavItem[] = [
 const adminItems: NavItem[] = [
   { label: "Users", to: "/admin/users", icon: UsersRound },
   { label: "Organizations", to: "/admin/organizations", icon: Building2 },
+  { label: "Approvers", to: "/admin/approvers", icon: BadgeCheck },
   { label: "Audit log", to: "/admin/audit-log", icon: ScrollText },
+  // EkLink sync status (any admin); only a super admin can run it.
+  { label: "Sync", to: "/admin/sync", icon: RefreshCw },
 ];
 
 interface SidebarNavProps {

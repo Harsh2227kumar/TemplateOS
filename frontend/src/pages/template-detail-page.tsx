@@ -291,12 +291,18 @@ export function TemplateDetailPage() {
           <div className="min-w-0">
             <dt className="text-sm font-medium text-slate-500">Scope</dt>
             <dd className="mt-1 break-words text-slate-900">
-              {template.scope_department || template.scope_organization ? (
+              {template.scope_department || template.scope_institute || template.scope_organization ? (
                 <span className="flex flex-col gap-1">
                   {template.scope_organization && (
                     <span className="flex items-center gap-1.5">
                       <Building className="h-3.5 w-3.5 shrink-0 text-slate-500" />
                       {template.scope_organization}
+                    </span>
+                  )}
+                  {template.scope_institute && (
+                    <span className="flex items-center gap-1.5">
+                      <Building className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+                      {template.scope_institute}
                     </span>
                   )}
                   {template.scope_department && (

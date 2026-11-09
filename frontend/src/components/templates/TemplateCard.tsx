@@ -82,7 +82,7 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
             </div>
           </div>
 
-          {Boolean(template.scope_organization || template.scope_department || template.allowed_roles?.length) && (
+          {Boolean(template.scope_organization || template.scope_institute || template.scope_department || template.allowed_roles?.length) && (
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               {template.visibility === "organization" && template.scope_organization && (
                 <Badge
@@ -92,6 +92,18 @@ export function TemplateCard({ template, onClick }: TemplateCardProps) {
                 >
                   <Building className="h-3 w-3 shrink-0" />
                   <span className="truncate">{template.scope_organization}</span>
+                </Badge>
+              )}
+              {template.visibility === "institute" && template.scope_institute && (
+                <Badge
+                  variant="outline"
+                  className="max-w-full gap-1 border-sky-200 bg-sky-50 font-medium text-sky-800"
+                  title={`Institute: ${template.scope_institute}${
+                    template.scope_organization ? ` (${template.scope_organization})` : ""
+                  }`}
+                >
+                  <Building className="h-3 w-3 shrink-0" />
+                  <span className="truncate">{template.scope_institute}</span>
                 </Badge>
               )}
               {template.visibility === "department" && template.scope_department && (

@@ -27,6 +27,7 @@ function controlledRefresh() {
 
 test("auth endpoints never trigger a refresh", () => {
   assert.equal(shouldRefreshAfter401("/auth/login"), false);
+  assert.equal(shouldRefreshAfter401("/auth/eklink/callback"), false);
   assert.equal(shouldRefreshAfter401("/auth/refresh"), false);
   assert.equal(shouldRefreshAfter401("/auth/logout"), false);
   assert.equal(shouldRefreshAfter401("/auth/me"), true);

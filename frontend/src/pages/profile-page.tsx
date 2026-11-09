@@ -12,6 +12,8 @@ import { useAuth } from "@/context/auth-context";
 import { useUpdateProfile } from "@/hooks/queries";
 import { ApiError, type User } from "@/lib/api";
 import { formatRole } from "@/lib/format";
+import { ManagedInEklink } from "@/features/admin/ManagedInEklink";
+import { isEklinkManaged } from "@/lib/admin-permissions";
 
 const profileSchema = z.object({
   full_name: z
@@ -34,15 +36,21 @@ function toValues(user: User | null): ProfileValues {
 }
 
 /** Who to ask about membership changes, by role. */
-function membershipHint(role: string | undefined): string {
+function membershipHint(role: string | undefined, managed: boolean): string {
+  if (managed) {
+    return "Your organization, institute, department and member type are managed in EkLink: ask your EkLink administrator to change them.";
+  }
   if (role === "super_admin") return "Change these on the Admin → Users page.";
   if (role === "org_admin") return "Ask a super admin to change this.";
-  if (role === "department_admin") return "Ask your organization admin to change this.";
+  if (role === "institute_admin") return "Ask your organization admin to change this.";
+  if (role === "department_admin") return "Ask your institute admin to change this.";
   return "Ask your department admin to change this.";
 }
 
 function ProfileForm({ user }: { user: User }) {
   const updateProfile = useUpdateProfile();
+  // EkLink-linked accounts get their name from EkLink.
+  const managed = isEklinkManaged(user);
   const [saved, setSaved] = useState(false);
   const form = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
@@ -58,7 +66,7 @@ function ProfileForm({ user }: { user: User }) {
     setSaved(false);
     try {
       await updateProfile.mutateAsync({
-        full_name: values.full_name,
+        ...(managed ? {} : { full_name: values.full_name }),
         phone: values.phone || null,
         job_title: values.job_title || null,
       });
@@ -85,8 +93,15 @@ function ProfileForm({ user }: { user: User }) {
             <FormItem>
               <FormLabel>Full name</FormLabel>
               <FormControl>
-                <Input autoComplete="name" maxLength={255} {...field} />
+                <Input
+                  autoComplete="name"
+                  maxLength={255}
+                  {...field}
+                  readOnly={managed}
+                  disabled={managed}
+                />
               </FormControl>
+              {managed && <ManagedInEklink />}
               <FormMessage />
             </FormItem>
           )}
@@ -181,21 +196,49 @@ export function ProfilePage() {
         <div className="border-b border-slate-200 bg-slate-50 px-4 py-5 sm:px-6">
           <h3 className="text-base font-semibold leading-6 text-slate-900">Account and membership</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Your role, organization and department decide which templates you can see and
-            publish. {membershipHint(user.role)}
+            Your role, organization, institute and department decide which templates you can see and
+            publish. {membershipHint(user.role, isEklinkManaged(user))}
           </p>
         </div>
         <div className="px-4 py-5 sm:p-0">
           <dl className="sm:divide-y sm:divide-slate-200">
-            {renderField("Email address", user.email)}
+            {renderField(
+              "Email address",
+              isEklinkManaged(user) ? (
+                <>
+                  {user.email}
+                  <ManagedInEklink />
+                </>
+              ) : (
+                user.email
+              ),
+            )}
+            {user.login_id && renderField("Login ID (PRN / staff ID)", user.login_id)}
             {renderField(
               "Role",
               <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700">
                 {formatRole(user.role)}
               </span>,
             )}
+            {user.member_type &&
+              user.member_type !== user.role &&
+              renderField("Member type", formatRole(user.member_type))}
             {renderField("Organization", user.organization)}
+            {renderField("Institute", user.institute ?? null)}
             {renderField("Department", user.department)}
+            {isEklinkManaged(user) &&
+              renderField("Managed by", <ManagedInEklink>EkLink (organization, institute, department, member type)</ManagedInEklink>)}
+            {(user.batch || user.section || user.semester) &&
+              renderField(
+                "Class",
+                [
+                  user.batch && `Batch ${user.batch}`,
+                  user.section && `Section ${user.section}`,
+                  user.semester && `Semester ${user.semester}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+              )}
             {renderField("Signature status", user.signature_path ? "Configured" : "Not configured")}
           </dl>
         </div>

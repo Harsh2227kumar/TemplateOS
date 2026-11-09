@@ -33,7 +33,9 @@ export const ENTITY_TYPE_OPTIONS: { value: string; label: string }[] = [
   { value: "document", label: "Document" },
   { value: "user", label: "User" },
   { value: "organization", label: "Organization" },
+  { value: "institute", label: "Institute" },
   { value: "department", label: "Department" },
+  { value: "approver_assignment", label: "Approver assignment" },
   { value: "audit_log", label: "Audit log" },
 ];
 
@@ -148,8 +150,11 @@ export function entityLink(item: Pick<AuditLogItem, "entity_type" | "entity_id">
     case "document_version":
       return `/documents/${item.entity_id}/preview`;
     case "organization":
+    case "institute":
     case "department":
       return "/admin/organizations";
+    case "approver_assignment":
+      return "/admin/approvers";
     default:
       return null;
   }

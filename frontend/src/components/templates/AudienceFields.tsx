@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Building, Globe, Lock, Users, UsersRound } from "lucide-react";
+import { Building, Building2, Globe, Lock, Users, UsersRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,8 @@ import {
   allowedVisibilities,
   departmentChoices,
   departmentName,
+  instituteChoices,
+  instituteName,
   isScoped,
   organizationName,
   supportsRoleRestriction,
@@ -58,6 +60,12 @@ const VISIBILITY_OPTIONS: VisibilityOption[] = [
     label: "Organization",
     hint: "Letterheads and organization-wide formats",
     icon: Building,
+  },
+  {
+    value: "institute",
+    label: "Institute",
+    hint: "Everyone in one institute",
+    icon: Building2,
   },
   { value: "department", label: "Department", hint: "One department's formats", icon: Users },
   { value: "group", label: "Group", hint: "Users with the same role as you", icon: UsersRound },
@@ -180,9 +188,12 @@ export function AudienceFields({
     // Keep the current value listed so the Select never holds an orphan value.
     (option) => permitted.includes(option.value) || option.value === value.visibility,
   );
-  const orgLocked = role === "org_admin" || role === "department_admin";
+  const orgLocked =
+    role === "org_admin" || role === "institute_admin" || role === "department_admin";
+  const instLocked = role === "institute_admin" || role === "department_admin";
   const deptLocked = role === "department_admin";
   const organizations = options?.organizations ?? [];
+  const institutes = instituteChoices(options, value.scope_organization_id);
   const departments = departmentChoices(options, value.scope_organization_id);
 
   const setVisibility = (visibility: string) => {
@@ -236,9 +247,10 @@ export function AudienceFields({
         ) : (
           options &&
           !options.can_publish.organization &&
+          !options.can_publish.institute &&
           !options.can_publish.department && (
             <p className="text-xs text-slate-500">
-              Organization and department publishing is available to administrators.
+              Organization, institute and department publishing is available to administrators.
             </p>
           )
         )}
@@ -267,6 +279,31 @@ export function AudienceFields({
                   : undefined
             }
           />
+          {value.visibility === "institute" && (
+            <ScopePicker
+              id={`${baseId}-inst`}
+              label="Institute"
+              value={value.scope_institute_id ?? null}
+              valueName={instituteName(options, value.scope_institute_id)}
+              onChange={(scope_institute_id) => onChange({ ...value, scope_institute_id })}
+              choices={institutes}
+              locked={instLocked}
+              placeholder="Select an institute"
+              emptyHint={
+                value.scope_organization_id === null
+                  ? "Choose an organization first"
+                  : "No institutes in this organization"
+              }
+              error={errors.scope_institute_id}
+              hint={
+                instLocked
+                  ? "Fixed to your own institute"
+                  : value.scope_organization_id !== null && institutes.length === 0
+                    ? "Create institutes under Admin → Organizations"
+                    : undefined
+              }
+            />
+          )}
           {value.visibility === "department" && (
             <ScopePicker
               id={`${baseId}-dept`}

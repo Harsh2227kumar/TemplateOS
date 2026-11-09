@@ -14,8 +14,21 @@ import {
 import { useAuth } from "@/context/auth-context";
 import { AdminQueryError } from "@/features/admin/AdminRoute";
 import { EditUserDialog } from "@/features/admin/EditUserDialog";
-import { useAdminUsers, useDepartments, useOrganizations } from "@/hooks/queries";
-import { USER_ROLES, canEditUser, departmentsOf, type Member } from "@/lib/admin-permissions";
+import {
+  useAdminUsers,
+  useDepartments,
+  useInstitutes,
+  useOrganizations,
+  useSyncStatus,
+} from "@/hooks/queries";
+import {
+  LEGACY_ROLES,
+  USER_ROLES,
+  canEditUser,
+  departmentsOf,
+  institutesOf,
+  type Member,
+} from "@/lib/admin-permissions";
 import type { AdminUser } from "@/lib/api";
 import { formatRole } from "@/lib/format";
 
@@ -37,31 +50,48 @@ export function AdminUsersPage() {
   const search = useDebounced(searchInput.trim());
   const [role, setRole] = useState(ALL);
   const [organizationId, setOrganizationId] = useState<number | null>(null);
+  const [instituteId, setInstituteId] = useState<number | null>(null);
   const [departmentId, setDepartmentId] = useState<number | null>(null);
+  const [status, setStatus] = useState<string>(ALL);
   const [page, setPage] = useState(1);
   const [editing, setEditing] = useState<AdminUser | null>(null);
 
-  useEffect(() => setPage(1), [search, role, organizationId, departmentId]);
+  useEffect(
+    () => setPage(1),
+    [search, role, organizationId, instituteId, departmentId, status],
+  );
 
   const isSuperAdmin = user?.role === "super_admin";
+  const isOrgAdmin = user?.role === "org_admin";
+  const isInstituteAdmin = user?.role === "institute_admin";
   const isDeptAdmin = user?.role === "department_admin";
   const organizations = useOrganizations();
+  const institutes = useInstitutes();
   const departments = useDepartments();
+  const sync = useSyncStatus();
+  const eklinkUrl = sync.data?.eklink_url ?? null;
 
   const users = useAdminUsers({
     search: search || undefined,
     role: role === ALL ? undefined : role,
     organization_id: organizationId ?? undefined,
+    institute_id: instituteId ?? undefined,
     department_id: departmentId ?? undefined,
+    is_active: status === ALL ? undefined : status === "active",
     page,
     limit: PAGE_SIZE,
   });
 
-  // Department filter: the chosen organization's (super admin) or their own.
+  // Institute / department filters: the chosen organization's (super admin) or their own.
   const filterOrg = isSuperAdmin ? organizationId : user?.organization_id ?? null;
+  const instituteFilterChoices = useMemo(
+    () => institutesOf(institutes.data ?? [], filterOrg),
+    [institutes.data, filterOrg],
+  );
+  const filterInstitute = isInstituteAdmin ? user?.institute_id ?? null : instituteId;
   const departmentFilterChoices = useMemo(
-    () => departmentsOf(departments.data ?? [], filterOrg),
-    [departments.data, filterOrg],
+    () => departmentsOf(departments.data ?? [], filterOrg, filterInstitute),
+    [departments.data, filterOrg, filterInstitute],
   );
 
   if (!user) return null;
@@ -76,20 +106,39 @@ export function AdminUsersPage() {
         <h1 className="text-2xl font-semibold">Users</h1>
         <p className="mt-1 text-sm text-slate-600">
           {isSuperAdmin
-            ? "Every account on TemplateOS. Assign roles, organizations and departments."
+            ? "Every account on TemplateOS. Assign roles, organizations, institutes and departments."
             : isDeptAdmin
-              ? "People in your department. You can change their role."
-              : "People in your organization. Assign roles and departments."}
+              ? "People in your department. You can change their role or deactivate them."
+              : isInstituteAdmin
+                ? "People in your institute. Assign roles and departments."
+                : "People in your organization. Assign roles, institutes and departments."}
+          {" "}Accounts are never deleted: deactivate them instead.
         </p>
+        {sync.data?.enabled && (
+          <p className="mt-2 text-sm text-slate-600">
+            People marked EkLink are managed in EkLink: their organization, institute, department,
+            member type and active status are changed there.{" "}
+            {sync.data.links.users && (
+              <a
+                href={sync.data.links.users}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-sky-700 hover:underline"
+              >
+                Open EkLink people
+              </a>
+            )}
+          </p>
+        )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <div className="relative sm:col-span-2 lg:col-span-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <Input
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search name or email"
+            placeholder="Search name, email or login ID"
             aria-label="Search users"
             className="pl-9"
             maxLength={100}
@@ -101,11 +150,22 @@ export function AdminUsersPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value={ALL}>All roles</SelectItem>
-            {USER_ROLES.map((value) => (
+            {[...USER_ROLES, ...LEGACY_ROLES].map((value) => (
               <SelectItem key={value} value={value}>
                 {formatRole(value)}
+                {LEGACY_ROLES.includes(value) ? " (old)" : ""}
               </SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger aria-label="Filter by status">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Any status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Deactivated</SelectItem>
           </SelectContent>
         </Select>
         {isSuperAdmin && (
@@ -113,6 +173,7 @@ export function AdminUsersPage() {
             value={organizationId === null ? ALL : String(organizationId)}
             onValueChange={(next) => {
               setOrganizationId(next === ALL ? null : Number(next));
+              setInstituteId(null);
               setDepartmentId(null);
             }}
           >
@@ -124,6 +185,30 @@ export function AdminUsersPage() {
               {(organizations.data ?? []).map((organization) => (
                 <SelectItem key={organization.id} value={String(organization.id)}>
                   {organization.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {(isSuperAdmin || isOrgAdmin) && (
+          <Select
+            value={instituteId === null ? ALL : String(instituteId)}
+            onValueChange={(next) => {
+              setInstituteId(next === ALL ? null : Number(next));
+              setDepartmentId(null);
+            }}
+            disabled={instituteFilterChoices.length === 0}
+          >
+            <SelectTrigger aria-label="Filter by institute">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>
+                {filterOrg === null ? "Pick an organization for institutes" : "All institutes"}
+              </SelectItem>
+              {instituteFilterChoices.map((institute) => (
+                <SelectItem key={institute.id} value={String(institute.id)}>
+                  {institute.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -163,6 +248,7 @@ export function AdminUsersPage() {
                   <th scope="col" className="px-4 py-3">Name</th>
                   <th scope="col" className="px-4 py-3">Role</th>
                   <th scope="col" className="hidden px-4 py-3 md:table-cell">Organization</th>
+                  <th scope="col" className="hidden px-4 py-3 lg:table-cell">Institute</th>
                   <th scope="col" className="hidden px-4 py-3 md:table-cell">Department</th>
                   <th scope="col" className="px-4 py-3 text-right">
                     <span className="sr-only">Actions</span>
@@ -173,14 +259,14 @@ export function AdminUsersPage() {
                 {users.isPending &&
                   Array.from({ length: 5 }).map((_, index) => (
                     <tr key={`skeleton-${index}`}>
-                      <td colSpan={5} className="px-4 py-4">
+                      <td colSpan={6} className="px-4 py-4">
                         <div className="h-4 w-2/3 animate-pulse rounded bg-slate-100" />
                       </td>
                     </tr>
                   ))}
                 {!users.isPending && rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-slate-500">
+                    <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
                       <UsersRound className="mx-auto mb-2 h-6 w-6 text-slate-400" />
                       No users match these filters.
                     </td>
@@ -189,7 +275,10 @@ export function AdminUsersPage() {
                 {rows.map((row) => {
                   const editable = canEditUser(actor, row);
                   return (
-                    <tr key={row.id} className="align-top">
+                    <tr
+                      key={row.id}
+                      className={row.is_active === false ? "bg-slate-50 align-top text-slate-500" : "align-top"}
+                    >
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-900">
                           {row.full_name}
@@ -197,16 +286,40 @@ export function AdminUsersPage() {
                             <span className="ml-2 text-xs font-normal text-slate-500">(you)</span>
                           )}
                         </p>
-                        <p className="break-all text-xs text-slate-500">{row.email}</p>
+                        <p className="break-all text-xs text-slate-500">
+                          {row.email}
+                          {row.login_id && <span className="ml-1 font-mono">· {row.login_id}</span>}
+                        </p>
                         <p className="mt-1 text-xs text-slate-500 md:hidden">
-                          {[row.organization, row.department].filter(Boolean).join(" · ") || "—"}
+                          {[row.organization, row.institute, row.department]
+                            .filter(Boolean)
+                            .join(" · ") || "—"}
                         </p>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant="secondary">{formatRole(row.role)}</Badge>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant="secondary">{formatRole(row.role)}</Badge>
+                          {row.is_active === false && (
+                            <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">
+                              Deactivated
+                            </Badge>
+                          )}
+                          {(row.sso || row.managed_by_eklink) && (
+                            <Badge
+                              variant="outline"
+                              className="border-sky-200 bg-sky-50 text-sky-700"
+                              title={row.managed_by_eklink ? "Managed in EkLink" : "Signs in with EkLink"}
+                            >
+                              EkLink
+                            </Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="hidden px-4 py-3 text-slate-700 md:table-cell">
                         {row.organization ?? <span className="text-slate-400">—</span>}
+                      </td>
+                      <td className="hidden px-4 py-3 text-slate-700 lg:table-cell">
+                        {row.institute ?? <span className="text-slate-400">—</span>}
                       </td>
                       <td className="hidden px-4 py-3 text-slate-700 md:table-cell">
                         {row.department ?? <span className="text-slate-400">—</span>}
@@ -264,7 +377,9 @@ export function AdminUsersPage() {
         actor={actor}
         target={editing}
         organizations={organizations.data ?? []}
+        institutes={institutes.data ?? []}
         departments={departments.data ?? []}
+        eklinkUrl={eklinkUrl}
         onOpenChange={(open) => !open && setEditing(null)}
       />
     </div>
