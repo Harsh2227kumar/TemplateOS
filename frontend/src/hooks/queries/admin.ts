@@ -8,6 +8,8 @@ import {
   type AdminUserListParams,
   type AdminUserUpdate,
   type ApiError,
+  type ApproverAssignmentCreate,
+  type DirectoryUpdate,
   type ProfileUpdate,
 } from "@/lib/api";
 import { adminKeys, templateKeys } from "@/lib/query/keys";
@@ -44,7 +46,52 @@ export function useDepartments(organizationId?: number, enabled = true) {
   });
 }
 
+/** super_admin: all institutes (or one organization's); others: their own scope's. */
+export function useInstitutes(organizationId?: number, enabled = true) {
+  return useQuery<Awaited<ReturnType<typeof adminApi.listInstitutes>>, ApiError>({
+    queryKey: adminKeys.institutes(organizationId),
+    queryFn: () => adminApi.listInstitutes(organizationId),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+/** Approver assignments inside the caller's admin scope. */
+export function useApprovers(currentOnly = true, enabled = true) {
+  return useQuery<Awaited<ReturnType<typeof adminApi.listApprovers>>, ApiError>({
+    queryKey: adminKeys.approvers({ current_only: currentOnly }),
+    queryFn: () => adminApi.listApprovers({ current_only: currentOnly }),
+    enabled,
+  });
+}
+
+/** EkLink sync status (any admin). Also tells the admin pages whether EkLink owns the data. */
+export function useSyncStatus(enabled = true) {
+  return useQuery<Awaited<ReturnType<typeof adminApi.syncStatus>>, ApiError>({
+    queryKey: adminKeys.syncStatus(),
+    queryFn: () => adminApi.syncStatus(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 // ── mutations ──────────────────────────────────────────────────────────────
+
+/** "Sync now" (changes) or "Full resync" (snapshot); refreshes everything EkLink feeds. */
+export function useRunSync() {
+  const queryClient = useQueryClient();
+  const { refreshUser } = useAuth();
+  return useMutation<Awaited<ReturnType<typeof adminApi.runSync>>, ApiError, "changes" | "full">({
+    mutationFn: (kind) => (kind === "full" ? adminApi.fullResync() : adminApi.runSync()),
+    onSuccess: (outcome) => {
+      queryClient.setQueryData(adminKeys.syncStatus(), outcome.status);
+      void queryClient.invalidateQueries({ queryKey: adminKeys.all });
+      void queryClient.invalidateQueries({ queryKey: templateKeys.accessOptions() });
+      void refreshUser();
+    },
+    onError: () => void queryClient.invalidateQueries({ queryKey: adminKeys.syncStatus() }),
+  });
+}
 
 export function useUpdateAdminUser() {
   const queryClient = useQueryClient();
@@ -56,6 +103,7 @@ export function useUpdateAdminUser() {
       // Membership counts on the directory pages change with the user.
       void queryClient.invalidateQueries({ queryKey: adminKeys.organizations() });
       void queryClient.invalidateQueries({ queryKey: adminKeys.departmentLists() });
+      void queryClient.invalidateQueries({ queryKey: adminKeys.instituteLists() });
       if (me && updated.id === me.id) {
         void refreshUser();
         // Their own scope decides what they may publish and see.
@@ -75,6 +123,7 @@ function useInvalidateDirectory() {
   const { refreshUser } = useAuth();
   return (options: { renamed?: boolean } = {}) => {
     void queryClient.invalidateQueries({ queryKey: adminKeys.organizations() });
+    void queryClient.invalidateQueries({ queryKey: adminKeys.instituteLists() });
     void queryClient.invalidateQueries({ queryKey: adminKeys.departmentLists() });
     void queryClient.invalidateQueries({ queryKey: templateKeys.accessOptions() });
     if (options.renamed) {
@@ -89,8 +138,78 @@ function useInvalidateDirectory() {
 export function useCreateOrganization() {
   const invalidate = useInvalidateDirectory();
   return useMutation({
-    mutationFn: (name: string) => adminApi.createOrganization(name),
+    mutationFn: (input: string | { name: string; code?: string | null }) =>
+      typeof input === "string"
+        ? adminApi.createOrganization(input)
+        : adminApi.createOrganization(input.name, input.code),
     onSuccess: () => invalidate(),
+  });
+}
+
+export function useUpdateOrganization() {
+  const invalidate = useInvalidateDirectory();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: DirectoryUpdate }) =>
+      adminApi.updateOrganization(id, body),
+    onSuccess: () => invalidate({ renamed: true }),
+  });
+}
+
+export function useCreateInstitute() {
+  const invalidate = useInvalidateDirectory();
+  return useMutation({
+    mutationFn: ({
+      name,
+      organizationId,
+      code,
+    }: {
+      name: string;
+      organizationId?: number;
+      code?: string | null;
+    }) => adminApi.createInstitute(name, organizationId, code),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useUpdateInstitute() {
+  const invalidate = useInvalidateDirectory();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: DirectoryUpdate }) =>
+      adminApi.updateInstitute(id, body),
+    onSuccess: () => invalidate({ renamed: true }),
+  });
+}
+
+export function useDeleteInstitute() {
+  const invalidate = useInvalidateDirectory();
+  return useMutation({
+    mutationFn: (id: number) => adminApi.deleteInstitute(id),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useUpdateDepartment() {
+  const invalidate = useInvalidateDirectory();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: number; body: DirectoryUpdate }) =>
+      adminApi.updateDepartment(id, body),
+    onSuccess: () => invalidate({ renamed: true }),
+  });
+}
+
+export function useCreateApprover() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ApproverAssignmentCreate) => adminApi.createApprover(body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: adminKeys.approverLists() }),
+  });
+}
+
+export function useEndApprover() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminApi.endApprover(id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: adminKeys.approverLists() }),
   });
 }
 
@@ -114,8 +233,17 @@ export function useDeleteOrganization() {
 export function useCreateDepartment() {
   const invalidate = useInvalidateDirectory();
   return useMutation({
-    mutationFn: ({ name, organizationId }: { name: string; organizationId?: number }) =>
-      adminApi.createDepartment(name, organizationId),
+    mutationFn: ({
+      name,
+      organizationId,
+      instituteId,
+      code,
+    }: {
+      name: string;
+      organizationId?: number;
+      instituteId?: number;
+      code?: string | null;
+    }) => adminApi.createDepartment(name, organizationId, instituteId, code),
     onSuccess: () => invalidate(),
   });
 }

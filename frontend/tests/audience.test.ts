@@ -7,6 +7,7 @@ import {
   allowedVisibilities,
   audienceFromTemplate,
   departmentChoices,
+  instituteChoices,
   toAccessPayload,
   validateAudience,
   withOrganization,
@@ -129,6 +130,7 @@ test("payload sends ids and clears what the visibility does not use", () => {
     {
       visibility: "department",
       scope_organization_id: UNI,
+      scope_institute_id: null,
       scope_department_id: CS,
       allowed_roles: ["faculty"],
     },
@@ -137,11 +139,11 @@ test("payload sends ids and clears what the visibility does not use", () => {
     toAccessPayload(
       audience({ visibility: "organization", scope_organization_id: UNI, scope_department_id: CS }),
     ),
-    { visibility: "organization", scope_organization_id: UNI, scope_department_id: null, allowed_roles: null },
+    { visibility: "organization", scope_organization_id: UNI, scope_institute_id: null, scope_department_id: null, allowed_roles: null },
   );
   assert.deepEqual(
     toAccessPayload(audience({ visibility: "private", scope_organization_id: UNI, role_mode: "selected", allowed_roles: ["faculty"] })),
-    { visibility: "private", scope_organization_id: null, scope_department_id: null, allowed_roles: null },
+    { visibility: "private", scope_organization_id: null, scope_institute_id: null, scope_department_id: null, allowed_roles: null },
   );
 });
 
@@ -156,11 +158,44 @@ test("editor state from a template", () => {
     {
       visibility: "department",
       scope_organization_id: UNI,
+      scope_institute_id: null,
       scope_department_id: CS,
       role_mode: "selected",
       allowed_roles: ["student"],
     },
   );
+});
+
+test("institute visibility: choices, validation, payload and defaults", () => {
+  const SIT = 100;
+  const SIBM = 101;
+  const opts = options({
+    institutes: [
+      { id: SIBM, organization_id: UNI, name: "SIBM" },
+      { id: SIT, organization_id: UNI, name: "SIT" },
+    ],
+    can_publish: { organization: false, institute: true, department: true },
+    defaults: { organization_id: UNI, department_id: null, institute_id: SIT },
+  });
+  assert.ok(allowedVisibilities(opts).includes("institute"));
+  assert.ok(!allowedVisibilities(opts).includes("organization"));
+  assert.ok(!allowedVisibilities(options()).includes("institute"));
+  assert.deepEqual(instituteChoices(opts, UNI).map((i) => i.name), ["SIBM", "SIT"]);
+  // institute admins are pinned to their own institute
+  const pinned = withScopeDefaults(
+    audience({ visibility: "institute", scope_institute_id: SIBM }), opts, "institute_admin",
+  );
+  assert.equal(pinned.scope_institute_id, SIT);
+  assert.equal(pinned.scope_organization_id, UNI);
+  assert.ok(validateAudience(audience({ visibility: "institute", scope_organization_id: UNI }), opts, "super_admin").scope_institute_id);
+  assert.deepEqual(validateAudience(pinned, opts, "institute_admin"), {});
+  assert.deepEqual(toAccessPayload(pinned), {
+    visibility: "institute",
+    scope_organization_id: UNI,
+    scope_institute_id: SIT,
+    scope_department_id: null,
+    allowed_roles: null,
+  });
 });
 
 test("scope defaults: forced for scoped admins, prefilled otherwise", () => {

@@ -121,6 +121,16 @@ export const adminKeys = {
       ...adminKeys.departmentLists(),
       organizationId === undefined ? {} : { organization_id: organizationId },
     ] as const,
+  instituteLists: () => [...adminKeys.all, "institutes"] as const,
+  institutes: (organizationId?: number) =>
+    [
+      ...adminKeys.instituteLists(),
+      organizationId === undefined ? {} : { organization_id: organizationId },
+    ] as const,
+  approvers: (params: { current_only?: boolean } = {}) =>
+    [...adminKeys.all, "approvers", params] as const,
+  approverLists: () => [...adminKeys.all, "approvers"] as const,
+  syncStatus: () => [...adminKeys.all, "sync", "status"] as const,
 };
 
 export const queryKeys = {
