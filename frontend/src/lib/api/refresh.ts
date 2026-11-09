@@ -17,8 +17,11 @@ export type RefreshOutcome =
   /** Network error or 5xx: the session may still be valid, so do not sign out. */
   | "unavailable";
 
-/** Paths whose 401 must never trigger a refresh (they are the auth flow itself). */
-const NO_REFRESH_PATHS = ["/auth/login", "/auth/refresh", "/auth/logout"];
+/**
+ * Paths whose 401 must never trigger a refresh (they are the auth flow itself).
+ * The EkLink code is single-use, so its exchange is never retried.
+ */
+const NO_REFRESH_PATHS = ["/auth/login", "/auth/eklink/callback", "/auth/refresh", "/auth/logout"];
 
 export function shouldRefreshAfter401(path: string): boolean {
   const pathname = path.split("?")[0];
