@@ -1,3 +1,10 @@
+from pathlib import Path
+import sys
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 from logging.config import fileConfig
 
 from alembic import context
@@ -8,7 +15,7 @@ from app.db.base import Base
 from app.models.user import User  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace('%', '%%'))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

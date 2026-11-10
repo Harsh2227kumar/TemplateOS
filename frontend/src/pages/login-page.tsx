@@ -1,12 +1,134 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/auth-context";
+import { ApiError, authApi } from "@/lib/api";
+
+// Only same-app paths: "//host" and "/\\host" would leave the site.
+function safeRedirectPath(path: string | undefined): string {
+  if (!path || !path.startsWith("/") || path.startsWith("//") || path.startsWith("/\\")) return "/";
+  return path;
+}
+
+/** 429 from POST /auth/login carries Retry-After (seconds). */
+function loginErrorMessage(caught: unknown): string {
+  if (!(caught instanceof ApiError)) return "Unable to log in. Please try again.";
+  if (caught.status === 429) {
+    const seconds = caught.retryAfterSeconds;
+    if (seconds === undefined) return "Too many attempts. Please try again later.";
+    if (seconds < 60) return `Too many attempts, try again in ${Math.max(1, Math.ceil(seconds))} seconds.`;
+    const minutes = Math.ceil(seconds / 60);
+    return `Too many attempts, try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+  }
+  return caught.message;
+}
+
 export function LoginPage() {
+  const { login } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [eklinkEnabled, setEklinkEnabled] = useState(false);
+  const [signupEnabled, setSignupEnabled] = useState(false);
+  const routeState = location.state as { from?: { pathname?: string }; signedUp?: boolean } | null;
+
+  useEffect(() => {
+    authApi
+      .eklinkConfig()
+      .then((config) => {
+        setEklinkEnabled(config.enabled);
+        setSignupEnabled(Boolean(config.signup_enabled));
+      })
+      .catch(() => {
+        setEklinkEnabled(false);
+        setSignupEnabled(false);
+      });
+  }, []);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setIsSubmitting(true);
+    try {
+      await login(email.trim(), password);
+      navigate(safeRedirectPath(routeState?.from?.pathname), { replace: true });
+    } catch (caught) {
+      setError(loginErrorMessage(caught));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
       <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm">
         <p className="text-sm uppercase tracking-[0.2em] text-slate-500">TemplateOS</p>
-        <h1 className="mt-2 text-2xl font-semibold">Login</h1>
+        <h1 className="mt-2 text-2xl font-semibold">Welcome back</h1>
         <p className="mt-3 text-sm text-slate-600">
-          Authentication UI placeholder for the V1.1 foundation phase.
+          Log in to access your document workspace.
         </p>
+        {routeState?.signedUp && (
+          <p className="mt-4 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">
+            Account created. You can log in now.
+          </p>
+        )}
+        <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
+          <label className="block text-sm font-medium text-slate-700">
+            Email
+            <input
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Password
+            <input
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+            />
+          </label>
+          {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+          <Button className="w-full" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Logging in…" : "Log in"}
+          </Button>
+        </form>
+        {eklinkEnabled && (
+          <>
+            <div className="my-5 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              or
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            <Button asChild className="w-full" variant="outline">
+              <a href={authApi.eklinkLoginUrl}>Sign in with EkLink</a>
+            </Button>
+          </>
+        )}
+        {signupEnabled ? (
+          <p className="mt-6 text-center text-sm text-slate-600">
+            New to TemplateOS?{" "}
+            <Link className="font-medium text-slate-900 underline" to="/signup">
+              Create an account
+            </Link>
+          </p>
+        ) : (
+          <p className="mt-6 text-center text-sm text-slate-500">
+            New here? Sign in with your college EkLink account, or ask your administrator for
+            access.
+          </p>
+        )}
       </div>
     </div>
   );

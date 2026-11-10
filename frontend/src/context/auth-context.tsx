@@ -1,0 +1,132 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { ApiError, SESSION_EXPIRED_EVENT, authApi, type User } from "@/lib/api";
+
+interface AuthContextValue {
+  user: User | null;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<void>;
+  /** Finish EkLink sign-in with the code and state from its callback. */
+  loginWithEklink: (code: string, state: string) => Promise<void>;
+  signup: (fullName: string, email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
+  /** Re-read GET /auth/me (e.g. after an admin changed the current user's role). */
+  refreshUser: () => Promise<void>;
+  /** Replace the signed-in user with a fresher copy (e.g. the PATCH /auth/me response). */
+  setCurrentUser: (user: User) => void;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+/**
+ * The session lives in httpOnly cookies the SPA cannot read, so "am I signed
+ * in?" is answered by GET /auth/me. The API client refreshes an expired access
+ * cookie on its own (once, single-flight) and fires SESSION_EXPIRED_EVENT when
+ * the refresh cookie is rejected too.
+ */
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  // StrictMode runs mount effects twice in development; ask /auth/me once.
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+
+    authApi
+      .me()
+      .then((currentUser) => setUser(currentUser))
+      .catch((error: unknown) => {
+        // A 401 here means the refresh failed as well: signed out. A network
+        // error, a 5xx or an aborted request must NOT sign the user out: no
+        // logout call is made and the cookies stay, so a reload restores the
+        // session once the API is reachable again.
+        if (!(error instanceof ApiError && error.status === 401)) {
+          console.warn("Could not check the session:", error);
+        }
+        setUser(null);
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  // The refresh cookie was rejected mid-session: drop the user so
+  // ProtectedRoute sends them back to the login page. Cached data belongs to
+  // the old session, so it goes too.
+  useEffect(() => {
+    const handleExpired = () => {
+      queryClient.clear();
+      setUser(null);
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired);
+  }, [queryClient]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    await authApi.login({ email, password });
+    const currentUser = await authApi.me();
+    // Never show a previous account's cached templates or drafts.
+    queryClient.clear();
+    setUser(currentUser);
+  }, [queryClient]);
+
+  const loginWithEklink = useCallback(async (code: string, state: string) => {
+    await authApi.eklinkCallback({ code, state });
+    const currentUser = await authApi.me();
+    queryClient.clear();
+    setUser(currentUser);
+  }, [queryClient]);
+
+  const signup = useCallback(async (fullName: string, email: string, password: string) => {
+    await authApi.signup({ full_name: fullName, email, password });
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch (error) {
+      // Sign out locally anyway; the cookies expire on their own.
+      console.warn("Logout request failed:", error);
+    }
+    queryClient.clear();
+    setUser(null);
+    navigate("/login", { replace: true });
+  }, [navigate, queryClient]);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      setUser(await authApi.me());
+    } catch (error) {
+      // A 401 already fired SESSION_EXPIRED_EVENT; anything else keeps the old copy.
+      console.warn("Could not refresh the current user:", error);
+    }
+  }, []);
+
+  const setCurrentUser = useCallback((next: User) => setUser(next), []);
+
+  const value = useMemo<AuthContextValue>(
+    () => ({ user, isLoading, login, loginWithEklink, signup, logout, refreshUser, setCurrentUser }),
+    [isLoading, user, login, loginWithEklink, signup, logout, refreshUser, setCurrentUser],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  return context;
+}

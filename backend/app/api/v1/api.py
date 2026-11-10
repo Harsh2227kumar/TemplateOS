@@ -1,6 +1,46 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import system
+from app.api.v1.endpoints import (
+    admin,
+    ai,
+    auth,
+    document_versions,
+    documents,
+    history,
+    sync,
+    system,
+    template_ai,
+    template_cleaning,
+    template_fields,
+    template_placeholders,
+    templates,
+    word_editor,
+)
 
 api_router = APIRouter()
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(system.router, prefix="/system", tags=["system"])
+# The /templates routers are included in this order on purpose: `templates`
+# declares the static /library and /access-options routes before
+# /{template_id}, and the sequence reproduces the original route order.
+for template_router in (
+    templates.router,
+    template_placeholders.router,
+    template_cleaning.router,
+    template_ai.router,
+    template_fields.router,
+):
+    api_router.include_router(template_router, prefix="/templates", tags=["templates"])
+api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
+api_router.include_router(
+    document_versions.router, prefix="/documents", tags=["document versions"]
+)
+api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+# V1.7 P2.1 Word file editor: routes under /system, /templates, /documents, /editor.
+api_router.include_router(word_editor.router)
+# V1.7 P3: /me/downloads, /documents/{id}/downloads, /admin/audit-logs*.
+api_router.include_router(history.router)
+api_router.include_router(admin.router, prefix="/admin", tags=["admin"])
+# EkLink change sync: the signed push endpoint and the admin status / run.
+api_router.include_router(sync.router, prefix="/sync", tags=["sync"])
+api_router.include_router(sync.admin_router, prefix="/admin", tags=["admin"])
