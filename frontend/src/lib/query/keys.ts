@@ -91,6 +91,18 @@ export const documentKeys = {
   /** V1.7 P2: under detail(id): generate / restore / save refresh them. */
   versions: (id: number) => [...documentKeys.detail(id), "versions"] as const,
   version: (id: number, version: number) => [...documentKeys.versions(id), version] as const,
+  /** V1.7 P2.2: the fit report of a version ("latest" without a number). */
+  fit: (id: number, version?: number | null) => [...documentKeys.detail(id), "fit", version ?? "latest"] as const,
+};
+
+/**
+ * V1.7 P2.2. The chat is NOT under documentKeys.detail(id): saving the draft
+ * must not refetch it (the cache is updated from each turn's response).
+ */
+export const aiFillKeys = {
+  all: ["ai-fill"] as const,
+  config: () => [...aiFillKeys.all, "config"] as const,
+  chat: (documentId: number) => [...aiFillKeys.all, "chat", documentId] as const,
 };
 
 export interface AdminUserListKeyParams {

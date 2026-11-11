@@ -17,7 +17,8 @@
  * `node --test` (frontend/tests/ai-flags.test.ts).
  */
 
-export type AiFlagAction = "grammar" | "tone" | "concise" | "formal" | "expand";
+/** "ai_fill": the value was proposed by the AI fill assistant (V1.7 P2.2). */
+export type AiFlagAction = "grammar" | "tone" | "concise" | "formal" | "expand" | "ai_fill";
 
 /** Form key of the entries. "$" cannot appear in a template field name. */
 export const AI_FLAGS_KEY = "$aiFlags";
