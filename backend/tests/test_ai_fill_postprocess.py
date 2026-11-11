@@ -128,6 +128,7 @@ def test_drops_unknown_signature_locked_and_duplicate_proposals():
         form=[("guide_name", "Dr. R. Mehta", "user")],
     )
     assert list(by_name(result)) == ["student_name"]
+    assert result.message.endswith("I left 'Guide Name' as you wrote it.")
     assert by_name(result)["student_name"].value == "Harsh Kumar"
     assert result.counts["dropped"] == 5
 

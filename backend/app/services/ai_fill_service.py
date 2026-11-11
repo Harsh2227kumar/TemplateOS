@@ -44,8 +44,9 @@ logger = logging.getLogger(__name__)
 FILL_ACTION = "ai_fill"
 # Field types the assistant never fills.
 SKIPPED_FIELD_TYPES = ("signature",)
-# Field types whose text the AI may reword (when the field's ai_enabled is on).
-REWRITE_FIELD_TYPES = ("text", "textarea", "list")
+# Prose fields: reworded only when the field's ai_enabled is on. Short text
+# (names, titles, IDs) is always cleaned up: the user chose AI filling.
+REWRITE_FIELD_TYPES = ("textarea", "list")
 CATALOG_VALUE_CHARS = 300
 CATALOG_HINT_CHARS = 200
 KIND_ORDER = {"conflict": 0, "missing": 1, "unclear": 2, "more_detail": 3}
@@ -528,12 +529,15 @@ def postprocess(
     kept: list[AiFillProposalRead] = []
     low: dict[str, tuple[str, list[str]]] = {}  # field -> (kind, choices) for the server question
     dropped = 0
+    left_alone: list[str] = []  # locked fields the model tried to change
     seen: set[str] = set()
     for proposal in turn.proposals:
         name = proposal.field_name
         field = by_name.get(name)
         if field is None or name in locked or name in seen:
             dropped += 1
+            if field is not None and name in locked and name not in left_alone:
+                left_alone.append(name)
             continue
         seen.add(name)
 
@@ -722,6 +726,8 @@ def postprocess(
             text = f"I filled {len(kept)} field(s)."
         else:
             text = "I need a few details before I can fill the form."
+    for name in left_alone:
+        text += f"\nI left '{_label(by_name[name])}' as you wrote it."
     for name in missing_required:
         if name in limit_hit:
             text += f"\nI couldn't get '{_label(by_name[name])}' from the chat. Please fill it in the form."
