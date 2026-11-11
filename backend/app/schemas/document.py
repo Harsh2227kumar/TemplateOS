@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.ai_fill import FitReport
+
 # Request-size bounds for PUT /documents/{id}/values (no prior limit existed).
 MAX_DOCUMENT_VALUE_LENGTH = 50_000
 MAX_VALUES_PER_REQUEST = 500
@@ -71,6 +73,9 @@ class GenerateDocumentResponse(GeneratedInfo):
     document_id: int
     document_status: str
     versions_count: int = 0
+    # V1.7 P2.2: does the new version fit the template (pages, long fields)?
+    # null when the check could not run; it never fails the generation.
+    fit: FitReport | None = None
 
 
 # --- Document Schemas ---
