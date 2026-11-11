@@ -81,15 +81,20 @@ ok "published to $WEB_ROOT"
 # ---------------- 4. restart + check ----------------
 step "4. Restarting the backend"
 sudo systemctl restart "$SERVICE"
+# The backend listens on the address set by --host in its systemd unit:
+# 127.0.0.1 by default, 172.17.0.1 once ONLYOFFICE is enabled. Read it from the unit.
+BIND_HOST="$(systemctl cat "$SERVICE" 2>/dev/null | grep -oE -- '--host [0-9.]+' | head -n1 | awk '{print $2}' || true)"
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
+HEALTH_URL="http://$BIND_HOST:8000/health"
 for _ in $(seq 1 30); do
-  if curl -fsS -m 3 http://127.0.0.1:8000/health >/dev/null 2>&1; then
-    ok "backend answers on 127.0.0.1:8000/health"
+  if curl -fsS -m 3 "$HEALTH_URL" >/dev/null 2>&1; then
+    ok "backend answers on $HEALTH_URL"
     break
   fi
   sleep 2
 done
-curl -fsS -m 3 http://127.0.0.1:8000/health >/dev/null 2>&1 \
-  || die "backend did not answer after restart. Check: sudo journalctl -u $SERVICE -n 80 --no-pager"
+curl -fsS -m 3 "$HEALTH_URL" >/dev/null 2>&1 \
+  || die "backend did not answer on $HEALTH_URL after restart. Check: sudo journalctl -u $SERVICE -n 80 --no-pager"
 
 step "Update finished"
 ok "$(sudo systemctl is-active "$SERVICE")"
