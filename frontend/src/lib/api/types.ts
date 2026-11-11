@@ -591,7 +591,7 @@ export interface DocumentValue {
   rich_content: RichTextDoc | null;
   /** The saved value is an AI result the user did not edit afterwards. */
   ai_modified: boolean;
-  ai_action: AiTextAction | null;
+  ai_action: AiValueAction | null;
   ai_modified_at: string | null;
 }
 
@@ -642,6 +642,8 @@ export interface GenerateDocumentResponse extends GeneratedInfo {
   document_status: string;
   /** V1.7 P2: every generate creates a version; how many exist now. */
   versions_count: number;
+  /** V1.7 P2.2: does the new version fit the template? null when not checked. */
+  fit?: FitReport | null;
 }
 
 // --- V1.7 Phase 1: read-only document preview (GET /documents/{id}/preview) ---
@@ -688,7 +690,7 @@ export interface PreviewField {
   value_format: ValueFormat;
   rich_content: RichTextDoc | null;
   ai_modified: boolean;
-  ai_action: AiTextAction | null;
+  ai_action: AiValueAction | null;
 }
 
 export interface PreviewSection {
@@ -748,7 +750,7 @@ export interface DocumentValueSaveItem {
   value_format?: ValueFormat;
   rich_content?: RichTextDoc | null;
   ai_modified?: boolean;
-  ai_action?: AiTextAction | null;
+  ai_action?: AiValueAction | null;
 }
 
 export interface DocumentValuesSave {
@@ -797,6 +799,8 @@ export interface DocumentVersionDetail extends DocumentVersion {
 // --- V1.5 Phase 1: basic AI writing actions on a single field ---
 
 export type AiTextAction = "grammar" | "tone" | "concise" | "formal" | "expand";
+/** What wrote a stored value: an improve-text action, or the AI fill assistant (V1.7 P2.2). */
+export type AiValueAction = AiTextAction | "ai_fill";
 
 /**
  * Text fields send original_text; list fields send original_items (one
@@ -954,4 +958,132 @@ export interface AuditLogParams {
   from?: string;
   to?: string;
   q?: string;
+}
+
+// --- V1.7 Phase 2.2: AI fill assistant and fit check ---
+
+export type AiFillConfidence = "high" | "medium" | "low";
+export type AiFillOrigin = "empty" | "ai" | "user";
+export type AiFillStage = "asking" | "filling" | "ready";
+export type AiFillQuestionKind = "missing" | "unclear" | "conflict" | "more_detail";
+
+/** GET /system/ai-config */
+export interface AiConfig {
+  enabled: boolean;
+  fill_enabled: boolean;
+}
+
+/** One proposed field value: `value` for text / textarea / date / number, `items` for lists. */
+export interface AiFillProposal {
+  field_name: string;
+  value: string | null;
+  items: string[] | null;
+  /** The user's own words the value comes from. */
+  source_text: string | null;
+  confidence: AiFillConfidence;
+  reason: string | null;
+  over_budget: boolean;
+}
+
+export interface AiFillQuestion {
+  id: string;
+  text: string;
+  field_names: string[];
+  choices: string[];
+  kind: AiFillQuestionKind;
+  /** 2+ when the field was asked about before. */
+  attempt: number;
+}
+
+export interface AiFillAnswer {
+  question_id: string;
+  /** The clicked choice; null when answered in the message text. */
+  choice: string | null;
+}
+
+export interface AiFillMessage {
+  id: number;
+  turn: number;
+  role: "user" | "assistant";
+  content: string;
+  answers: AiFillAnswer[];
+  skipped: string[];
+  proposals: AiFillProposal[];
+  questions: AiFillQuestion[];
+  stage: AiFillStage | null;
+  created_at: string;
+}
+
+export interface AiFillSessionInfo {
+  id: number;
+  status: "active" | "completed";
+  turn_count: number;
+  max_turns: number;
+}
+
+export interface FieldBudget {
+  field_name: string;
+  placement: string;
+  budget: number;
+  unit: "chars" | "items";
+  item_budget: number | null;
+  hard: boolean;
+}
+
+/** GET /documents/{id}/ai-fill */
+export interface AiFillSessionRead {
+  session: AiFillSessionInfo | null;
+  messages: AiFillMessage[];
+  open_questions: AiFillQuestion[];
+  budgets: FieldBudget[];
+}
+
+/** One field of the form as the browser sees it (saved or not). */
+export interface AiFillFormStateItem {
+  field_name: string;
+  /** Plain value: lists as a JSON array string, rich text as its plain text. */
+  value: string;
+  origin: AiFillOrigin;
+}
+
+/** POST /documents/{id}/ai-fill/messages body */
+export interface AiFillMessageCreate {
+  message: string;
+  answers: AiFillAnswer[];
+  skipped: string[];
+  form_state: AiFillFormStateItem[];
+}
+
+/** POST /documents/{id}/ai-fill/messages */
+export interface AiFillTurnResponse {
+  session: AiFillSessionInfo;
+  user_message: AiFillMessage;
+  assistant_message: AiFillMessage;
+  stage: AiFillStage;
+  missing_required: string[];
+  /** Required fields the AI stopped asking about: the user fills them. */
+  needs_user: string[];
+  required_total: number;
+  required_filled: number;
+  done: boolean;
+}
+
+export interface FitLongField {
+  field_name: string;
+  label: string;
+  length: number;
+  budget: number;
+  unit: "chars" | "items";
+}
+
+/** GET /documents/{id}/fit-report and `fit` of POST /generate. Advisory only. */
+export interface FitReport {
+  version: number | null;
+  pages: number | null;
+  baseline_pages: number | null;
+  overflow: boolean;
+  long_fields: FitLongField[];
+  /** false when there is no PDF to count pages of (long_fields are still listed). */
+  checked: boolean;
+  reason: string | null;
 }

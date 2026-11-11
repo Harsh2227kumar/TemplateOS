@@ -1,6 +1,6 @@
 import { Sparkles } from "lucide-react";
 
-import type { AiTextAction } from "@/lib/api";
+import type { AiValueAction } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { AI_STYLE_LABELS } from "./use-ai-style-switcher";
 
@@ -16,11 +16,11 @@ export function AiBadge({
   saved = true,
   className,
 }: {
-  action: AiTextAction | null;
+  action: AiValueAction | null;
   saved?: boolean;
   className?: string;
 }) {
-  const style = action ? AI_STYLE_LABELS[action] : null;
+  const style = action === "ai_fill" ? "AI assistant" : action ? AI_STYLE_LABELS[action] : null;
   const description = saved
     ? `Last saved value was written with AI${style ? ` (${style})` : ""}`
     : `Written with AI${style ? ` (${style})` : ""}; edit it to make it your own`;
