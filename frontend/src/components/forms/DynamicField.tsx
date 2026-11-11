@@ -13,6 +13,7 @@ import { AiBadge } from "@/components/fields/AiBadge";
 import { useAiStyleSwitcher } from "@/components/fields/use-ai-style-switcher";
 import { AI_FLAGS_KEY, aiFlagFor, readAiFlags } from "@/components/forms/ai-flags";
 import { formValueText } from "@/components/forms/form-values";
+import { AiFillFieldNote } from "@/features/ai-fill/AiFillFieldNote";
 import { RichTextField } from "@/features/rich-text/RichTextField";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -172,6 +173,8 @@ export function DynamicField({ field: rawField, aiContext, disabled }: DynamicFi
       ) : (
         <FieldControl {...controlProps} />
       )}
+
+      <AiFillFieldNote name={name} fieldType={field.field_type} />
 
       {errorMessage && (
         <p id={errorId} className="flex items-start gap-1 text-sm text-red-600" role="alert">

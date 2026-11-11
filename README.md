@@ -17,6 +17,13 @@ original layout and formatting.
 - **AI writing (AWS Bedrock):** field suggestions while setting up a
   template, and per-field or whole-form rewrites (fix grammar, professional,
   concise, formal, expand).
+- **AI fill assistant:** when starting a document, choose to fill the form
+  yourself or to chat with the AI. Write what you know in your own words;
+  the AI fixes the language (never the facts), fills the fields it is sure
+  about, asks about anything missing or unclear (again if needed), and
+  never changes a field you wrote. You review and save the form as usual.
+  After generating, a fit check warns when the content makes the document
+  longer than the template.
 - **Preview, rich text and versions:** a read-only preview with
   completeness; rich text (bold, lists, links) in paragraph fields that
   reaches the DOCX/PDF; every Generate is a new version with its own files,

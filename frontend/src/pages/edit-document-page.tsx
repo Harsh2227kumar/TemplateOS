@@ -1,12 +1,14 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { CheckCircle, CheckCircle2, ChevronLeft, Eye, History, Loader2, RotateCcw, Save } from "lucide-react";
+import { CheckCircle, CheckCircle2, ChevronLeft, Eye, History, Loader2, RotateCcw, Save, Sparkles } from "lucide-react";
 
 import { buildInitialValues, normalizeSavedFormValues, serializeValues } from "@/components/forms/form-values";
 import { useSaveShortcut, useUnsavedChangesWarning } from "@/components/forms/use-form-guards";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { AiFillProvider, focusFormField, useAiFillAssistant } from "@/features/ai-fill/ai-fill-context";
+import { FitCheckNotice } from "@/features/ai-fill/FitCheckNotice";
 import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { latestTimestamp } from "@/features/documents/draft-timestamps";
@@ -30,9 +32,11 @@ import {
 } from "@/features/word-editor/word-editor-model";
 import {
   combineQueries,
+  useAiFillEnabled,
   useDocument,
   useDownloadGenerated,
   useEditorEnabled,
+  useFitReport,
   useGenerateDocument,
   useRetryPdf,
   useSaveDocumentValues,
@@ -40,14 +44,25 @@ import {
   useTemplateFields,
 } from "@/hooks/queries";
 import { useSeedOnce } from "@/hooks/use-seed-once";
-import { ApiError, type Document, type DocumentFormValues, type GeneratedInfo, type TemplateField } from "@/lib/api";
+import {
+  ApiError,
+  type Document,
+  type DocumentFormValues,
+  type FitReport,
+  type GeneratedInfo,
+  type TemplateField,
+} from "@/lib/api";
 import { parseServerDate } from "@/lib/dates";
 import { parseRouteId } from "@/lib/route-params";
+import { cn } from "@/lib/utils";
 
 // V1.7 P2.1: loaded when generate asks about manual edits.
 const ManualEditsDialog = lazy(() =>
   import("@/features/word-editor/ManualEditsDialog").then((module) => ({ default: module.ManualEditsDialog })),
 );
+
+// V1.7 P2.2: the assistant chat is loaded when it is opened.
+const AiAssistantPanel = lazy(() => import("@/features/ai-fill/AiAssistantPanel"));
 
 // Same rule as the backend (document_permissions.EDITABLE_STATUSES).
 const EDITABLE_STATUSES = ["draft", "generated"];
@@ -78,6 +93,16 @@ export function EditDocumentPage() {
   const [generateSuccess, setGenerateSuccess] = useState<string | null>(null);
   const [manualConflict, setManualConflict] = useState<ManualEditsConflict | null>(null);
   const editorEnabled = useEditorEnabled();
+  // V1.7 P2.2: the AI fill assistant (?assistant=open) and the fit check.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const aiFillEnabled = useAiFillEnabled();
+  const assistantAvailable = aiFillEnabled && document !== null && EDITABLE_STATUSES.includes(document.status);
+  const assistant = useAiFillAssistant(documentId, assistantAvailable);
+  const assistantOpen = assistantAvailable && searchParams.get("assistant") === "open";
+  // Below lg only one of the two is shown.
+  const [mobileTab, setMobileTab] = useState<"form" | "assistant">("assistant");
+  const [latestFit, setLatestFit] = useState<FitReport | null>(null);
+  const fitQuery = useFitReport(documentId, Boolean(document?.generated));
 
   // Fields as of seeding: the schema and inputs never change under the user.
   const [fields, setFields] = useState<TemplateField[]>([]);
@@ -173,6 +198,7 @@ export function EditDocumentPage() {
       const result = await generateDocument.mutateAsync({ documentId, replaceManualEdits });
       setManualConflict(null);
       setLatestGenerated(result);
+      setLatestFit(result.fit ?? null);
       // A PDF failure is not a generation failure: the panel shows it in amber.
       // Shown inline above the panel with an "Open preview" link.
       const created = versionCreatedText(result);
@@ -264,6 +290,8 @@ export function EditDocumentPage() {
     setSaveError(null);
     setGenerateSuccess(null);
     setLatestGenerated(null);
+    setLatestFit(null);
+    assistant.reset();
     setLastSavedAt(restored.updated_at);
   };
 
@@ -271,6 +299,26 @@ export function EditDocumentPage() {
     if (isDirty && !window.confirm("Discard your unsaved changes and go back to the last saved version?")) return;
     form.reset(structuredClone(lastSavedValuesRef.current));
     setSaveError(null);
+    assistant.reset();
+  };
+
+  const setAssistantOpen = (open: boolean) => {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (open) next.set("assistant", "open");
+        else next.delete("assistant");
+        return next;
+      },
+      { replace: true },
+    );
+    if (open) setMobileTab("assistant");
+  };
+
+  /** Jump to a field of the form (from the chat or the fit notice). */
+  const showField = (fieldName: string) => {
+    setMobileTab("form");
+    focusFormField(fieldName);
   };
 
   // "Not found" covers 404/403 on the draft; anything else is a retryable load error.
@@ -311,7 +359,41 @@ export function EditDocumentPage() {
   const savedDate = parseServerDate(lastSavedAt);
   const savedLabel = savedDate ? formatDistanceToNow(savedDate, { addSuffix: true }) : "unknown";
 
+  const editFileHref = canEditDocumentFile({
+    editorEnabled,
+    documentStatus: document.status,
+    hasDocx: Boolean(latestGenerated ?? document.generated),
+  })
+    ? documentEditorPath(document.id)
+    : null;
+
   return (
+    <AiFillProvider value={assistant}>
+      {assistantOpen && (
+        <div className="mx-auto mb-4 flex max-w-3xl rounded-lg border border-slate-200 bg-white p-1 lg:hidden" role="tablist" aria-label="Form or assistant">
+          {(["form", "assistant"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === tab}
+              onClick={() => setMobileTab(tab)}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+                mobileTab === tab ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50",
+              )}
+            >
+              {tab === "form" ? "Form" : "AI assistant"}
+            </button>
+          ))}
+        </div>
+      )}
+      <div
+        className={cn(
+          assistantOpen && "mx-auto max-w-6xl lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:items-start lg:gap-6",
+        )}
+      >
+        <div className={cn("min-w-0", assistantOpen && mobileTab === "assistant" && "hidden lg:block")}>
     <DraftFormShell
       form={form}
       formRef={formRef}
@@ -350,16 +432,16 @@ export function EditDocumentPage() {
             onGenerate={handleGenerate}
             onRetryPdf={() => void handleRetryPdf()}
             onDownload={(format) => void handleDownload(format)}
-            editFileHref={
-              canEditDocumentFile({
-                editorEnabled,
-                documentStatus: document.status,
-                hasDocx: Boolean(latestGenerated ?? document.generated),
-              })
-                ? documentEditorPath(document.id)
-                : null
-            }
+            editFileHref={editFileHref}
           />
+          {!generateDocument.isPending && (
+            <FitCheckNotice
+              documentId={document.id}
+              fit={latestFit ?? fitQuery.data}
+              onShowField={showField}
+              editFileHref={editFileHref}
+            />
+          )}
           {manualConflict && (
             <Suspense fallback={null}>
               <ManualEditsDialog
@@ -418,6 +500,19 @@ export function EditDocumentPage() {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {assistantAvailable && (
+                <Button
+                  type="button"
+                  variant={assistantOpen ? "default" : "outline"}
+                  size="sm"
+                  aria-pressed={assistantOpen}
+                  onClick={() => setAssistantOpen(!assistantOpen)}
+                  title="Fill this form by chatting with the AI"
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  AI assistant
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -493,5 +588,31 @@ export function EditDocumentPage() {
         </>
       }
     />
+        </div>
+        {assistantOpen && (
+          <aside className={cn("min-w-0 lg:sticky lg:top-20", mobileTab === "form" && "hidden lg:block")}>
+            <Suspense
+              fallback={
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Opening the assistant…
+                </div>
+              }
+            >
+              <AiAssistantPanel
+                documentId={document.id}
+                fields={fields}
+                form={form}
+                assistant={assistant}
+                disabled={saving || generateDocument.isPending}
+                onShowField={showField}
+                onSave={requestSubmit}
+                onClose={() => setAssistantOpen(false)}
+              />
+            </Suspense>
+          </aside>
+        )}
+      </div>
+    </AiFillProvider>
   );
 }

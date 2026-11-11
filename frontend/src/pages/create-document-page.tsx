@@ -6,11 +6,13 @@ import { buildInitialValues, normalizeSavedFormValues, serializeValues } from "@
 import { useSaveShortcut, useUnsavedChangesWarning } from "@/components/forms/use-form-guards";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toast";
+import { FillModeChooser, rememberFillMode, rememberedFillMode, type FillMode } from "@/features/ai-fill/FillModeChooser";
 import { DraftFormShell } from "@/features/documents/DraftFormShell";
 import { DraftLoadError, DraftLoadingSkeleton, DraftNotFound } from "@/features/documents/DraftLoadStates";
 import { useDraftForm } from "@/features/documents/use-draft-form";
 import {
   combineQueries,
+  useAiFillEnabled,
   useCreateDocument,
   useSaveDocumentValues,
   useTemplate,
@@ -40,6 +42,11 @@ export function CreateDocumentPage() {
   // Id of a document created by an earlier submit whose value save failed.
   // Retries reuse it instead of creating a duplicate document.
   const createdDocIdRef = useRef<number | null>(null);
+  // V1.7 P2.2: fill the form by hand, or start with the AI assistant.
+  const aiFillEnabled = useAiFillEnabled();
+  const [fillMode, setFillMode] = useState<FillMode>(rememberedFillMode);
+  const [startingAi, setStartingAi] = useState(false);
+  const [startAiError, setStartAiError] = useState<string | null>(null);
   const redirectTimerRef = useRef<number | null>(null);
   const { form, formRef, handleInvalid, describeSaveError, requestSubmit } = useDraftForm(fields);
   const { isDirty } = form.formState;
@@ -96,6 +103,38 @@ export function CreateDocumentPage() {
     }
   };
 
+  const chooseFillMode = (mode: FillMode) => {
+    setFillMode(mode);
+    rememberFillMode(mode);
+  };
+
+  /** Create the (empty) draft and open it with the assistant. */
+  const startWithAi = async () => {
+    if (!templateId || startingAi || saving || saveSuccess) return;
+    if (
+      isDirty &&
+      !window.confirm("The assistant starts with an empty draft. What you typed in the form below is not kept. Continue?")
+    ) {
+      return;
+    }
+    setStartingAi(true);
+    setStartAiError(null);
+    try {
+      let docId = createdDocIdRef.current;
+      if (docId === null) {
+        const doc = await createDocument.mutateAsync({ template_id: templateId });
+        docId = doc.id;
+        createdDocIdRef.current = docId;
+      }
+      // Mark the form clean so the unsaved-changes guard lets the redirect through.
+      form.reset(form.getValues());
+      navigate(`/documents/${docId}/edit?assistant=open`, { replace: true });
+    } catch (err) {
+      setStartAiError(err instanceof Error && err.message ? err.message : "Could not start the draft. Please try again.");
+      setStartingAi(false);
+    }
+  };
+
   const goBack = () => {
     // navigate(-1) would leave the app when the page was opened directly.
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
@@ -131,7 +170,7 @@ export function CreateDocumentPage() {
     );
   }
 
-  const busy = saving || saveSuccess;
+  const busy = saving || saveSuccess || startingAi;
 
   return (
     <DraftFormShell
@@ -179,7 +218,7 @@ export function CreateDocumentPage() {
         </>
       }
       notice={
-        saveSuccess && (
+        saveSuccess ? (
           <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4" role="status">
             <CheckCircle className="h-5 w-5 shrink-0 text-green-600" />
             <div>
@@ -187,6 +226,16 @@ export function CreateDocumentPage() {
               <p className="text-sm text-green-700">Opening the editor…</p>
             </div>
           </div>
+        ) : (
+          <FillModeChooser
+            mode={aiFillEnabled ? fillMode : "manual"}
+            onModeChange={chooseFillMode}
+            aiAvailable={aiFillEnabled}
+            starting={startingAi}
+            disabled={saving}
+            onStartAi={() => void startWithAi()}
+            error={startAiError}
+          />
         )
       }
       footerClassName="sm:justify-end"
