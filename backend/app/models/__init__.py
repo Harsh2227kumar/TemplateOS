@@ -14,6 +14,8 @@ from app.models.download_history import DownloadHistory
 from app.models.audit_log import AuditLog
 from app.models.approver_assignment import ApproverAssignment
 from app.models.sync_state import SyncState
+from app.models.ai_fill_session import AiFillSession
+from app.models.ai_fill_message import AiFillMessage
 
 # Remove generated DOCX/PDF files from storage when their rows are deleted.
 from app.services.generated_file_cleanup import register as _register_cleanup

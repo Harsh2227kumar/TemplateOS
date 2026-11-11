@@ -37,8 +37,10 @@ if TYPE_CHECKING:
     from app.models.document import Document
 
 VALUE_FORMATS: tuple[str, ...] = ("plain", "rich")
-# Same actions as POST /ai/improve-text (app.schemas.ai.AI_TEXT_ACTIONS).
-AI_ACTIONS: tuple[str, ...] = ("grammar", "tone", "concise", "formal", "expand")
+# The actions of POST /ai/improve-text (app.schemas.ai.AI_TEXT_ACTIONS) plus
+# "ai_fill": the value was proposed by the AI fill assistant (V1.7 P2.2).
+AI_FILL_ACTION = "ai_fill"
+AI_ACTIONS: tuple[str, ...] = ("grammar", "tone", "concise", "formal", "expand", AI_FILL_ACTION)
 
 
 class DocumentValue(Base):
