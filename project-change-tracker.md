@@ -3592,3 +3592,42 @@ Completed V1.4 Phase 2 Member 1 tasks: built the frontend for save-draft functio
 
 - After the integration PRs merge, V1.7 (Phases 1, 2, 2.1 and 3) is complete. Run `alembic upgrade head` (applies `c3f7a9d2e6b1`).
 - Next per `MD/version-plan.md`: V1.8 (optional approval workflow).
+
+### Checkpoint 0075
+
+- Date: 2026-11-12
+- Member: Member 3 (AI - Database/Integration Developer)
+- Branch: `docs/readme-v17-p22-ai-fill` (from `dev`, PR into `dev`)
+- Push status: before push
+- Range covered: after Checkpoint 0074 -> 2026-11-12
+
+#### Summary
+
+- V1.7 Phase 2.2 (AI fill assistant) and the dashboard full-name fix go into `dev` through the integration PRs #220 (`backend`) and #221 (`frontend`); the READMEs now describe Phase 2.2.
+
+#### Completed Tasks
+
+- Phase 2.2 built in the order M3 -> M2 -> M1 and merged into the domain branches: #216 (data layer), #217 (API and fit check), #218 (frontend).
+- #219: the dashboard greets with the full name instead of the first word (often only "Dr." / "Mr.").
+- Root README: AI fill assistant feature. Backend README: "AI fill assistant" section (endpoints, checks on the model's reply, privacy, settings, fit check). Frontend README: feature, tests and folder list.
+- `dev` + `backend` + `frontend` checked to merge without conflicts. This PR changes only documentation files that neither integration PR touches.
+
+#### Code Changes
+
+- `README.md`, `backend/README.md`, `frontend/README.md`, `project-change-tracker.md`
+
+#### Features Added / Updated / Removed
+
+- Added: none in this PR (documentation only); Phase 2.2 itself arrives with #220 and #221.
+- Updated: READMEs.
+- Removed: none.
+
+#### Issues Fixed
+
+- Dashboard greeting showed only the title (#219, via #221).
+
+#### Notes For Next Push
+
+- After #220 merges, run `alembic upgrade head` (applies `f2a6c8e4b7d1`: `ai_fill_sessions`, `ai_fill_messages`, `templates.baseline_pages*`) and `pip install -r requirements.txt` (new: `pypdf`).
+- Not yet verified live: the fit check's page count with Gotenberg running, and the AI fill layout below the `lg` breakpoint.
+- Phase 2.2 is not listed in `MD/version-plan.md`; add it there if the team wants the roadmap to show it.
