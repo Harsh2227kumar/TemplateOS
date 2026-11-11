@@ -117,6 +117,8 @@ AWS credentials in the frontend.
 - `POST /api/v1/ai/improve-text`: rewrites one AI-enabled field in a style
   (`grammar` with Nova Micro; `tone`, `concise`, `formal`, `expand` with Nova
   Lite). List fields send `original_items` and are rewritten item by item.
+- AI fill assistant (V1.7 Phase 2.2), see below (Claude via
+  `BEDROCK_MODEL_FILL`, else `BEDROCK_MODEL_SUGGESTIONS`).
 
 Settings (repository-root `.env`, restart the backend after a change):
 
@@ -127,6 +129,7 @@ Settings (repository-root `.env`, restart the backend after a change):
 | `BEDROCK_MODEL_SUGGESTIONS` | Inference-profile id for field suggestions |
 | `BEDROCK_MODEL_NOVA_MICRO`, `BEDROCK_MODEL_NOVA_LITE` | Inference-profile ids for the text styles, e.g. `apac.amazon.nova-micro-v1:0` |
 | `AI_MAX_OUTPUT_TOKENS` | Reply length cap (default `1024`) |
+| `BEDROCK_MODEL_FILL` | Optional model for the AI fill assistant (default: the suggestions model) |
 
 Check the setup from `backend/` with `python scripts/verify_bedrock.py`
 (`--live` also makes one tiny real call per model).
@@ -140,6 +143,44 @@ Troubleshooting:
   without quotes, and restart the backend.
 - `You don't have access to the model`: enable the model under Bedrock
   -> Model access in that region.
+
+### AI fill assistant
+
+A user fills a draft's form by chatting: the reply holds **proposals**
+(never saved by the server; the browser puts them in the form and the user
+saves through `PUT /documents/{id}/values` with `ai_action: "ai_fill"`) and
+up to three questions.
+
+- `GET /api/v1/documents/{id}/ai-fill`: the chat, its open questions and
+  each field's length budget.
+- `POST /api/v1/documents/{id}/ai-fill/messages`: one turn (`message`,
+  `answers`, `skipped`, `form_state`). 503 when AI is off or fails (nothing
+  is stored), 409 `turn_limit` after `AI_FILL_MAX_TURNS`.
+- `DELETE /api/v1/documents/{id}/ai-fill`: clears the chat (values stay).
+- `GET /api/v1/system/ai-config`: whether the UI may offer AI features.
+
+The model's reply is checked before it reaches the user: fields the user
+wrote, unknown fields and signatures are dropped; a number, email or date
+the user never wrote becomes a question; an ambiguous date like `3/4` is
+asked with both readings. A field is asked about at most
+`AI_FILL_MAX_ASKS_PER_FIELD` times, then left to the user. The chat is
+stored with the document (deleted with it) and never in `ai_generations`,
+the audit log or the server logs.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `AI_FILL_MAX_OUTPUT_TOKENS` | `4096` | Reply length cap per turn |
+| `AI_FILL_MAX_MESSAGE_CHARS` | `8000` | Longest user message |
+| `AI_FILL_MAX_HISTORY_CHARS` | `24000` | Earlier messages sent to the model |
+| `AI_FILL_MAX_TURNS` | `30` | Turns per chat |
+| `AI_FILL_MAX_QUESTIONS` | `3` | Questions per turn |
+| `AI_FILL_MAX_ASKS_PER_FIELD` | `3` | Questions about one field per chat |
+
+**Fit check:** `POST /documents/{id}/generate` returns `fit` (also
+`GET /api/v1/documents/{id}/fit-report?version=n`): the PDF's page count
+against the template rendered with example values (computed once per
+template version, needs PDF conversion), and fields longer than their
+place in the Word file allows. It only warns; it never blocks or cuts.
 
 ## PDF conversion (Gotenberg)
 
