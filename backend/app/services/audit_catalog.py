@@ -35,6 +35,8 @@ AUDIT_ACTIONS: dict[str, tuple[str, str]] = {
     # AI
     "ai.improve_text": ("AI text improvement", "ai"),
     "ai.suggest_fields": ("AI field suggestions", "ai"),
+    "ai.fill_document": ("AI form fill", "ai"),
+    "ai.fill_clear": ("AI fill chat cleared", "ai"),
     # Admin
     "admin.user_update": ("User updated", "admin"),
     "admin.organization_create": ("Organization created", "admin"),

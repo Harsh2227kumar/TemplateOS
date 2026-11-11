@@ -49,6 +49,7 @@ def _load_ai_env_from_file() -> None:
         "BEDROCK_MODEL_NOVA_LITE",
         "BEDROCK_MODEL_NOVA_MICRO",
         "AI_MAX_OUTPUT_TOKENS",
+        "BEDROCK_MODEL_FILL",
         "AWS_BEARER_TOKEN_BEDROCK",
     ):
         value = values.get(key)
@@ -143,6 +144,26 @@ class Settings(BaseSettings):
         default="", alias="BEDROCK_MODEL_NOVA_MICRO"
     )
     ai_max_output_tokens: int = Field(default=1024, alias="AI_MAX_OUTPUT_TOKENS")
+    # --- AI fill assistant (V1.7 Phase 2.2): fill a form from a chat ---
+    # Claude via instructor, like field suggestions. Empty -> the suggestions
+    # model is used (see fill_model).
+    bedrock_model_fill: str = Field(default="", alias="BEDROCK_MODEL_FILL")
+    ai_fill_max_output_tokens: int = Field(
+        default=4096, ge=256, alias="AI_FILL_MAX_OUTPUT_TOKENS"
+    )
+    ai_fill_max_message_chars: int = Field(
+        default=8000, ge=100, alias="AI_FILL_MAX_MESSAGE_CHARS"
+    )
+    # Earlier user messages sent to the model (oldest dropped first).
+    ai_fill_max_history_chars: int = Field(
+        default=24000, ge=1000, alias="AI_FILL_MAX_HISTORY_CHARS"
+    )
+    ai_fill_max_turns: int = Field(default=30, ge=1, alias="AI_FILL_MAX_TURNS")
+    ai_fill_max_questions: int = Field(default=3, ge=1, le=10, alias="AI_FILL_MAX_QUESTIONS")
+    # How often one field may be asked about in a chat (clarification loop).
+    ai_fill_max_asks_per_field: int = Field(
+        default=3, ge=1, le=10, alias="AI_FILL_MAX_ASKS_PER_FIELD"
+    )
     # --- PDF conversion (V1.6 Phase 2), see app/services/pdf_service.py ---
     # "auto": Gotenberg when GOTENBERG_URL is set, else a local LibreOffice
     # (LIBREOFFICE_PATH or soffice/libreoffice on PATH), else off.
@@ -208,6 +229,11 @@ class Settings(BaseSettings):
     @property
     def onlyoffice_public_base(self) -> str | None:
         return self.onlyoffice_public_url.rstrip("/") if self.onlyoffice_public_url else None
+
+    @property
+    def fill_model(self) -> str:
+        """Model id of the AI fill assistant (falls back to the suggestions model)."""
+        return self.bedrock_model_fill or self.bedrock_model_suggestions
 
     @property
     def ai_is_configured(self) -> bool:

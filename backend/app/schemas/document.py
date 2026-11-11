@@ -23,7 +23,7 @@ MAX_VALUES_PER_REQUEST = 500
 PdfStatus = Literal["pending", "converted", "failed"]
 # V1.7 Phase 2: how a value is stored, and which AI action produced it.
 ValueFormat = Literal["plain", "rich"]
-AiAction = Literal["grammar", "tone", "concise", "formal", "expand"]
+AiAction = Literal["grammar", "tone", "concise", "formal", "expand", "ai_fill"]
 
 
 # --- Generation (V1.6) ---

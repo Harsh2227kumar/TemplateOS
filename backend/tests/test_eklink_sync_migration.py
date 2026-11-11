@@ -130,5 +130,5 @@ def test_single_head_is_this_revision() -> None:
         "JWT_SECRET_KEY": "test-secret-that-is-long-enough-for-migration-tests",
     }
     heads = _alembic(environment, "heads").stdout.split()
-    assert heads[0] == REVISION
+    # Later revisions build on this one; there must still be a single head.
     assert heads.count("(head)") == 1

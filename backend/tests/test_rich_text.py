@@ -112,7 +112,8 @@ def test_whitelist_constants():
         "doc", "paragraph", "text", "hardBreak", "bulletList", "orderedList", "listItem",
     }
     assert ALLOWED_MARKS == {"bold", "italic", "underline", "strike", "link", "highlight"}
-    assert AI_ACTIONS == AI_TEXT_ACTIONS
+    # improve-text actions plus the AI fill assistant (V1.7 P2.2)
+    assert AI_ACTIONS == AI_TEXT_ACTIONS + ("ai_fill",)
 
 
 def test_shared_vector_normalizes_and_projects():
