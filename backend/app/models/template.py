@@ -120,6 +120,10 @@ class Template(Base):
     parent_template_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("templates.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # V1.7 P2.2 fit check: pages of this template rendered with example
+    # values, cached for baseline_pages_version (= version when computed).
+    baseline_pages: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    baseline_pages_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_locked: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )

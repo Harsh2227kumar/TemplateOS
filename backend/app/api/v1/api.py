@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     admin,
     ai,
+    ai_fill,
     auth,
     document_versions,
     documents,
@@ -36,6 +37,8 @@ api_router.include_router(
     document_versions.router, prefix="/documents", tags=["document versions"]
 )
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+# V1.7 P2.2 AI fill assistant: /documents/{id}/ai-fill* and /fit-report.
+api_router.include_router(ai_fill.router, prefix="/documents", tags=["ai fill"])
 # V1.7 P2.1 Word file editor: routes under /system, /templates, /documents, /editor.
 api_router.include_router(word_editor.router)
 # V1.7 P3: /me/downloads, /documents/{id}/downloads, /admin/audit-logs*.

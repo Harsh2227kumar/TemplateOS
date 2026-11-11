@@ -67,7 +67,8 @@ from app.schemas.document_preview import (
     PreviewSection,
     PreviewTemplate,
 )
-from app.services import audit_service, document_generation
+from app.services import audit_service, document_generation, fit_check
+from app.services.field_placement import cached_field_budgets
 from app.services.file_delivery import deliver_file
 from app.services.document_permissions import (
     document_permissions,
@@ -694,7 +695,17 @@ def generate_document_endpoint(
         },
         template=template,
     )
-    return document_generation.generation_response(db, document, record)
+    response = document_generation.generation_response(db, document, record)
+    try:
+        fields = get_fields_by_template(db, template.id)
+        response.fit = fit_check.fit_report(
+            db, template, record.version, fields, cached_field_budgets(template, fields)
+        )
+        db.commit()  # a freshly computed baseline page count
+    except Exception:  # advisory only: the generation already succeeded
+        db.rollback()
+        logger.warning("Fit check failed for document %s", document.id, exc_info=True)
+    return response
 
 
 @router.post(
