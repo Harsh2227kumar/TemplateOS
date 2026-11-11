@@ -16,7 +16,8 @@ import { parseServerDate } from "@/lib/dates";
 export function DashboardPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const firstName = user?.full_name?.split(" ")[0] || "User";
+  // The whole name: the first word is often only a title ("Dr.", "Mr.").
+  const displayName = user?.full_name?.trim() || "User";
   const downloadGenerated = useDownloadGenerated();
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
 
@@ -298,7 +299,7 @@ export function DashboardPage() {
       <section className="relative overflow-hidden rounded-2xl bg-slate-900 px-6 py-10 sm:px-10 sm:py-12">
         <div className="relative z-10 text-white">
           <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">Document Workspace</p>
-          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Welcome back, {firstName}</h1>
+          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Welcome back, {displayName}</h1>
           <p className="mt-4 max-w-2xl text-base text-slate-300">
             Upload DOCX templates, configure fields, and generate polished documents with AI assistance. Start by uploading a template or browsing the library.
           </p>
